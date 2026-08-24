@@ -59,9 +59,12 @@ export function normalizePlan(plan) {
     phases: findPhases(plan).map((ph) => ({
       phase: ph.phase || ph.阶段名称 || ph.stage_name || '备赛阶段',
       date: ph.date || ph.起止日期 || (ph.start_date ? (ph.end_date ? `${ph.start_date} ~ ${ph.end_date}` : ph.start_date) : ''),
-      tasks: (ph.tasks || ph.任务清单 || []).map((t) =>
-        typeof t === 'string' ? { text: t, done: false } : { text: t.text ?? t.任务名称 ?? String(t), done: !!t.done, done_at: t.done_at || null }
-      ),
+      tasks: (ph.tasks || ph.任务清单 || []).map((t) => {
+        // 对象任务保留 dept/done_by（小组计划任务带部门分工，AI 生成的 dept 不能丢；undefined 字段序列化时自动省略）
+        if (typeof t === 'string') return { text: t, done: false };
+        const o = t || {};
+        return { text: o.text ?? o.任务名称 ?? String(o), done: !!o.done, done_at: o.done_at || null, dept: o.dept ?? o.部门, done_by: o.done_by };
+      }),
       check_standard: ph.check_standard || ph.达标要求 || '',
       week_hours: ph.week_hours || ph.每周学习时长 || ph.每周最低学习时长 || 0,
     })),

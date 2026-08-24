@@ -185,9 +185,23 @@ async function finalize(mode, parsed, o) {
       name: String(d.name || d.部门名 || '').trim(), duty: String(d.duty || d.职责 || '').trim(),
     })).filter((d) => d.name && d.name !== '通用'); // 「通用」是任务标签不是部门角色
     const existingRoles = mode === 'team-generate' ? db.prepare('SELECT id, name FROM team_role WHERE team_id = ?').all(ctx.team.id) : [];
-    const roles = mode === 'team-create' ? depts : existingRoles;
+    // 先做无副作用的结构校验（AI 偶发残缺计划时避免白插部门角色）
+    if (!normalizePlan(parsed).phases.length) throw new Error('AI 计划无有效阶段，请继续对话补充信息');
+    // team-generate：AI 建议的新部门先落库（level 递增），任务归一化要把新部门也算进角色表
+    let created = [];
+    if (mode === 'team-generate') {
+      let level = db.prepare('SELECT COALESCE(MAX(level), 0) AS m FROM team_role WHERE team_id = ?').get(ctx.team.id).m;
+      for (const d of depts) {
+        if (existingRoles.some((x) => x.name === d.name)) continue;
+        level += 1;
+        const rr = db.prepare('INSERT INTO team_role (team_id, name, level, permissions) VALUES (?,?,?,?)')
+          .run(ctx.team.id, d.name, level, JSON.stringify(DEFAULT_MEMBER_PERMS));
+        created.push({ id: rr.lastInsertRowid, name: d.name });
+      }
+    }
+    const roles = mode === 'team-create' ? depts : [...existingRoles, ...created];
     const norm = normalizePlan(parsed);
-    // 部门计划任务带 dept/role_id 归一化（复用 team.js 规则：dept 匹配不到角色 → 通用）
+    // 部门计划任务带 dept/role_id 归一化（规则同 team.js：dept 匹配不到角色 → 通用）
     norm.phases = norm.phases.map((ph) => ({
       ...ph,
       tasks: (ph.tasks || []).map((t) => {
@@ -196,20 +210,9 @@ async function finalize(mode, parsed, o) {
         return { ...t, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null };
       }),
     }));
-    if (!norm.phases.length) throw new Error('AI 计划无有效阶段，请继续对话补充信息');
     const plan = { comp_id: comp?.id ?? null, comp_name: comp?.name ?? null, ...norm };
 
     if (mode === 'team-generate') {
-      // 新建部门角色（沿用现有 + 新增；level 递增）
-      let level = db.prepare('SELECT COALESCE(MAX(level), 0) AS m FROM team_role WHERE team_id = ?').get(ctx.team.id).m;
-      const created = [];
-      for (const d of depts) {
-        if (existingRoles.some((x) => x.name === d.name)) continue;
-        level += 1;
-        const rr = db.prepare('INSERT INTO team_role (team_id, name, level, permissions) VALUES (?,?,?,?)')
-          .run(ctx.team.id, d.name, level, JSON.stringify(DEFAULT_MEMBER_PERMS));
-        created.push({ id: rr.lastInsertRowid, name: d.name });
-      }
       const rr2 = db.prepare('INSERT INTO team_plan (team_id, comp_id, title, plan_json) VALUES (?,?,?,?)')
         .run(ctx.team.id, comp?.id ?? null, comp?.name ?? '小组备赛计划', JSON.stringify(plan));
       return { action: 'plan', reply, plan, departments: created, plan_id: rr2.lastInsertRowid };

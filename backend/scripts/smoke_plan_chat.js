@@ -3,6 +3,7 @@
 //      未登录 401、非组长 403、POST /team 带对话结果（departments+plan）建组、mergeDone 保留勾选（确定性单测）
 import db from '../db/database.js';
 import { mergeDone } from '../routes/planChat.js';
+import { normalizePlan } from '../routes/schedule.js';
 
 const BASE = 'http://localhost:3000/api';
 let pass = 0, fail = 0;
@@ -40,6 +41,9 @@ const old = { phases: [{ phase: '基础', tasks: [{ text: '任务A', done: true,
 mergeDone(norm, old);
 ok('同文本任务保留 done/done_by/done_at', norm.phases[0].tasks[0].done === true && norm.phases[0].tasks[0].done_by === '小明' && norm.phases[0].tasks[0].done_at === '2026-08-01');
 ok('新任务不受影响', norm.phases[0].tasks[1].done === false);
+// normalizePlan 必须保留 dept/done_by（曾丢弃导致小组计划任务全变「通用」）
+const np = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', dept: '视觉组', done: true, done_by: '小明' }] }] });
+ok('normalizePlan 保留 dept/done_by', np.phases[0].tasks[0].dept === '视觉组' && np.phases[0].tasks[0].done_by === '小明', JSON.stringify(np.phases[0].tasks[0]));
 
 // 1) mode 校验 + 首轮必提问
 console.log('— 协议校验');
