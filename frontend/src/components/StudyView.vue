@@ -4,7 +4,9 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
+import auth from '../auth.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
+import MyTeamTasks from './team/MyTeamTasks.vue';
 
 const form = ref({ topic: '', level: '零基础', goal: '', hours: 10 });
 const generating = ref(false);
@@ -167,6 +169,8 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 
 <template>
   <div class="study-page">
+    <!-- 我的小组任务（登录可见；勾选与小组页同一份计划，双向同步） -->
+    <MyTeamTasks v-if="auth.token" />
     <!-- AI 生成区 -->
     <div class="gen-card">
       <div class="gen-head">

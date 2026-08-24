@@ -95,6 +95,8 @@ export const api = {
   teamPlanDelete: (id, pid) => req(`/team/${id}/plan/${pid}`, { method: 'DELETE' }),
   teamPlanTaskToggle: (id, pid, phaseIdx, taskIdx, done) =>
     req(`/team/${id}/plan/${pid}/task`, { method: 'POST', body: JSON.stringify({ phase_idx: phaseIdx, task_idx: taskIdx, done }) }),
+  // 我的小组任务（个人日程页聚合：所有小组中「我的部门 + 通用」任务，服务端已过滤并带原始下标）
+  teamMyTasks: () => req('/team/my-tasks'),
   // AI 智能分组：按成员信息+部门+竞赛建议分组（仅建议，应用复用 teamMemberRole）
   teamAiGrouping: (id) => req(`/team/${id}/ai-grouping`, { method: 'POST' }),
   teamLog: (id, content) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify({ content }) }),

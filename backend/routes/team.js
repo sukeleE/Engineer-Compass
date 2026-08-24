@@ -113,6 +113,39 @@ r.post('/join', (req, res) => {
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
 });
 
+// GET /api/team/my-tasks — 我的小组任务（个人日程页聚合：我所有小组计划中「本部门 + 通用」任务）
+// 服务端按当前用户角色过滤并保留原始 phase_idx/task_idx（前端回写定位用）；无我的任务的阶段/计划/小组整段丢弃
+// ⚠️ 必须注册在 GET /:id 之前，否则 'my-tasks' 会被 :id 吞掉
+r.get('/my-tasks', (req, res) => {
+  const myTeams = db.prepare(
+    `SELECT t.id AS team_id, t.name AS team_name, t.owner_id, tm.role_id, tr.name AS role_name
+     FROM team_member tm JOIN team t ON t.id = tm.team_id
+     LEFT JOIN team_role tr ON tr.id = tm.role_id
+     WHERE tm.user_id = ? ORDER BY t.create_time DESC`
+  ).all(req.user.id);
+  const out = [];
+  for (const mt of myTeams) {
+    const rows = db.prepare('SELECT id, title, plan_json, update_time FROM team_plan WHERE team_id = ? ORDER BY update_time DESC').all(mt.team_id);
+    const plans = [];
+    for (const row of rows) {
+      let plan;
+      try { plan = JSON.parse(row.plan_json || '{}'); } catch { continue; }
+      const phases = (plan.phases || []).map((ph, pi) => ({
+        phase: ph.phase || '备赛阶段',
+        date: ph.date || '',
+        phase_idx: pi,
+        tasks: (ph.tasks || []).map((t, ti) => ({
+          text: t.text, done: !!t.done, dept: t.dept || '通用',
+          done_by: t.done_by || null, task_idx: ti,
+        })).filter((t) => t.dept === '通用' || (mt.role_name && t.dept === mt.role_name)),
+      })).filter((ph) => ph.tasks.length);
+      if (phases.length) plans.push({ id: row.id, title: row.title, comp_name: plan.comp_name || null, update_time: row.update_time, phases });
+    }
+    if (plans.length) out.push({ team_id: mt.team_id, team_name: mt.team_name, role_name: mt.role_name, is_owner: mt.owner_id === req.user.id, plans });
+  }
+  res.json(out);
+});
+
 // GET /api/team/:id — 组详情（成员+角色+统计）
 r.get('/:id', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
@@ -290,7 +323,8 @@ function normTeamPlan(plan, roles) {
       if (!text) return null;
       const dept = String(raw.dept || raw.部门 || '').trim();
       const role = roles.find((x) => x.name === dept);
-      return { text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null };
+      // done_by 必须保留（老任务无该字段 → null），否则组长编辑保存会抹掉完成人
+      return { text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null, done_by: raw.done_by || null };
     }).filter(Boolean),
   })).filter((p) => p.tasks.length);
   return { phases };
@@ -389,7 +423,8 @@ r.post('/:id/plan', (req, res) => {
   res.status(201).json({ id: rr.lastInsertRowid, message: '已创建' });
 });
 
-// POST /api/team/:id/plan/:pid/task — 勾选任务（成员即可，多部门同时跟进）
+// POST /api/team/:id/plan/:pid/task — 勾选任务（本部门成员勾本部门任务；通用任务全员；组长/小组设置权限可勾一切）
+// 勾选记录完成人 done_by（取消勾选清空）——与个人日程页共用此接口，天然双向同步
 r.post('/:id/plan/:pid/task', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
@@ -399,10 +434,15 @@ r.post('/:id/plan/:pid/task', (req, res) => {
   const plan = JSON.parse(p.plan_json || '{}');
   const task = plan.phases?.[Number(phase_idx)]?.tasks?.[Number(task_idx)];
   if (!task) return res.status(400).json({ error: '任务不存在' });
+  // 部门限权：dept 为空按通用；组长（is_owner）或「小组设置」权限可勾任何任务
+  const dept = task.dept || '通用';
+  const allowed = canEditPlan(ctx) || dept === '通用' || (!!ctx.role?.name && dept === ctx.role.name);
+  if (!allowed) return res.status(403).json({ error: `仅「${dept}」成员可勾选该任务` });
   task.done = !!done;
+  task.done_by = task.done ? (req.user.nickname || req.user.username) : null;
   db.prepare('UPDATE team_plan SET plan_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
     .run(JSON.stringify(plan), p.id);
-  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, message: '已更新' });
+  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, done_by: task.done_by, message: '已更新' });
 });
 
 // DELETE /api/team/:id/plan/:pid — 删除小组计划（组长/小组设置权限）

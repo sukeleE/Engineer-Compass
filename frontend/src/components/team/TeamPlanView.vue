@@ -4,11 +4,15 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
+import auth from '../../auth.js';
 import TeamPlans from './TeamPlans.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
 const canEdit = computed(() => props.me?.is_owner || props.perms?.team);
+const myRoleName = computed(() => props.me?.role?.name || null);
+// 勾选权限（与后端同规则）：组长/小组设置权限可勾一切；通用任务全员；其余仅本部门成员
+const canCheck = (t) => canEdit.value || !t.dept || t.dept === '通用' || t.dept === myRoleName.value;
 const plans = ref([]);
 const comps = ref([]);
 const genCompId = ref(null);
@@ -73,12 +77,13 @@ async function generate() {
   } catch (e) { ElMessage.error(e.message); } finally { genLoading.value = false; }
 }
 
-// —— 勾选任务（全员）——
+// —— 勾选任务（本部门成员；乐观更新，done/done_by 成对回滚）——
 async function toggle(prow, phIdx, task) {
-  const old = task.done;
-  task.done = !task.done;
-  try { await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, task.done); }
-  catch (e) { task.done = old; ElMessage.error(e.message); }
+  const old = { done: task.t.done, done_by: task.t.done_by };
+  task.t.done = !task.t.done;
+  task.t.done_by = task.t.done ? (auth.user?.nickname || auth.user?.username || '') : null;
+  try { await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, task.t.done); }
+  catch (e) { task.t.done = old.done; task.t.done_by = old.done_by; ElMessage.error(e.message); }
 }
 
 // —— 编辑（组长）——
@@ -178,8 +183,10 @@ onMounted(() => { load(); loadComps(); });
             <div v-for="[dept, items] in deptGroups(ph)" :key="dept" class="dept-group">
               <div class="dg-head"><el-tag size="small" :type="tagType(dept)" effect="dark">{{ dept }}</el-tag></div>
               <el-checkbox v-for="task in items" :key="task.idx" :model-value="task.t.done"
+                :disabled="!canCheck(task.t)" :title="canCheck(task.t) ? '' : `仅「${task.t.dept}」成员可勾选`"
                 @change="toggle(p, pi, task)" class="task-line">
                 <span class="task-text" :class="{ done: task.t.done }">{{ task.t.text }}</span>
+                <span v-if="task.t.done_by" class="done-by">👤 {{ task.t.done_by }}</span>
               </el-checkbox>
             </div>
             <div v-if="!ph.tasks?.length" class="ph-none">（本阶段暂无任务）</div>
@@ -272,6 +279,7 @@ onMounted(() => { load(); loadComps(); });
       .task-text { font-size: 13px; line-height: 1.6;
         &.done { color: #94a3b8; text-decoration: line-through; }
       }
+      .done-by { font-size: 11.5px; color: #94a3b8; margin-left: 6px; }
     }
   }
   .ph-none { color: #cbd5e1; font-size: 12.5px; }
