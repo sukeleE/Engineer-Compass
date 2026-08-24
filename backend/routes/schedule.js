@@ -60,7 +60,7 @@ export function normalizePlan(plan) {
       phase: ph.phase || ph.阶段名称 || ph.stage_name || '备赛阶段',
       date: ph.date || ph.起止日期 || (ph.start_date ? (ph.end_date ? `${ph.start_date} ~ ${ph.end_date}` : ph.start_date) : ''),
       tasks: (ph.tasks || ph.任务清单 || []).map((t) =>
-        typeof t === 'string' ? { text: t, done: false } : { text: t.text ?? t.任务名称 ?? String(t), done: !!t.done }
+        typeof t === 'string' ? { text: t, done: false } : { text: t.text ?? t.任务名称 ?? String(t), done: !!t.done, done_at: t.done_at || null }
       ),
       check_standard: ph.check_standard || ph.达标要求 || '',
       week_hours: ph.week_hours || ph.每周学习时长 || ph.每周最低学习时长 || 0,
@@ -187,6 +187,56 @@ r.delete('/:id', (req, res) => {
   const r2 = db.prepare('DELETE FROM user_schedule WHERE id = ?').run(id);
   if (r2.changes === 0) return res.status(404).json({ error: '日程不存在' });
   res.json({ id, message: '已删除' });
+});
+
+// GET /api/schedule/calendar?month=YYYY-MM — 月历聚合：当月完成事项（竞赛/学习/小组）+ 当月笔记
+// 任务完成时由前端（竞赛/学习 plan_json）或后端（小组 team_plan）记录 done_at=YYYY-MM-DD，按完成日聚合
+// 注册在 /:id/export 之前（express 按注册顺序匹配）
+r.get('/calendar', optionalAuth, (req, res) => {
+  const month = String(req.query.month || '').match(/^\d{4}-\d{2}$/)?.[0];
+  if (!month) return res.status(400).json({ error: 'month 必填，格式 YYYY-MM' });
+  const collect = (plan, planName) => {
+    const out = [];
+    for (const ph of (plan.phases || [])) {
+      for (const t of (ph.tasks || [])) {
+        if (t.done && typeof t.done_at === 'string' && t.done_at.startsWith(month)) {
+          out.push({ date: t.done_at, plan_name: planName, task: t.text });
+        }
+      }
+    }
+    return out;
+  };
+
+  // 竞赛日程：登录=自己的 + 历史匿名 'local'；匿名=仅 'local'（与 /list 同规则）
+  const compBase = `SELECT s.id, s.plan_json, c.name AS comp_name FROM user_schedule s
+     LEFT JOIN competition c ON c.id = s.comp_id`;
+  const compRows = req.user
+    ? db.prepare(`${compBase} WHERE s.user_id = ? OR s.user_id = 'local'`).all(req.user.id)
+    : db.prepare(`${compBase} WHERE s.user_id = 'local'`).all();
+  const comp = compRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.comp_name || '我的日程'));
+
+  // 学习日程：仅登录（匿名为空）
+  const studyRows = req.user
+    ? db.prepare('SELECT id, plan_json, topic FROM user_study WHERE user_id = ?').all(req.user.id)
+    : [];
+  const study = studyRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.topic || '学习日程'));
+
+  // 小组计划：我所在小组的全部计划
+  const teamRows = req.user
+    ? db.prepare(
+        `SELECT tp.id, tp.title, tp.plan_json FROM team_plan tp
+         JOIN team_member tm ON tm.team_id = tp.team_id WHERE tm.user_id = ?`
+      ).all(req.user.id)
+    : [];
+  const team = teamRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.title || '小组计划'));
+
+  // 当月笔记（与 notes.js 同归属规则）
+  const uid = req.user ? String(req.user.id) : 'local';
+  const notes = db.prepare(
+    'SELECT id, note_date, status, content FROM daily_note WHERE user_id = ? AND substr(note_date, 1, 7) = ? ORDER BY note_date DESC'
+  ).all(uid, month);
+
+  res.json({ month, comp, study, team, notes });
 });
 
 // GET /api/schedule/:id/export?format=md|excel — 导出计划

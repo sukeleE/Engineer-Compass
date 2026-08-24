@@ -53,6 +53,8 @@ export const api = {
   scheduleDelete: (id) => req(`/schedule/${id}`, { method: 'DELETE' }),
   scheduleOptimize: (id) => req(`/schedule/${id}/optimize`, { method: 'POST' }, AI_TIMEOUT),
   scheduleExportUrl: (id, format = 'md') => `/api/schedule/${id}/export?format=${format}`,
+  // 月历聚合：当月完成事项（竞赛/学习/小组，按完成日期 done_at）+ 当月笔记
+  calendarMonth: (month) => req(`/schedule/calendar?month=${month}`),
   // 学习日程（AI 学习规划，与竞赛无关）
   studyPlan: (input) => req('/study/plan', { method: 'POST', body: JSON.stringify(input) }, AI_TIMEOUT),
   studyManual: (card) => req('/study/manual', { method: 'POST', body: JSON.stringify(card) }),

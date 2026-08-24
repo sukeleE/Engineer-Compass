@@ -5,6 +5,7 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
+import { fmtDate } from '../../utils/noteStatus.js';
 import TeamPlans from './TeamPlans.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
@@ -80,11 +81,12 @@ async function generate() {
 
 // —— 勾选任务（本部门成员；乐观更新，done/done_by 成对回滚）——
 async function toggle(prow, phIdx, task) {
-  const old = { done: task.t.done, done_by: task.t.done_by };
+  const old = { done: task.t.done, done_by: task.t.done_by, done_at: task.t.done_at };
   task.t.done = !task.t.done;
   task.t.done_by = task.t.done ? (auth.user?.nickname || auth.user?.username || '') : null;
+  task.t.done_at = task.t.done ? fmtDate(new Date()) : null; // 完成日期（月历按完成日聚合；取消清空）
   try { await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, task.t.done); }
-  catch (e) { task.t.done = old.done; task.t.done_by = old.done_by; ElMessage.error(e.message); }
+  catch (e) { task.t.done = old.done; task.t.done_by = old.done_by; task.t.done_at = old.done_at; ElMessage.error(e.message); }
 }
 
 // —— 编辑（组长）——

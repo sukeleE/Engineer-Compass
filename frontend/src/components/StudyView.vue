@@ -4,6 +4,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
+import { fmtDate } from '../utils/noteStatus.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
 
 const form = ref({ topic: '', level: '零基础', goal: '', hours: 10 });
@@ -93,12 +94,16 @@ async function savePlan() {
   }
 }
 
-// 勾选任务 → 即时保存
+// 勾选任务 → 即时保存（写完成日期 done_at，月历按完成日聚合；失败回滚 done/done_at）
 async function toggleTask(t) {
+  const old = { done: t.done, done_at: t.done_at };
+  t.done = !t.done;
+  t.done_at = t.done ? fmtDate(new Date()) : null;
   try {
     await savePlan();
   } catch (e) {
-    t.done = !t.done; // 回滚
+    t.done = old.done;
+    t.done_at = old.done_at;
     ElMessage.error(`保存失败：${e.message}`);
   }
 }
@@ -274,7 +279,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
                 <div class="task-row" :class="{ done: t.done }">
                   <el-checkbox
                     :model-value="!!t.done" :disabled="saving"
-                    @change="(v) => { t.done = v; toggleTask(t); }"
+                    @change="toggleTask(t)"
                   />
                   <el-input v-if="t._editing" v-model="t.text" size="small" class="t-edit" autofocus
                     @mousedown.stop

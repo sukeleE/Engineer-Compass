@@ -156,7 +156,7 @@ r.get('/my-tasks', (req, res) => {
         phase_idx: pi,
         tasks: (ph.tasks || []).map((t, ti) => ({
           text: t.text, done: !!t.done, dept: t.dept || '通用',
-          done_by: t.done_by || null, task_idx: ti,
+          done_by: t.done_by || null, done_at: t.done_at || null, task_idx: ti,
         })),
       }));
       if (phases.length) plans.push({ id: row.id, title: row.title, comp_name: plan.comp_name || null, update_time: row.update_time, phases });
@@ -510,9 +510,12 @@ r.post('/:id/plan/:pid/task', (req, res) => {
   if (!allowed) return res.status(403).json({ error: `仅「${dept}」成员可勾选该任务` });
   task.done = !!done;
   task.done_by = task.done ? (req.user.nickname || req.user.username) : null;
+  // 完成日期（本地时区 YYYY-MM-DD）：月历视图按完成日聚合；取消勾选清空
+  const d = new Date();
+  task.done_at = task.done ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
   db.prepare('UPDATE team_plan SET plan_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
     .run(JSON.stringify(plan), p.id);
-  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, done_by: task.done_by, message: '已更新' });
+  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, done_by: task.done_by, done_at: task.done_at, message: '已更新' });
 });
 
 // DELETE /api/team/:id/plan/:pid — 删除小组计划（组长/小组设置权限）

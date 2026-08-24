@@ -5,6 +5,7 @@ import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
+import { fmtDate } from '../../utils/noteStatus.js';
 
 const teams = ref([]);
 const loading = ref(false);
@@ -53,16 +54,18 @@ function deptGroups(ph) {
   return [...m.entries()];
 }
 
-// 勾选（乐观更新，done/done_by 成对回滚；下标用服务端返回的原始 phase_idx/task_idx，勿用过滤后位置）
+// 勾选（乐观更新，done/done_by/done_at 成对回滚；下标用服务端返回的原始 phase_idx/task_idx，勿用过滤后位置）
 async function toggle(team, plan, ph, task) {
-  const old = { done: task.done, done_by: task.done_by };
+  const old = { done: task.done, done_by: task.done_by, done_at: task.done_at };
   task.done = !task.done;
   task.done_by = task.done ? (auth.user?.nickname || auth.user?.username || '') : null;
+  task.done_at = task.done ? fmtDate(new Date()) : null; // 完成日期（月历按完成日聚合；取消清空）
   try {
     await api.teamPlanTaskToggle(team.team_id, plan.id, ph.phase_idx, task.task_idx, task.done);
   } catch (e) {
     task.done = old.done;
     task.done_by = old.done_by;
+    task.done_at = old.done_at;
     ElMessage.error(e.message);
   }
 }
