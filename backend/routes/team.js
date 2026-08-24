@@ -113,8 +113,9 @@ r.post('/join', (req, res) => {
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
 });
 
-// GET /api/team/my-tasks — 我的小组任务（个人日程页聚合：我所有小组计划中「本部门 + 通用」任务）
-// 服务端按当前用户角色过滤并保留原始 phase_idx/task_idx（前端回写定位用）；无我的任务的阶段/计划/小组整段丢弃
+// GET /api/team/my-tasks — 我的小组任务（个人日程页聚合：我所有小组的完整备赛计划，与小组页同一份 plan_json）
+// 返回全部部门任务（含 dept/done/done_by）与原始 phase_idx/task_idx（前端回写定位用）；
+// 勾选限权由前端按 role_name/is_owner 禁用、后端 POST plan/:pid/task 强制校验（越权 403）
 // ⚠️ 必须注册在 GET /:id 之前，否则 'my-tasks' 会被 :id 吞掉
 r.get('/my-tasks', (req, res) => {
   const myTeams = db.prepare(
@@ -137,8 +138,8 @@ r.get('/my-tasks', (req, res) => {
         tasks: (ph.tasks || []).map((t, ti) => ({
           text: t.text, done: !!t.done, dept: t.dept || '通用',
           done_by: t.done_by || null, task_idx: ti,
-        })).filter((t) => t.dept === '通用' || (mt.role_name && t.dept === mt.role_name)),
-      })).filter((ph) => ph.tasks.length);
+        })),
+      }));
       if (phases.length) plans.push({ id: row.id, title: row.title, comp_name: plan.comp_name || null, update_time: row.update_time, phases });
     }
     if (plans.length) out.push({ team_id: mt.team_id, team_name: mt.team_name, role_name: mt.role_name, is_owner: mt.owner_id === req.user.id, plans });

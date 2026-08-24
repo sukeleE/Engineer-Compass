@@ -150,13 +150,13 @@ r = await req('/team/my-tasks', { token: tokB });
 const mtB = r.data.find((t) => t.team_id === teamId);
 const mtBTasks = mtB?.plans?.[0]?.phases?.[0]?.tasks || [];
 ok('B 聚合含小组', !!mtB, `got ${r.status}`);
-ok('B 只看到机械组 + 通用任务', mtBTasks.length === 2 && mtBTasks.every((t) => t.dept === '机械组' || t.dept === '通用'), JSON.stringify(mtBTasks.map((t) => t.dept)));
-ok('B 聚合任务带原始下标', mtBTasks[0]?.task_idx === 0 && mtBTasks[1]?.task_idx === 1, JSON.stringify(mtBTasks.map((t) => t.task_idx)));
+ok('B 聚合看到全部部门任务', mtBTasks.length === 3 && mtBTasks.every((t) => ['机械组', '通用', '电控组'].includes(t.dept)), JSON.stringify(mtBTasks.map((t) => t.dept)));
+ok('B 聚合任务带原始下标', mtBTasks[0]?.task_idx === 0 && mtBTasks[1]?.task_idx === 1 && mtBTasks[2]?.task_idx === 2, JSON.stringify(mtBTasks.map((t) => t.task_idx)));
 ok('B 聚合任务带完成人', mtBTasks[0]?.done_by === unameB);
 r = await req('/team/my-tasks', { token: tokA });
 const mtA = r.data.find((t) => t.team_id === teamId);
 const mtATasks = mtA?.plans?.[0]?.phases?.[0]?.tasks || [];
-ok('组长 A 聚合只看到通用任务', mtATasks.length === 1 && mtATasks[0]?.dept === '通用', JSON.stringify(mtATasks.map((t) => t.dept)));
+ok('组长 A 聚合看到全部部门任务', mtATasks.length === 3 && mtATasks.every((t) => ['机械组', '通用', '电控组'].includes(t.dept)), JSON.stringify(mtATasks.map((t) => t.dept)));
 
 // 8) 删除
 console.log('— 删除');

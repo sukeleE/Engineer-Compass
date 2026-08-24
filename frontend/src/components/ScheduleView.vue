@@ -290,7 +290,7 @@ onMounted(load);
 
 <template>
   <main class="schedule-page">
-    <!-- 合并页签：竞赛日程 / 学习日程（右侧日程笔记面板共用） -->
+    <!-- 合并页签：竞赛日程 / 学习日程 / 小组任务（笔记浮窗三 tab 共用，挂在 tabs 外层） -->
     <el-tabs v-model="viewTab" class="page-tabs">
     <el-tab-pane label="🏆 竞赛日程" name="comp">
     <div class="page-head">
@@ -315,7 +315,7 @@ onMounted(load);
       </router-link>
     </el-empty>
 
-    <!-- ========== 任务清单视图（左：清单 · 右：日程笔记） ========== -->
+    <!-- ========== 任务清单视图 ========== -->
     <template v-if="viewMode === 'list'">
       <div class="s-wrap">
       <div v-loading="loading" class="s-list">
@@ -432,7 +432,6 @@ onMounted(load);
           </div>
         </div>
       </div>
-      <ScheduleNotes :schedules="schedules" :active="viewTab === 'comp' && viewMode === 'list'" />
       </div>
     </template>
 
@@ -498,7 +497,6 @@ onMounted(load);
     <el-tab-pane label="📚 学习日程" name="study">
       <div class="study-wrap">
         <StudyView />
-        <ScheduleNotes :active="viewTab === 'study'" />
       </div>
     </el-tab-pane>
 
@@ -509,6 +507,9 @@ onMounted(load);
       <el-empty v-else description="登录后查看所在小组的备赛任务" :image-size="80" />
     </el-tab-pane>
     </el-tabs>
+
+    <!-- 日程笔记浮窗：三个 tab 共享，可拖动、可收起 -->
+    <ScheduleNotes :schedules="schedules" />
   </main>
 </template>
 
@@ -520,9 +521,8 @@ onMounted(load);
   :deep(.el-tabs__header) { margin-bottom: 12px; }
   :deep(.el-tabs__item) { font-size: 14.5px; }
 }
-// 学习日程 tab：StudyView（弹性）+ 右侧共享笔记面板
-.study-wrap { display: flex; gap: 16px; align-items: flex-start; }
-:deep(.study-page) { padding: 0; max-width: none; flex: 1; min-width: 0; }
+// 学习日程 tab：StudyView 独立占满
+:deep(.study-page) { padding: 0; max-width: none; }
 
 .page-head {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;
@@ -530,9 +530,8 @@ onMounted(load);
   .head-right { display: flex; gap: 10px; align-items: center; }
 }
 
-// 左右布局：任务清单（弹性）+ 日程笔记面板（固定 340px 吸顶）
-.s-wrap { display: flex; gap: 16px; align-items: flex-start; }
-.s-list { display: flex; flex-direction: column; gap: 16px; flex: 1; min-width: 0; }
+// 任务清单：卡片流（笔记已独立为浮窗，不再占右侧栏位）
+.s-list { display: flex; flex-direction: column; gap: 16px; }
 
 .s-card {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;

@@ -1,7 +1,7 @@
 <script setup>
-// 日程笔记面板（备赛日程页右侧）：每日富文本笔记 + 学习状态 + 本月历史回看
-// 编写/回看统一走「📝 写笔记 / 点历史条目」→ 居中大弹窗（查看/编辑/删除）
-import { ref, computed, watch, onMounted } from 'vue';
+// 日程笔记浮窗（日程规划页三个 tab 共享）：可拖动手柄、可收起；点「写笔记」或历史条目 → 居中大弹窗
+// 编写/回看统一走弹窗（查看/编辑/删除/切换日期）
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import RichEditor from './team/RichEditor.vue';
@@ -9,7 +9,7 @@ import { NOTE_STATUS, statusOf, excerpt, fmtDate } from '../utils/noteStatus.js'
 
 const props = defineProps({
   schedules: { type: Array, default: () => [] }, // 供「关联备赛」选择
-  active: { type: Boolean, default: true },      // 视图可见 → 自动刷新（月历里保存的笔记回来能看到）
+  active: { type: Boolean, default: true },      // 视图可见 → 自动刷新
 });
 
 const date = ref(fmtDate(new Date()));
@@ -22,6 +22,40 @@ const deleting = ref(false);
 const loading = ref(false);
 const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
+
+// —— 浮窗：收起 / 拖动 ——
+const collapsed = ref(false);
+const dragRef = ref(null);
+const pos = ref({ left: null, top: null }); // null → 默认右下角
+const dragging = ref(null);
+function dragStart(e) {
+  if (e.target.closest('button')) return; // 不干扰按钮点击
+  const el = dragRef.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  dragging.value = { sx: e.clientX, sy: e.clientY, ox: rect.left, oy: rect.top };
+  window.addEventListener('pointermove', dragMove);
+  window.addEventListener('pointerup', dragEnd);
+  e.preventDefault();
+}
+function dragMove(e) {
+  if (!dragging.value) return;
+  const x = dragging.value.ox + e.clientX - dragging.value.sx;
+  const y = dragging.value.oy + e.clientY - dragging.value.sy;
+  pos.value = {
+    left: Math.max(0, Math.min(x, window.innerWidth - 340)),
+    top: Math.max(0, Math.min(y, window.innerHeight - 50)),
+  };
+}
+function dragEnd() {
+  dragging.value = null;
+  window.removeEventListener('pointermove', dragMove);
+  window.removeEventListener('pointerup', dragEnd);
+}
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', dragMove);
+  window.removeEventListener('pointerup', dragEnd);
+});
 
 // 当前日期对应的笔记（本月列表内查找；跨月时重拉列表）
 const activeNote = computed(() => monthNotes.value.find((n) => n.note_date === date.value) || null);
@@ -120,30 +154,35 @@ onMounted(() => { if (props.active) refresh(); });
 </script>
 
 <template>
-  <div class="sn-panel">
-    <div class="sn-head">
+  <div ref="dragRef" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
+    <!-- 拖拽手柄 + 收起/展开 -->
+    <div class="sn-head" @pointerdown.prevent="dragStart">
       <b>📝 日程笔记</b>
-      <span class="sn-sub">每日学习记录 · 点日期可回看</span>
+      <span class="sn-sub">拖动此栏可移动</span>
+      <el-button size="small" text class="sn-ctl" :title="collapsed ? '展开' : '收起'"
+        @click="collapsed = !collapsed">{{ collapsed ? '⤢ 展开' : '⤡ 收起' }}</el-button>
     </div>
 
-    <el-button type="primary" class="sn-write" size="large" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
+    <template v-if="!collapsed">
+      <el-button type="primary" class="sn-write" size="large" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
 
-    <div class="sn-list-head">本月笔记（{{ history.length }}）</div>
-    <div class="sn-list" v-loading="loading">
-      <div v-for="n in history" :key="n.id" class="sn-item" :class="{ cur: n.note_date === date }"
-        :title="'回看 ' + n.note_date" @click="openDlg(n.note_date, 'view')">
-        <span class="sn-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
-        <div class="sn-item-main">
-          <div class="sn-item-top">
-            {{ n.note_date.slice(5) }}
-            <template v-if="statusOf(n.status)">· {{ statusOf(n.status).emoji }} {{ statusOf(n.status).label }}</template>
+      <div class="sn-list-head">本月笔记（{{ history.length }}）</div>
+      <div class="sn-list" v-loading="loading">
+        <div v-for="n in history" :key="n.id" class="sn-item" :class="{ cur: n.note_date === date }"
+          :title="'回看 ' + n.note_date" @click="openDlg(n.note_date, 'view')">
+          <span class="sn-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
+          <div class="sn-item-main">
+            <div class="sn-item-top">
+              {{ n.note_date.slice(5) }}
+              <template v-if="statusOf(n.status)">· {{ statusOf(n.status).emoji }} {{ statusOf(n.status).label }}</template>
+            </div>
+            <div class="sn-item-ex">{{ excerpt(n.content) }}</div>
           </div>
-          <div class="sn-item-ex">{{ excerpt(n.content) }}</div>
+          <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
         </div>
-        <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
+        <span v-if="!history.length" class="sn-empty">这个月还没有笔记 — 点上方「写笔记」开始记录吧</span>
       </div>
-      <span v-if="!history.length" class="sn-empty">这个月还没有笔记 — 点上方「写笔记」开始记录吧</span>
-    </div>
+    </template>
 
     <!-- 编写 / 回看弹窗（居中大尺寸） -->
     <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
@@ -190,20 +229,23 @@ onMounted(() => { if (props.active) refresh(); });
 </template>
 
 <style lang="scss" scoped>
-.sn-panel {
-  width: 340px; flex-shrink: 0; position: sticky; top: 12px;
-  max-height: calc(100vh - 60px); overflow-y: auto;
+// 浮窗：fixed 右下角，可拖动（拖动后 left/top 覆盖 right/bottom），三 tab 共享
+.sn-float {
+  position: fixed; right: 18px; bottom: 18px; z-index: 900;
+  width: 330px; max-height: calc(100vh - 70px); overflow-y: auto;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px 14px; box-shadow: 0 2px 10px rgba(0, 0, 0, .05);
+  padding: 10px 12px; box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
   scrollbar-width: thin;
 
   .sn-head {
-    display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    cursor: move; user-select: none; padding: 2px 0;
     b { font-size: 15px; }
-    .sn-sub { font-size: 11px; color: var(--text-2); }
+    .sn-sub { font-size: 11px; color: var(--text-2); flex: 1; }
+    .sn-ctl { margin-left: auto; flex-shrink: 0; }
   }
 
-  .sn-write { width: 100%; margin-bottom: 12px; }
+  .sn-write { width: 100%; margin-bottom: 10px; }
 
   .sn-list-head { margin: 0 0 6px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
 
