@@ -40,31 +40,36 @@ function netConnect(c) {
   });
 }
 
-// 读一行响应（已处理 TCP 分片缓冲；multiline "250-xxx" 由 cmd 循环消费）
+// 读一行响应（已处理 TCP 分片缓冲 + 残留行预消费；multiline "250-xxx" 由 cmd 循环消费）
 function makeReader(sock) {
   let buf = '';
   return () => new Promise((resolve, reject) => {
-    const onData = (chunk) => {
-      buf += chunk.toString('utf8');
+    // 先消费缓冲区里的残留行（multiline 响应剩余部分可能早已到达），否则会永久等新数据
+    const tryParse = () => {
       const idx = buf.indexOf('\r\n');
-      if (idx < 0) return;
-      sock.off('data', onData);
+      if (idx < 0) return false;
       const line = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
-      resolve({ code: +line.slice(0, 3), text: line.slice(4) });
+      // last：原始行第 4 个字符（分隔符）是 '-' 表示 multiline 中间行，' ' 表示终行
+      resolve({ code: +line.slice(0, 3), text: line.slice(4), last: line.charAt(3) !== '-' });
+      return true;
+    };
+    if (tryParse()) return;
+    const onData = (chunk) => {
+      buf += chunk.toString('utf8');
+      if (tryParse()) sock.off('data', onData);
     };
     sock.on('data', onData);
     sock.on('error', reject);
   });
 }
 
-// 发送命令并等待响应；multiline 前缀 '-' 自动吞掉，直到终行
+// 发送命令并等待响应；multiline 中间行（last=false）自动吞掉，直到终行
 async function cmd(sock, read, line, expect) {
   sock.write(line + '\r\n');
   for (;;) {
     const r = await read();
-    const isLast = r.text.charAt(0) !== '-';
-    if (isLast) {
+    if (r.last) {
       if (expect && !expect.includes(r.code)) {
         throw new Error(`SMTP ${line.split(' ')[0]} 失败: ${r.code} ${r.text}`);
       }
