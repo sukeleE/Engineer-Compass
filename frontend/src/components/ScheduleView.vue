@@ -7,13 +7,15 @@ import { api } from '../api.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
 import ScheduleNotes from './ScheduleNotes.vue';
 import StudyView from './StudyView.vue';
+import MyTeamTasks from './team/MyTeamTasks.vue';
+import auth from '../auth.js';
 import RichEditor from './team/RichEditor.vue';
 import { NOTE_STATUS, statusOf, fmtDate, pad2 } from '../utils/noteStatus.js';
 
-// 页面 tab：comp 竞赛日程 | study 学习日程（支持 ?tab=study 深链，如 /study 重定向）
+// 页面 tab：comp 竞赛日程 | study 学习日程 | team 小组任务（支持 ?tab=xx 深链，如 /study 重定向）
 const route = useRoute();
 const router = useRouter();
-const viewTab = ref(route.query.tab === 'study' ? 'study' : 'comp');
+const viewTab = ref(['comp', 'study', 'team'].includes(route.query.tab) ? route.query.tab : 'comp');
 watch(viewTab, (v) => {
   router.replace({ query: { ...route.query, tab: v } }).catch(() => {});
 });
@@ -498,6 +500,13 @@ onMounted(load);
         <StudyView />
         <ScheduleNotes :active="viewTab === 'study'" />
       </div>
+    </el-tab-pane>
+
+    <el-tab-pane label="🏗️ 小组任务" name="team">
+      <template v-if="auth.token">
+        <MyTeamTasks />
+      </template>
+      <el-empty v-else description="登录后查看所在小组的备赛任务" :image-size="80" />
     </el-tab-pane>
     </el-tabs>
   </main>
