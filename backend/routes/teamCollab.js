@@ -36,7 +36,7 @@ function attachComments(teamId, type, targets) {
   const ids = targets.map((t) => t.id);
   if (!ids.length) return targets.map((t) => ({ ...t, comments: [] }));
   const rows = db.prepare(
-    `SELECT c.id, c.target_id, c.user_id, c.content, c.create_time, u.nickname
+    `SELECT c.id, c.target_id, c.user_id, c.content, c.create_time, COALESCE(u.nickname, u.username) AS nickname
      FROM comment c JOIN user u ON u.id = c.user_id
      WHERE c.team_id = ? AND c.target_type = ? AND c.target_id IN (${ids.map(() => '?').join(',')})
      ORDER BY c.create_time`
@@ -154,7 +154,8 @@ r.get('/:id/logs', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
-    `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id, u.nickname
+    `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id,
+            COALESCE(u.nickname, u.username) AS nickname, u.avatar
      FROM progress_log l JOIN user u ON u.id = l.user_id
      WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT 100`
   ).all(ctx.team.id).map((l) => ({ ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments) }));
@@ -242,7 +243,8 @@ r.get('/:id/messages', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
-    `SELECT m.id, m.content, m.attachments, m.create_time, u.id AS user_id, u.nickname
+    `SELECT m.id, m.content, m.attachments, m.create_time, u.id AS user_id,
+            COALESCE(u.nickname, u.username) AS nickname
      FROM team_message m JOIN user u ON u.id = m.user_id
      WHERE m.team_id = ? ORDER BY m.create_time DESC LIMIT 200`
   ).all(ctx.team.id).map((m) => ({ ...m, content: cleanContent(m.content), attachments: parseAtt(m.attachments) }));

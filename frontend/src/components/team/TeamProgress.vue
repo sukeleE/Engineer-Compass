@@ -110,17 +110,17 @@ async function submitReport() {
 }
 
 async function removeLog(l) {
-  try { await ElMessageBox.confirm('确定删除这条进度汇报？评论与附件将一并删除', '删除汇报', { type: 'warning' }); }
+  try { await ElMessageBox.confirm('确定撤回这条进度汇报？评论与附件将一并删除', '撤回汇报', { type: 'warning' }); }
   catch { return; }
   try {
     await api.teamLogDelete(props.teamId, l.id);
     logs.value = logs.value.filter((x) => x.id !== l.id);
-    ElMessage.success('汇报已删除');
+    ElMessage.success('汇报已撤回');
   } catch (e) { ElMessage.error(e.message); }
 }
 
-// 可编辑/删除：本人或组长
-const canEditLog = (l) => l.user_id === props.me.user_id || props.me.is_owner;
+// 可编辑/撤回：本人或组长（Number 兜底，防类型不一致导致按钮不显示）
+const canEditLog = (l) => Number(l.user_id) === Number(props.me.user_id) || props.me.is_owner;
 
 // 富文本内容里的图片：点击 → 全屏预览
 function onRichClick(e, l) {
@@ -219,12 +219,17 @@ reload().catch((e) => ElMessage.error(e.message));
     <div class="tp-logs">
       <h4>🗣️ 成员进度汇报</h4>
       <el-timeline v-if="logs.length">
-        <el-timeline-item v-for="l in logs" :key="l.id">
-          <template #timestamp>
-            <span class="log-ts">{{ l.nickname }} · {{ l.create_time?.slice(5, 16) }}</span>
-            <el-button v-if="canEditLog(l)" size="small" text type="primary" title="编辑该汇报" @click="editLog(l)">✏️</el-button>
-            <el-button v-if="canEditLog(l)" size="small" text type="danger" title="删除该汇报" @click="removeLog(l)">🗑</el-button>
-          </template>
+        <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="l.create_time?.slice(5, 16)">
+          <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
+          <div class="log-head">
+            <span class="log-avatar" v-if="l.avatar"><img :src="l.avatar" alt="" /></span>
+            <span class="log-author">{{ l.nickname || '未知成员' }}</span>
+            <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
+            <span class="log-actions">
+              <el-button v-if="canEditLog(l)" size="small" text type="primary" @click="editLog(l)">✏️ 修改</el-button>
+              <el-button v-if="canEditLog(l)" size="small" text type="danger" @click="removeLog(l)">↩️ 撤回</el-button>
+            </span>
+          </div>
           <div v-if="l.content" class="log-rich" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
           <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
           <CommentThread :team-id="teamId" type="log" :target="l" />
@@ -267,7 +272,17 @@ reload().catch((e) => ElMessage.error(e.message));
   }
 }
 .tp-logs { margin-top: 18px; h4 { margin: 0 0 10px; } .tp-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; } }
-.log-ts { margin-right: 6px; font-size: 12.5px; }
+.log-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  .log-avatar {
+    width: 26px; height: 26px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #2563eb1a; border: 1px solid #2563eb33;
+    img { width: 100%; height: 100%; object-fit: cover; }
+  }
+  .log-author { font-size: 13.5px; font-weight: 600; }
+  .log-actions { margin-left: auto; display: flex; gap: 2px; }
+}
 .log-rich {
   :deep(video) { max-width: 100%; max-height: 320px; border-radius: 8px; }
   :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
