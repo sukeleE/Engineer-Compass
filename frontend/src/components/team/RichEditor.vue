@@ -67,7 +67,7 @@ onBeforeUnmount(() => {
     .w-e-toolbar { padding: 3px 8px; }
     .w-e-bar-item { padding: 2px 3px; }
   }
-  :deep(.re-body) { height: 300px; overflow-y: hidden; }
+  :deep(.re-body) { height: 640px; max-height: calc(100vh - 260px); overflow-y: hidden; }
   :deep(.w-e-text-container) { z-index: 1; }
 }
 </style>

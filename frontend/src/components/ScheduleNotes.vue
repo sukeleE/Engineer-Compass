@@ -186,7 +186,7 @@ onMounted(() => { if (props.active) refresh(); });
 
     <!-- 编写 / 回看弹窗（居中大尺寸） -->
     <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
-      width="920px" top="4vh" :close-on-click-modal="false" destroy-on-close append-to-body>
+      width="680px" top="4vh" :close-on-click-modal="false" destroy-on-close append-to-body>
       <!-- 回看模式 -->
       <template v-if="dlgMode === 'view' && activeNote">
         <div v-if="statusOf(activeNote.status)" class="dn-status"

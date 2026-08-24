@@ -467,7 +467,7 @@ onMounted(load);
     </div>
 
     <!-- 点击日期 → 回看 / 记录当天笔记 -->
-    <el-dialog v-model="calDlg" :title="`${calDlgDate} ${WEEK_CN[new Date(calDlgDate + 'T00:00:00').getDay()]}`" width="920px" top="4vh" destroy-on-close>
+    <el-dialog v-model="calDlg" :title="`${calDlgDate} ${WEEK_CN[new Date(calDlgDate + 'T00:00:00').getDay()]}`" width="680px" top="4vh" destroy-on-close>
       <div v-if="calDlgMode === 'view' && calDlgNote" class="dlg-note-view">
         <div v-if="statusOf(calDlgNote.status)" class="dlg-status"
           :style="{ color: statusOf(calDlgNote.status).color, background: statusOf(calDlgNote.status).color + '1a' }">
