@@ -10,6 +10,24 @@ r.use(authRequired); // 以下接口全部需要登录
 
 const DEFAULT_MEMBER_PERMS = ['progress', 'message', 'file_upload']; // 默认"组员"角色
 
+// 某成员的角色名数组（桥表，level 降序）
+const roleNamesOf = (teamId, userId) => db.prepare(
+  `SELECT tr.name FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
+   WHERE tmr.team_id = ? AND tmr.user_id = ? ORDER BY tr.level DESC, tr.id`
+).all(teamId, userId).map((x) => x.name);
+
+// 全组成员角色聚合：{ userId: [角色行] }（批量，避免 N+1）
+const roleMapOf = (teamId) => {
+  const rows = db.prepare(
+    `SELECT tmr.user_id, tr.id AS role_id, tr.name AS role_name, tr.level AS role_level
+     FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
+     WHERE tmr.team_id = ? ORDER BY tr.level DESC, tr.id`
+  ).all(teamId);
+  const m = {};
+  for (const rr of rows) (m[rr.user_id] ||= []).push(rr);
+  return m;
+};
+
 // POST /api/team — 创建小组（组长=创建者，自动建默认"组员"角色）
 // 可选 comp_id：AI 按竞赛智能拆分部门（team_role）并生成备赛计划（team_plan）；AI 失败时用子赛项模板兜底
 r.post('/', async (req, res) => {
@@ -108,8 +126,10 @@ r.post('/join', (req, res) => {
   const exists = db.prepare('SELECT id FROM team_member WHERE team_id = ? AND user_id = ?').get(team.id, req.user.id);
   if (exists) return res.status(409).json({ error: '你已在该小组中' });
   const defaultRole = db.prepare("SELECT id FROM team_role WHERE team_id = ? AND name = '组员' ORDER BY level LIMIT 1").get(team.id);
-  db.prepare('INSERT INTO team_member (team_id, user_id, role_id) VALUES (?,?,?)')
-    .run(team.id, req.user.id, defaultRole?.id ?? null);
+  db.prepare('INSERT INTO team_member (team_id, user_id, role_id) VALUES (?,?,NULL)')
+    .run(team.id, req.user.id);
+  if (defaultRole) db.prepare('INSERT INTO team_member_role (team_id, user_id, role_id) VALUES (?,?,?)')
+    .run(team.id, req.user.id, defaultRole.id);
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
 });
 
@@ -119,9 +139,8 @@ r.post('/join', (req, res) => {
 // ⚠️ 必须注册在 GET /:id 之前，否则 'my-tasks' 会被 :id 吞掉
 r.get('/my-tasks', (req, res) => {
   const myTeams = db.prepare(
-    `SELECT t.id AS team_id, t.name AS team_name, t.owner_id, tm.role_id, tr.name AS role_name
+    `SELECT t.id AS team_id, t.name AS team_name, t.owner_id
      FROM team_member tm JOIN team t ON t.id = tm.team_id
-     LEFT JOIN team_role tr ON tr.id = tm.role_id
      WHERE tm.user_id = ? ORDER BY t.create_time DESC`
   ).all(req.user.id);
   const out = [];
@@ -142,7 +161,10 @@ r.get('/my-tasks', (req, res) => {
       }));
       if (phases.length) plans.push({ id: row.id, title: row.title, comp_name: plan.comp_name || null, update_time: row.update_time, phases });
     }
-    if (plans.length) out.push({ team_id: mt.team_id, team_name: mt.team_name, role_name: mt.role_name, is_owner: mt.owner_id === req.user.id, plans });
+    if (plans.length) {
+      const myRoles = roleNamesOf(mt.team_id, req.user.id);
+      out.push({ team_id: mt.team_id, team_name: mt.team_name, role_name: myRoles[0] || null, role_names: myRoles, is_owner: mt.owner_id === req.user.id, plans });
+    }
   }
   res.json(out);
 });
@@ -153,12 +175,20 @@ r.get('/:id', (req, res) => {
   if (!ctx) return res.status(404).json({ error: '小组不存在' });
   if (!ctx.member) return res.status(403).json({ error: '不是小组成员' });
 
+  const roleMap = roleMapOf(ctx.team.id);
   const members = db.prepare(
-    `SELECT u.id, u.username, u.nickname, tm.role_id, tr.name AS role_name, tr.level AS role_level, tm.join_time
+    `SELECT u.id, u.username, u.nickname, tm.join_time
      FROM team_member tm JOIN user u ON u.id = tm.user_id
-     LEFT JOIN team_role tr ON tr.id = tm.role_id
-     WHERE tm.team_id = ? ORDER BY (tm.role_id IS NULL) DESC, tr.level DESC, tm.join_time`
-  ).all(ctx.team.id).map((m) => ({ ...m, is_owner: m.id === ctx.team.owner_id, is_me: m.id === req.user.id }));
+     WHERE tm.team_id = ? ORDER BY tm.join_time`
+  ).all(ctx.team.id).map((m) => {
+    const rs = roleMap[m.id] || [];
+    return {
+      ...m,
+      role_id: rs[0]?.role_id ?? null, role_name: rs[0]?.role_name ?? null, role_level: rs[0]?.role_level ?? null,
+      role_ids: rs.map((x) => x.role_id), role_names: rs.map((x) => x.role_name),
+      is_owner: m.id === ctx.team.owner_id, is_me: m.id === req.user.id,
+    };
+  }).sort((a, b) => (b.is_owner - a.is_owner) || ((b.role_level ?? -1) - (a.role_level ?? -1)) || (a.join_time < b.join_time ? -1 : 1));
 
   const roles = db.prepare('SELECT id, name, level, permissions FROM team_role WHERE team_id = ? ORDER BY level DESC, id').all(ctx.team.id)
     .map((r2) => ({ ...r2, permissions: JSON.parse(r2.permissions || '[]') }));
@@ -176,7 +206,11 @@ r.get('/:id', (req, res) => {
 
   res.json({
     team: ctx.team,
-    me: { user_id: req.user.id, is_owner: ctx.isOwner, role: ctx.role ? { id: ctx.role.id, name: ctx.role.name, level: ctx.role.level, permissions: JSON.parse(ctx.role.permissions || '[]') } : null },
+    me: {
+      user_id: req.user.id, is_owner: ctx.isOwner,
+      role: ctx.role ? { id: ctx.role.id, name: ctx.role.name, level: ctx.role.level, permissions: JSON.parse(ctx.role.permissions || '[]') } : null,
+      roles: ctx.roles.map((r2) => ({ id: r2.id, name: r2.name, level: r2.level, permissions: JSON.parse(r2.permissions || '[]') })),
+    },
     perms: {
       task: hasPerm(ctx, 'task'), progress: hasPerm(ctx, 'progress'), message: hasPerm(ctx, 'message'),
       file_upload: hasPerm(ctx, 'file_upload'), file_delete: hasPerm(ctx, 'file_delete'),
@@ -241,6 +275,7 @@ r.delete('/:id/role/:rid', (req, res) => {
   if (!role) return res.status(404).json({ error: '角色不存在' });
   db.exec('BEGIN');
   try {
+    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND role_id = ?').run(ctx.team.id, role.id);
     db.prepare('UPDATE team_member SET role_id = NULL WHERE team_id = ? AND role_id = ?').run(ctx.team.id, role.id);
     db.prepare('DELETE FROM team_role WHERE id = ?').run(role.id);
     db.exec('COMMIT');
@@ -248,23 +283,54 @@ r.delete('/:id/role/:rid', (req, res) => {
   res.json({ message: `已删除角色「${role.name}」` });
 });
 
-// POST /api/team/:id/member — 调整成员角色（member 权限）
+// 校验角色 id 列表都属于本组且 ≤3 个（返回规范化后的数组，非法返回 null + 响应已发出）
+function checkRoleIds(ctx, res, ids) {
+  if (ids.length > 3) { res.status(400).json({ error: '每个成员最多 3 个角色' }); return null; }
+  for (const rid of [...new Set(ids)]) {
+    if (!db.prepare('SELECT id FROM team_role WHERE id = ? AND team_id = ?').get(rid, ctx.team.id)) {
+      res.status(404).json({ error: '角色不存在' }); return null;
+    }
+  }
+  return [...new Set(ids)];
+}
+
+// POST /api/team/:id/member — 调整成员角色（member 权限；role_ids 数组替换全部角色，兼容旧 role_id 单值）
 r.post('/:id/member', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   const deny = requirePerm(ctx, res, 'member');
   if (deny) return deny;
-  const { user_id, role_id } = req.body || {};
+  const { user_id, role_ids, role_id } = req.body || {};
   const target = db.prepare('SELECT * FROM team_member WHERE team_id = ? AND user_id = ?').get(ctx.team.id, Number(user_id));
   if (!target) return res.status(404).json({ error: '成员不存在' });
   if (Number(user_id) === ctx.team.owner_id) return res.status(400).json({ error: '不能修改组长的角色' });
-  if (role_id) {
-    const role = db.prepare('SELECT * FROM team_role WHERE id = ? AND team_id = ?').get(role_id, ctx.team.id);
-    if (!role) return res.status(404).json({ error: '角色不存在' });
-    db.prepare('UPDATE team_member SET role_id = ? WHERE id = ?').run(role.id, target.id);
-  } else {
-    db.prepare('UPDATE team_member SET role_id = NULL WHERE id = ?').run(target.id);
-  }
+  const ids = checkRoleIds(ctx, res, Array.isArray(role_ids) ? role_ids.map(Number) : (role_id != null ? [Number(role_id)] : []));
+  if (!ids) return;
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, target.user_id);
+    for (const rid of ids) db.prepare('INSERT INTO team_member_role (team_id, user_id, role_id) VALUES (?,?,?)').run(ctx.team.id, target.user_id, rid);
+    db.prepare('UPDATE team_member SET role_id = ? WHERE id = ?').run(ids[0] ?? null, target.id); // 旧字段同步首角色
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
   res.json({ message: '已更新成员角色' });
+});
+
+// POST /api/team/:id/member/self-role — 成员自选角色（≤3，仅限自己；组长无需自选）
+r.post('/:id/member/self-role', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  if (ctx.isOwner) return res.status(400).json({ error: '组长无需自选角色' });
+  const { role_ids } = req.body || {};
+  const ids = checkRoleIds(ctx, res, Array.isArray(role_ids) ? role_ids.map(Number) : []);
+  if (!ids) return;
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, req.user.id);
+    for (const rid of ids) db.prepare('INSERT INTO team_member_role (team_id, user_id, role_id) VALUES (?,?,?)').run(ctx.team.id, req.user.id, rid);
+    db.prepare('UPDATE team_member SET role_id = ? WHERE team_id = ? AND user_id = ?').run(ids[0] ?? null, ctx.team.id, req.user.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  res.json({ message: '已更新我的角色' });
 });
 
 // DELETE /api/team/:id/member/:uid — 移除成员（member 权限；组长不可被移除）
@@ -290,6 +356,9 @@ r.post('/:id/transfer', (req, res) => {
   db.exec('BEGIN');
   try {
     db.prepare('UPDATE team SET owner_id = ? WHERE id = ?').run(Number(user_id), ctx.team.id);
+    // 新旧组长角色清理（桥表 + 旧字段同步）
+    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, Number(user_id));
+    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, ctx.team.owner_id);
     db.prepare('UPDATE team_member SET role_id = NULL WHERE team_id = ? AND user_id = ?').run(ctx.team.id, Number(user_id));
     db.prepare('UPDATE team_member SET role_id = NULL WHERE team_id = ? AND user_id = ?').run(ctx.team.id, ctx.team.owner_id);
     db.exec('COMMIT');
@@ -437,7 +506,7 @@ r.post('/:id/plan/:pid/task', (req, res) => {
   if (!task) return res.status(400).json({ error: '任务不存在' });
   // 部门限权：dept 为空按通用；组长（is_owner）或「小组设置」权限可勾任何任务
   const dept = task.dept || '通用';
-  const allowed = canEditPlan(ctx) || dept === '通用' || (!!ctx.role?.name && dept === ctx.role.name);
+  const allowed = canEditPlan(ctx) || dept === '通用' || ctx.roles.some((rr) => rr.name === dept);
   if (!allowed) return res.status(403).json({ error: `仅「${dept}」成员可勾选该任务` });
   task.done = !!done;
   task.done_by = task.done ? (req.user.nickname || req.user.username) : null;
@@ -464,11 +533,12 @@ r.post('/:id/ai-grouping', async (req, res) => {
   if (deny) return deny;
 
   const members = db.prepare(
-    `SELECT u.id, u.nickname, u.username, tr.name AS role_name
+    `SELECT u.id, u.nickname, u.username
      FROM team_member tm JOIN user u ON u.id = tm.user_id
-     LEFT JOIN team_role tr ON tr.id = tm.role_id
      WHERE tm.team_id = ? AND u.id <> ?` // 组长不可被改角色，不参与分组
   ).all(ctx.team.id, ctx.team.owner_id);
+  const memberRoles = roleMapOf(ctx.team.id); // user_id → [{role_id,role_name,role_level}]
+  for (const m of members) m.role_names = (memberRoles[m.id] || []).map((x) => x.role_name);
   const roles = db.prepare(`SELECT id, name FROM team_role WHERE team_id = ? AND name <> '组员' ORDER BY level DESC, id`).all(ctx.team.id);
   if (!members.length) return res.json({ message: '暂无其他成员', assignments: [] });
   if (!roles.length) return res.json({ message: '还没有部门角色，先创建部门（如：机械组/电控组/软件组）', assignments: [] });
@@ -482,7 +552,7 @@ r.post('/:id/ai-grouping', async (req, res) => {
     const system = `你是竞赛小组管理助手，为成员智能分组。
 竞赛:${compTitle || '（未关联具体竞赛）'}
 部门:${roles.map((x) => x.name).join('、')}
-成员:${JSON.stringify(members.map((m) => ({ user_id: m.id, nickname: m.nickname || m.username, current_role: m.role_name || '无' })))}
+成员:${JSON.stringify(members.map((m) => ({ user_id: m.id, nickname: m.nickname || m.username, current_role: (m.role_names || []).join('、') || '无' })))}
 要求输出严格 JSON：{"assignments":[{"user_id":12,"role_name":"机械组"}]}，role_name 必须从部门中选择。
 根据成员昵称/当前角色判断最合适部门；无法判断时归入最贴近的部门；不要遗漏任何成员。禁止多余文字。`;
     const raw = await callDeepSeek([{ role: 'system', content: system }, { role: 'user', content: '请给出分组建议' }]);
@@ -493,7 +563,7 @@ r.post('/:id/ai-grouping', async (req, res) => {
       const role = roles.find((x) => x.name === String(a.role_name || '').trim());
       if (m && role && !m.suggested) {
         m.suggested = true;
-        assignments.push({ user_id: m.id, nickname: m.nickname || m.username, current_role: m.role_name || '无', suggest_role: role.name, suggest_role_id: role.id });
+        assignments.push({ user_id: m.id, nickname: m.nickname || m.username, current_role: (m.role_names || []).join('、') || '无', suggest_role: role.name, suggest_role_id: role.id });
       }
     }
     // 补漏：AI 遗漏的成员 → 不强制分配（交给前端展示）

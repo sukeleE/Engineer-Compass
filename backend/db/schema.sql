@@ -150,9 +150,16 @@ CREATE TABLE IF NOT EXISTS team_member (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   team_id   INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
   user_id   INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-  role_id   INTEGER REFERENCES team_role(id) ON DELETE SET NULL,  -- NULL=无角色（组长恒全权限）
+  role_id   INTEGER REFERENCES team_role(id) ON DELETE SET NULL,  -- 旧单角色字段（已由 team_member_role 取代，保留兼容）
   join_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(team_id, user_id)
+);
+-- 成员多角色桥表（每人最多 3 个角色；自选/组长分配共用）
+CREATE TABLE IF NOT EXISTS team_member_role (
+  team_id INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  role_id INTEGER NOT NULL REFERENCES team_role(id) ON DELETE CASCADE,
+  PRIMARY KEY(team_id, user_id, role_id)
 );
 
 -- 表12 team_task 进度任务（里程碑对齐）

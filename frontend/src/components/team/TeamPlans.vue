@@ -29,7 +29,10 @@ onMounted(() => load());
       <div class="mp-head">
         <b>{{ m.nickname }}</b>
         <el-tag v-if="m.is_owner" size="small" type="warning">👑 组长</el-tag>
-        <el-tag v-else-if="m.role_name" size="small">{{ m.role_name }}</el-tag>
+        <template v-else>
+          <el-tag v-for="rn in m.role_names || []" :key="rn" size="small" style="margin-right:4px">{{ rn }}</el-tag>
+          <el-tag v-if="!(m.role_names || []).length" size="small">组员</el-tag>
+        </template>
         <span class="mp-count">
           备赛 {{ m.schedules.length }} · 学习 {{ m.studies.length }}
         </span>

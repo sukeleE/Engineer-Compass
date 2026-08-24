@@ -46,24 +46,26 @@ export const PERM_KEYS = {
   member: '成员管理', role: '角色管理', team: '小组设置',
 };
 
-// 返回 { team, member, role }；member=null 表示非成员；owner 恒全权限
+// 返回 { team, member, roles, role }；member=null 表示非成员；owner 恒全权限
+// roles=多角色数组（team_member_role 桥表，最多 3 个）；role=level 最高的角色（兼容旧单角色调用）
 export function teamCtx(teamId, userId) {
   const team = db.prepare('SELECT * FROM team WHERE id = ?').get(Number(teamId));
   if (!team) return null;
   const member = db.prepare('SELECT * FROM team_member WHERE team_id = ? AND user_id = ?').get(team.id, userId);
-  const role = member?.role_id
-    ? db.prepare('SELECT * FROM team_role WHERE id = ?').get(member.role_id)
-    : null;
-  return { team, member: member || null, role: role || null, isOwner: team.owner_id === userId };
+  const roles = db.prepare(
+    `SELECT tr.* FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
+     WHERE tmr.team_id = ? AND tmr.user_id = ? ORDER BY tr.level DESC, tr.id`
+  ).all(team.id, userId);
+  return { team, member: member || null, roles, role: roles[0] || null, isOwner: team.owner_id === userId };
 }
 
-// 权限判断：组长恒有；否则看角色 permissions JSON
+// 权限判断：组长恒有；否则看任意角色 permissions 并集
 export function hasPerm(ctx, key) {
   if (!ctx) return false;
   if (ctx.isOwner) return true;
-  if (!ctx.member || !ctx.role) return false;
+  if (!ctx.member || !ctx.roles?.length) return false;
   try {
-    return (JSON.parse(ctx.role.permissions || '[]') || []).includes(key);
+    return ctx.roles.some((r) => (JSON.parse(r.permissions || '[]') || []).includes(key));
   } catch { return false; }
 }
 

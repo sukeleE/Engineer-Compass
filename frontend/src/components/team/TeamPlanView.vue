@@ -10,9 +10,10 @@ import TeamPlans from './TeamPlans.vue';
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
 const canEdit = computed(() => props.me?.is_owner || props.perms?.team);
-const myRoleName = computed(() => props.me?.role?.name || null);
+// 我的全部角色名（多角色：任一匹配本部门即可勾）
+const myRoleNames = computed(() => (props.me?.roles || []).map((r) => r.name));
 // 勾选权限（与后端同规则）：组长/小组设置权限可勾一切；通用任务全员；其余仅本部门成员
-const canCheck = (t) => canEdit.value || !t.dept || t.dept === '通用' || t.dept === myRoleName.value;
+const canCheck = (t) => canEdit.value || !t.dept || t.dept === '通用' || myRoleNames.value.includes(t.dept);
 const plans = ref([]);
 const comps = ref([]);
 const genCompId = ref(null);

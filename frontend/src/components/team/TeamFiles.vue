@@ -6,7 +6,7 @@ import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
 
-const props = defineProps({ teamId: Number, me: Object, perms: Object });
+const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array });
 
 const files = ref([]);
 const uploading = ref(false);
@@ -31,6 +31,9 @@ const preview = (f) => openImage(dlUrl(f), f.file_name);
 async function load() {
   files.value = await api.teamFiles(props.teamId);
 }
+
+// 上传者角色（members 由 TeamDetail 传入，含 role_names 数组）
+const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
 
 async function pickFile(e) {
   const file = e.target.files?.[0];
@@ -91,7 +94,11 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <span v-else class="f-icon">{{ fmtType(f.file_type) }}</span>
       <div class="f-info">
         <b>{{ f.file_name }}</b>
-        <span class="f-meta">{{ fmtSize(f.file_size) }} · {{ f.uploader }} · {{ f.create_time?.slice(0, 10) }}</span>
+        <span class="f-meta">
+          {{ fmtSize(f.file_size) }} · {{ f.uploader }}
+          <el-tag v-for="rn in roleNamesOf(f.user_id)" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
+          · {{ f.create_time?.slice(0, 10) }}
+        </span>
       </div>
       <a class="f-dl" :href="dlUrl(f)" target="_blank">下载 ⬇</a>
       <el-button v-if="f.user_id === me.user_id || perms.file_delete" size="small" text type="danger" @click="remove(f)">删除</el-button>

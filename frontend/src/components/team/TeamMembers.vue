@@ -89,7 +89,7 @@ async function saveRole() {
 }
 
 async function removeRole(role) {
-  const used = members.value.some((m) => m.role_id === role.id);
+  const used = members.value.some((m) => (m.role_ids || []).includes(role.id));
   const tip = used ? `（有成员在使用，删除后这些成员将失去该角色权限）` : '';
   try {
     await ElMessageBox.confirm(`删除角色「${role.name}」？${tip}`, '确认', { type: 'warning' });
@@ -101,13 +101,35 @@ async function removeRole(role) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
-async function setMemberRole(m, roleId) {
+// 组长分配：多选（≤3），role_ids 数组整体替换
+async function setMemberRoles(m, roleIds) {
+  const ids = (roleIds || []).map(Number);
   try {
-    await api.teamMemberRole(props.teamId, { user_id: m.id, role_id: roleId || null });
+    await api.teamMemberRole(props.teamId, { user_id: m.id, role_ids: ids });
     await reload();
-    ElMessage.success(`已将 ${m.nickname} 设为「${roles.value.find((r) => r.id === roleId)?.name || '无角色'}」`);
+    ElMessage.success(`已更新 ${m.nickname} 的角色（${ids.length} 个）`);
   } catch (e) { ElMessage.error(e.message); }
 }
+
+// —— 成员自选角色（≤3；非组长成员在自己那一行可打开）——
+const selfDlg = ref(false);
+const selfRoleIds = ref([]);
+
+function openSelfRole() {
+  selfRoleIds.value = [...(myMember.value?.role_ids || [])];
+  selfDlg.value = true;
+}
+
+async function saveSelfRole() {
+  try {
+    await api.teamSelfRole(props.teamId, { role_ids: selfRoleIds.value.map(Number) });
+    ElMessage.success('我的角色已更新');
+    selfDlg.value = false;
+    await reload();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+const myMember = computed(() => members.value.find((m) => m.is_me) || null);
 
 async function removeMember(m) {
   try {
@@ -162,17 +184,36 @@ loadInvite();
           <span class="m-user">@{{ m.username }}</span>
         </div>
         <template v-if="perms.member && !m.is_owner">
-          <el-select :model-value="m.role_id" size="small" style="width: 140px" placeholder="分配角色"
-            @change="(v) => setMemberRole(m, v)">
-            <el-option :value="null" label="（无角色）" />
+          <el-select :model-value="m.role_ids || []" size="small" multiple collapse-tags collapse-tags-tooltip
+            :multiple-limit="3" style="width: 220px" placeholder="分配角色（≤3）"
+            @change="(v) => setMemberRoles(m, v)">
             <el-option v-for="r in roles" :key="r.id" :value="r.id" :label="r.name" />
           </el-select>
           <el-button v-if="me.is_owner && !m.is_me" size="small" text @click="transfer(m)">转让</el-button>
           <el-button size="small" text type="danger" @click="removeMember(m)">移除</el-button>
         </template>
-        <el-tag v-else-if="m.role_name" size="small">{{ m.role_name }}</el-tag>
+        <template v-else-if="m.is_me && !me.is_owner">
+          <el-button size="small" type="primary" plain @click="openSelfRole">🎭 自选角色</el-button>
+        </template>
+        <template v-else>
+          <el-tag v-for="rn in m.role_names || []" :key="rn" size="small" style="margin-right:4px">{{ rn }}</el-tag>
+          <el-tag v-if="!(m.role_names || []).length" size="small">无角色</el-tag>
+        </template>
       </div>
     </div>
+
+    <!-- 成员自选角色弹窗（≤3） -->
+    <el-dialog v-model="selfDlg" title="🎭 自选我的角色" width="420px" top="20vh">
+      <p class="self-note">选择你在小组中的角色（最多 3 个）。角色权限会叠加，角色也可由组长调整。</p>
+      <el-select v-model="selfRoleIds" multiple collapse-tags collapse-tags-tooltip
+        :multiple-limit="3" placeholder="选择角色（≤3）" style="width:100%">
+        <el-option v-for="r in roles" :key="r.id" :value="r.id" :label="r.name" />
+      </el-select>
+      <template #footer>
+        <el-button @click="selfDlg = false">取消</el-button>
+        <el-button type="primary" @click="saveSelfRole">保存角色</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 角色 -->
     <div class="tm-sec">
@@ -274,6 +315,7 @@ loadInvite();
   .invite-code { font-family: monospace; font-size: 15px; letter-spacing: 2px; color: #1d4ed8; background: #eff6ff; border: 1px dashed #bfdbfe; border-radius: 8px; padding: 5px 12px; }
 }
 .owner-actions { margin-top: 12px; }
+.self-note { color: #94a3b8; font-size: 12.5px; margin: 0 0 12px; }
 .ai-note { color: #94a3b8; font-size: 12.5px; margin: 0 0 12px; }
 .ai-row { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 12px; margin-bottom: 8px;

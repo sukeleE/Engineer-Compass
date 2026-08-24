@@ -6,7 +6,7 @@ import { api } from '../../api.js';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
 
-const props = defineProps({ teamId: Number, me: Object, perms: Object });
+const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array });
 
 const msgs = ref([]);
 const input = ref('');
@@ -55,7 +55,10 @@ async function remove(m) {
 }
 
 // 可改/可删：本人或组长/管理员
-const canMod = (m) => m.user_id === props.me.user_id || props.perms.task;
+const canMod = (m) => Number(m.user_id) === Number(props.me.user_id) || props.perms.task;
+
+// 作者角色（members 由 TeamDetail 传入，含 role_names 数组）
+const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
 
 // 原地编辑：消息体切换为输入框
 const editId = ref(null);
@@ -83,6 +86,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <div v-for="m in msgs" :key="m.id" class="chat-item" :class="{ mine: m.user_id === me.user_id }">
         <div class="ci-head">
           <b>{{ m.nickname }}</b>
+          <el-tag v-for="rn in roleNamesOf(m.user_id)" :key="rn" size="small" effect="plain" style="margin-left:2px">{{ rn }}</el-tag>
           <span class="ci-time">{{ m.create_time?.slice(5, 16) }}</span>
           <span class="ci-ops">
             <el-button v-if="canMod(m)" size="small" text type="primary" title="编辑消息" @click="startEdit(m)">✏️</el-button>

@@ -83,6 +83,7 @@ export const api = {
   teamRoleSave: (id, card) => req(`/team/${id}/role`, { method: 'POST', body: JSON.stringify(card) }),
   teamRoleDelete: (id, rid) => req(`/team/${id}/role/${rid}`, { method: 'DELETE' }),
   teamMemberRole: (id, card) => req(`/team/${id}/member`, { method: 'POST', body: JSON.stringify(card) }),
+  teamSelfRole: (id, card) => req(`/team/${id}/member/self-role`, { method: 'POST', body: JSON.stringify(card) }),
   teamMemberRemove: (id, uid) => req(`/team/${id}/member/${uid}`, { method: 'DELETE' }),
   teamTransfer: (id, userId) => req(`/team/${id}/transfer`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
   teamDelete: (id) => req(`/team/${id}`, { method: 'DELETE' }),

@@ -243,7 +243,7 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
       <router-link to="/team" class="stat-card">
         <b class="sc-num">{{ profile?.teams?.length || 0 }}</b>
         <span class="sc-label">加入小组</span>
-        <span class="sc-sub">{{ profile?.teams?.map((t) => t.role_name || '组长').join(' / ') || '尚未加入小组' }}</span>
+        <span class="sc-sub">{{ profile?.teams?.map((t) => t.is_owner ? '组长' : (t.role_names || []).join('、') || '组员').join(' / ') || '尚未加入小组' }}</span>
       </router-link>
     </section>
 
@@ -262,9 +262,11 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
             <b>{{ t.name }}</b>
             <span class="ti-desc">{{ t.desc || '—' }}</span>
           </div>
-          <el-tag size="small" :type="t.is_owner ? 'danger' : 'info'">
-            {{ t.is_owner ? '👑 组长' : t.role_name || '组员' }}
-          </el-tag>
+          <el-tag size="small" :type="t.is_owner ? 'danger' : 'info'" v-if="t.is_owner">👑 组长</el-tag>
+          <template v-else>
+            <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" style="margin-right:4px">{{ rn }}</el-tag>
+            <el-tag v-if="!(t.role_names || []).length" size="small" type="info">组员</el-tag>
+          </template>
           <span class="ti-count">{{ t.member_count }} 人</span>
         </router-link>
       </div>

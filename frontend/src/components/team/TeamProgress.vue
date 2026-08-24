@@ -122,6 +122,9 @@ async function removeLog(l) {
 // 可编辑/撤回：本人或组长（Number 兜底，防类型不一致导致按钮不显示）
 const canEditLog = (l) => Number(l.user_id) === Number(props.me.user_id) || props.me.is_owner;
 
+// 作者角色（members 由 TeamDetail 传入，含 role_names 数组）
+const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
+
 // 富文本内容里的图片：点击 → 全屏预览
 function onRichClick(e, l) {
   if (e.target.tagName === 'IMG') {
@@ -224,6 +227,7 @@ reload().catch((e) => ElMessage.error(e.message));
           <div class="log-head">
             <span class="log-avatar" v-if="l.avatar"><img :src="l.avatar" alt="" /></span>
             <span class="log-author">{{ l.nickname || '未知成员' }}</span>
+            <el-tag v-for="rn in roleNamesOf(l.user_id)" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
             <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
             <span class="log-actions">
               <el-button v-if="canEditLog(l)" size="small" text type="primary" @click="editLog(l)">✏️ 修改</el-button>

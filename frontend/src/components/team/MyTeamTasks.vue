@@ -23,8 +23,8 @@ async function load() {
   }
 }
 
-// 勾选限权（与小组页 TeamPlanView 同规则）
-const canCheck = (team, t) => team.is_owner || !t.dept || t.dept === '通用' || t.dept === team.role_name;
+// 勾选限权（与小组页 TeamPlanView 同规则；多角色任一匹配即可勾）
+const canCheck = (team, t) => team.is_owner || !t.dept || t.dept === '通用' || (team.role_names || []).includes(t.dept);
 
 // 部门汇总：{ 部门名: {done,total} }
 function deptStats(plan) {
@@ -85,7 +85,10 @@ onMounted(load);
       <div class="mt-team-head">
         <b>{{ t.team_name }}</b>
         <el-tag v-if="t.is_owner" size="small" type="warning">👑 组长</el-tag>
-        <el-tag v-else-if="t.role_name" size="small" type="info" effect="plain">{{ t.role_name }}</el-tag>
+        <template v-else>
+          <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" effect="plain" style="margin-right:4px">{{ rn }}</el-tag>
+          <el-tag v-if="!(t.role_names || []).length" size="small" type="info" effect="plain">无角色</el-tag>
+        </template>
       </div>
 
       <div v-for="plan in t.plans" :key="plan.id" class="mt-plan">

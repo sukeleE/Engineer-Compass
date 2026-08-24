@@ -29,5 +29,18 @@ migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email)');
 migCol('user', 'avatar', 'ALTER TABLE user ADD COLUMN avatar TEXT'); // 头像 dataURL（feedback 表靠 schema.sql IF NOT EXISTS，无需迁移）
 
+// 成员多角色桥表：新库 schema.sql 已建；老库手动建表 + 从 team_member.role_id 搬迁存量角色
+const hasTMR = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='team_member_role'").get();
+if (!hasTMR) {
+  db.exec(`CREATE TABLE IF NOT EXISTS team_member_role (
+    team_id INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES team_role(id) ON DELETE CASCADE,
+    PRIMARY KEY(team_id, user_id, role_id))`);
+}
+db.prepare(
+  'INSERT OR IGNORE INTO team_member_role (team_id, user_id, role_id) SELECT team_id, user_id, role_id FROM team_member WHERE role_id IS NOT NULL'
+).run();
+
 export default db;
 export { DB_PATH };

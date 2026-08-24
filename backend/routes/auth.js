@@ -174,19 +174,26 @@ r.put('/email', authRequired, (req, res) => {
   res.json({ user: userCard(u) });
 });
 
-// GET /api/auth/me — 当前用户（含所属小组摘要）
+// GET /api/auth/me — 当前用户（含所属小组摘要；多角色 role_names 数组 + role_name 兼容）
 r.get('/me', authRequired, (req, res) => {
   const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id) || req.user;
+  // user_id → 角色名数组（全部小组一次性拉取，量小）
+  const roleMap = {};
+  for (const x of db.prepare(
+    `SELECT tmr.team_id, tmr.user_id, tr.name AS role_name
+     FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
+     ORDER BY tr.level DESC, tr.id`
+  ).all()) (roleMap[`${x.team_id}:${x.user_id}`] ||= []).push(x.role_name);
   const teams = db.prepare(
-    `SELECT t.id, t.name, t.desc, t.invite_code, t.owner_id, tm.role_id, tr.name AS role_name, tr.level AS role_level,
+    `SELECT t.id, t.name, t.desc, t.invite_code, t.owner_id,
             (SELECT COUNT(*) FROM team_member m2 WHERE m2.team_id = t.id) AS member_count
      FROM team_member tm JOIN team t ON t.id = tm.team_id
-     LEFT JOIN team_role tr ON tr.id = tm.role_id
      WHERE tm.user_id = ? ORDER BY t.create_time DESC`
   ).all(req.user.id);
-  res.json({ user: userCard(u), teams: teams.map((t) => ({
-    ...t, is_owner: t.owner_id === req.user.id,
-  })) });
+  res.json({ user: userCard(u), teams: teams.map((t) => {
+    const rns = roleMap[`${t.id}:${req.user.id}`] || [];
+    return { ...t, role_names: rns, role_name: rns[0] || null, is_owner: t.owner_id === req.user.id };
+  }) });
 });
 
 export default r;

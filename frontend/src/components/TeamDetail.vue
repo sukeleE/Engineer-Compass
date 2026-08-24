@@ -42,7 +42,10 @@ watch(
           <p v-if="detail.team.desc" class="td-desc">{{ detail.team.desc }}</p>
           <div class="td-tags">
             <el-tag size="small" type="warning" v-if="detail.me.is_owner">👑 组长</el-tag>
-            <el-tag size="small" v-else>{{ detail.me.role?.name || '无角色' }}</el-tag>
+            <template v-else>
+              <el-tag v-for="r in detail.me.roles || []" :key="r.id" size="small">{{ r.name }}</el-tag>
+              <el-tag v-if="!(detail.me.roles || []).length" size="small">无角色</el-tag>
+            </template>
             <el-tag size="small" type="info" effect="plain">🔑 {{ detail.team.invite_code }}</el-tag>
             <el-tag size="small" type="success" effect="plain">{{ detail.members.length }} 人</el-tag>
           </div>
@@ -57,10 +60,10 @@ watch(
           <TeamPlanView :team-id="detail.team.id" :me="detail.me" :roles="detail.roles" :perms="detail.perms" />
         </el-tab-pane>
         <el-tab-pane label="💬 讨论" name="chat">
-          <TeamChat :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" />
+          <TeamChat :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" />
         </el-tab-pane>
         <el-tab-pane label="📁 资料共享" name="files">
-          <TeamFiles :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" />
+          <TeamFiles :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" />
         </el-tab-pane>
         <el-tab-pane label="🔧 设备预约" name="devices">
           <TeamDevices :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :devices="detail.devices" />

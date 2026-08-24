@@ -200,10 +200,16 @@ r.get('/:id/plans', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const members = db.prepare(
-    `SELECT u.id, u.nickname, tm.role_id, tr.name AS role_name FROM team_member tm
-     JOIN user u ON u.id = tm.user_id LEFT JOIN team_role tr ON tr.id = tm.role_id
-     WHERE tm.team_id = ? ORDER BY (tm.role_id IS NULL) DESC, tr.level DESC, tm.join_time`
+    `SELECT u.id, u.nickname FROM team_member tm JOIN user u ON u.id = tm.user_id
+     WHERE tm.team_id = ? ORDER BY tm.join_time`
   ).all(ctx.team.id);
+  // 多角色聚合：user_id → 角色名数组（最高 level 优先）
+  const roleMap = {};
+  for (const x of db.prepare(
+    `SELECT tmr.user_id, tr.name AS role_name FROM team_member_role tmr
+     JOIN team_role tr ON tr.id = tmr.role_id
+     WHERE tmr.team_id = ? ORDER BY tr.level DESC, tr.id`
+  ).all(ctx.team.id)) (roleMap[x.user_id] ||= []).push(x.role_name);
 
   const rows = members.map((m) => {
     const schedules = db.prepare(
@@ -231,7 +237,7 @@ r.get('/:id/plans', (req, res) => {
         phases: plan.phases.map((p) => ({ phase: p.phase, date: p.date, done: p.tasks.filter((t) => t.done).length, total: p.tasks.length })),
       };
     });
-    return { user_id: m.id, nickname: m.nickname, role_name: m.role_name, is_owner: m.id === ctx.team.owner_id, schedules, studies };
+    return { user_id: m.id, nickname: m.nickname, role_names: roleMap[m.id] || [], role_name: (roleMap[m.id] || [])[0] || null, is_owner: m.id === ctx.team.owner_id, schedules, studies };
   });
   res.json(rows);
 });
