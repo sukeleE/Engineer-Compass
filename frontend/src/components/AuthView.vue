@@ -1,5 +1,5 @@
 <script setup>
-// 登录 / 注册：邮箱验证码（推荐，未注册自动注册）+ 账号密码（兼容旧账号）
+// 登录 / 注册：邮箱验证码（推荐，未注册自动注册）+ 邮箱密码（登录名由邮箱自动生成）
 import { ref, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -69,20 +69,22 @@ async function emailLogin() {
   }
 }
 
-// ---- 账号密码（兼容旧账号） ----
+// ---- 邮箱 + 密码（登录 / 注册；登录名由邮箱前缀自动生成，无需填写） ----
 const mode = ref('login'); // login | register
-const form = ref({ username: '', password: '', nickname: '', password2: '' });
+const form = ref({ email: '', password: '', nickname: '', password2: '' });
 
 async function submit() {
   const f = form.value;
-  if (!f.username.trim() || !f.password) return ElMessage.warning('请输入用户名和密码');
+  const mail = f.email.trim();
+  if (!EMAIL_RE.test(mail)) return ElMessage.warning('请输入正确的邮箱地址');
+  if (!f.password) return ElMessage.warning('请输入密码');
   if (mode.value === 'register' && f.password !== f.password2) return ElMessage.warning('两次密码不一致');
   loading.value = true;
   try {
     const apiFn = mode.value === 'login' ? api.login : api.register;
     const card = mode.value === 'login'
-      ? { username: f.username.trim(), password: f.password }
-      : { username: f.username.trim(), password: f.password, nickname: f.nickname.trim() };
+      ? { email: mail, password: f.password }
+      : { email: mail, password: f.password, nickname: f.nickname.trim() };
     const res = await apiFn(card);
     setAuth(res.token, res.user);
     ElMessage.success(mode.value === 'login' ? `欢迎回来，${res.user.nickname}` : '注册成功，已自动登录');
@@ -128,14 +130,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <p class="email-tip">💡 未注册的邮箱会自动创建账号，并把本机已生成的备赛/学习计划关联到该账号；同一账号可在任何设备登录查看。</p>
         </el-tab-pane>
 
-        <!-- Tab2 账号密码（兼容旧账号） -->
-        <el-tab-pane label="🔑 账号密码" name="pwd">
+        <!-- Tab2 邮箱 + 密码 -->
+        <el-tab-pane label="🔑 邮箱+密码" name="pwd">
           <el-form label-position="top" @submit.prevent>
-            <el-form-item label="用户名">
-              <el-input v-model="form.username" placeholder="2-20 位字母/数字/下划线" @keyup.enter="submit" />
+            <el-form-item label="邮箱">
+              <el-input v-model="form.email" placeholder="you@example.com" @keyup.enter="submit" />
             </el-form-item>
             <el-form-item v-if="mode === 'register'" label="昵称（组内显示）">
-              <el-input v-model="form.nickname" placeholder="选填，默认同用户名" @keyup.enter="submit" />
+              <el-input v-model="form.nickname" placeholder="选填，默认取邮箱前缀" @keyup.enter="submit" />
             </el-form-item>
             <el-form-item label="密码">
               <el-input v-model="form.password" type="password" show-password placeholder="至少 6 位" @keyup.enter="submit" />

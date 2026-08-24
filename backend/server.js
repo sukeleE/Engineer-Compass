@@ -11,6 +11,7 @@ import auth from './routes/auth.js';
 import notes from './routes/notes.js';
 import team from './routes/team.js';
 import teamCollab from './routes/teamCollab.js';
+import feedback from './routes/feedback.js';
 import { hasSMTP } from './routes/mailer.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
@@ -28,6 +29,7 @@ app.use('/api/auth', auth);
 app.use('/api/notes', notes);
 app.use('/api/team', team);
 app.use('/api/team', teamCollab);
+app.use('/api/feedback', feedback);
 
 // 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；mail=true 表示邮箱登录发真邮件）
 app.get('/api/health', (req, res) => {

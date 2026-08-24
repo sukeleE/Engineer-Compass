@@ -20,10 +20,10 @@ export function authRequired(req, res, next) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token || '';
   if (!token) return res.status(401).json({ error: '未登录' });
   const s = db.prepare(
-    'SELECT s.user_id, u.username, u.nickname, u.is_admin FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?'
+    'SELECT s.user_id, u.username, u.nickname, u.is_admin, u.email, u.avatar FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?'
   ).get(token);
   if (!s) return res.status(401).json({ error: '登录已失效，请重新登录' });
-  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, token };
+  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, email: s.email || '', avatar: s.avatar || null, token };
   next();
 }
 
@@ -32,9 +32,9 @@ export function optionalAuth(req, res, next) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return next();
   const s = db.prepare(
-    'SELECT s.user_id, u.username, u.nickname, u.is_admin FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?'
+    'SELECT s.user_id, u.username, u.nickname, u.is_admin, u.email, u.avatar FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?'
   ).get(token);
-  if (s) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, token };
+  if (s) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, email: s.email || '', avatar: s.avatar || null, token };
   next();
 }
 

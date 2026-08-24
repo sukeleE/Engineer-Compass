@@ -92,21 +92,22 @@ CREATE TABLE IF NOT EXISTS user_study (
 -- 表7 user 用户表（登录）
 CREATE TABLE IF NOT EXISTS user (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT UNIQUE NOT NULL,          -- 登录名（唯一）
+  username      TEXT UNIQUE NOT NULL,          -- 登录名（唯一；注册时由邮箱前缀自动生成）
   password_hash TEXT NOT NULL,                 -- scrypt: salt$hash(hex)
   nickname      TEXT,                          -- 昵称
-  email         TEXT,                          -- 邮箱（验证码登录；唯一索引允许多 NULL）
+  email         TEXT,                          -- 邮箱（登录/绑定；唯一索引允许多 NULL）
+  avatar        TEXT,                          -- 头像（128px JPEG 压缩 dataURL，~10-20KB）
   is_admin      INTEGER DEFAULT 0,             -- 系统管理员（可进管理端）
   create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 表19 email_code 邮箱验证码（注册/登录用，一次性、10分钟过期）
+-- 表19 email_code 邮箱验证码（登录/注册/绑定邮箱用，一次性、10分钟过期）
 -- （user.email 唯一索引在 database.js 迁移链后创建，兼容老库先 ALTER 再加列的启动顺序）
 CREATE TABLE IF NOT EXISTS email_code (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   email         TEXT NOT NULL,                   -- 收件邮箱
   code          TEXT NOT NULL,                   -- 6 位数字验证码
-  purpose       TEXT NOT NULL,                   -- login / register
+  purpose       TEXT NOT NULL,                   -- login / register / bind（bind=绑定/更换邮箱）
   expire_at     INTEGER NOT NULL,                -- 过期时间戳（epoch ms）
   created_at_ms INTEGER NOT NULL,                -- 发送时间戳（epoch ms，冷却判断用）
   create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -260,6 +261,15 @@ CREATE TABLE IF NOT EXISTS team_plan (
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_team_plan_team ON team_plan(team_id);
+
+-- 表22 feedback 用户反馈（提交后邮件转发给管理员 FEEDBACK_TO，库内留档）
+CREATE TABLE IF NOT EXISTS feedback (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  content       TEXT NOT NULL,                   -- 反馈内容（1-5000 字）
+  contact_email TEXT,                            -- 反馈时用户邮箱快照
+  create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE INDEX IF NOT EXISTS idx_process_comp  ON competition_process(comp_id);
 CREATE INDEX IF NOT EXISTS idx_stack_comp    ON tech_stack(comp_id);

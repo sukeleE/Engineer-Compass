@@ -27,6 +27,7 @@ migCol('team_message', 'attachments', "ALTER TABLE team_message ADD COLUMN attac
 migCol('user_study', 'user_id', 'ALTER TABLE user_study ADD COLUMN user_id INTEGER');
 migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不支持 ADD COLUMN UNIQUE，唯一性用索引保证
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email)');
+migCol('user', 'avatar', 'ALTER TABLE user ADD COLUMN avatar TEXT'); // 头像 dataURL（feedback 表靠 schema.sql IF NOT EXISTS，无需迁移）
 
 export default db;
 export { DB_PATH };

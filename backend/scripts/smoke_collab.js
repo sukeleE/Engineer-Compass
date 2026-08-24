@@ -28,8 +28,8 @@ const VID = 'AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tcDJhaXYxAAAAHGZ0eXBtcDQyAAAAAG1wNDJ
 (async () => {
   // ========== 1. 计划同步 ==========
   console.log('▶ 1 计划同步');
-  const ra = await req('POST', '/auth/register', { username: `p_${N}a`, password: 'pass1234', nickname: '组长阿明' });
-  const rb = await req('POST', '/auth/register', { username: `p_${N}b`, password: 'pass1234', nickname: '组员小丽' });
+  const ra = await req('POST', '/auth/register', { username: `p_${N}a`, password: 'pass1234', email: `p_${N}a@test.dev`, nickname: '组长阿明' });
+  const rb = await req('POST', '/auth/register', { username: `p_${N}b`, password: 'pass1234', email: `p_${N}b@test.dev`, nickname: '组员小丽' });
   const ta = json(ra).token, tb = json(rb).token;
   ok(!!ta && !!tb, '注册两位用户');
   const rc = await req('POST', '/team', { name: `同步组_${N}` }, ta);
@@ -84,7 +84,7 @@ const VID = 'AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tcDJhaXYxAAAAHGZ0eXBtcDQyAAAAAG1wNDJ
   ok(rl4.status === 413, '附件>25MB 拒绝(413)', `status=${rl4.status}`);
   // 无 progress 权限角色 → 403（复用上一轮验证思路：新建只读角色）
   // 注册第三人加入，组长将其改为「只读观察员」角色（仅 message 权限，无 progress）
-  const rc3 = await req('POST', '/auth/register', { username: `p_${N}c`, password: 'pass1234', nickname: '路人丙' });
+  const rc3 = await req('POST', '/auth/register', { username: `p_${N}c`, password: 'pass1234', email: `p_${N}c@test.dev`, nickname: '路人丙' });
   const tc3 = json(rc3).token;
   const rj = await req('POST', '/team/join', { invite_code: team.invite_code }, tc3);
   ok(rj.status === 201, '第三人加入（默认组员角色）');

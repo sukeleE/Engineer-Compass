@@ -16,7 +16,10 @@ import auth from './auth.js';
         <router-link to="/schedule">📅 日程规划</router-link>
         <router-link to="/team">🏗️ 项目小组</router-link>
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
-          <span class="me-avatar">{{ auth.user?.nickname?.charAt(0) || '🔓' }}</span>
+          <span class="me-avatar">
+            <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
+            <template v-else>{{ auth.user?.nickname?.charAt(0) || '🔓' }}</template>
+          </span>
           <span class="me-name">{{ auth.user?.nickname || '登录' }}</span>
         </router-link>
       </nav>
@@ -34,8 +37,9 @@ import auth from './auth.js';
   &.logged { border-color: #2563eb55; background: #2563eb0d; }
   .me-avatar {
     width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
-    align-items: center; justify-content: center;
+    align-items: center; justify-content: center; overflow: hidden;
     background: #2563eb; color: #fff; font-size: 12px; flex-shrink: 0;
+    img { width: 100%; height: 100%; object-fit: cover; }
   }
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 }

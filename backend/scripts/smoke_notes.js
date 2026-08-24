@@ -53,7 +53,7 @@ ok('非法状态回落为空', r.status === 200 && r.data.id === anonNoteId);
 
 // 7) 注册测试账号（密码登录）
 console.log('— 登录用户与匿名隔离');
-r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y, password: 'test123456' }) });
+r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y, password: 'test123456', email: Y + '@test.dev' }) });
 ok('注册测试账号', r.status === 201, `got ${r.status} ${r.data.error || ''}`);
 const token = r.data.token;
 const userId = r.data.user?.id;

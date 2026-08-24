@@ -71,6 +71,9 @@ export const api = {
   sendCode: (email, purpose = 'login') => req('/auth/send-code', { method: 'POST', body: JSON.stringify({ email, purpose }) }),
   emailLogin: (email, code) => req('/auth/email-login', { method: 'POST', body: JSON.stringify({ email, code }) }),
   me: () => req('/auth/me'),
+  updateProfile: (card) => req('/auth/profile', { method: 'PUT', body: JSON.stringify(card) }),
+  bindEmail: (card) => req('/auth/email', { method: 'PUT', body: JSON.stringify(card) }),
+  feedback: (card) => req('/feedback', { method: 'POST', body: JSON.stringify(card) }),
   // 项目小组
   teamCreate: (card) => req('/team', { method: 'POST', body: JSON.stringify(card) }),
   teamJoin: (inviteCode) => req('/team/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),

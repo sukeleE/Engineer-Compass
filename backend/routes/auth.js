@@ -10,12 +10,29 @@ const r = Router();
 const CODE_TTL = 10 * 60 * 1000; // 验证码 10 分钟有效
 const CODE_COOLDOWN = 60 * 1000; // 同一邮箱 60 秒内只能发一次
 
+// 邮箱 → 登录名：取邮箱前缀（去非法字符），冲突加数字后缀（email-login 自动注册与密码注册共用）
+function genUsername(mail) {
+  let base = (mail.split('@')[0] || 'user').replace(/[^A-Za-z0-9_]/g, '_').slice(0, 16);
+  if (!/^[A-Za-z0-9_]{2,20}$/.test(base)) base = 'user';
+  let name = base;
+  for (let n = 1; db.prepare('SELECT id FROM user WHERE username = ?').get(name); n++) {
+    name = `${base}${n}`.slice(0, 20);
+  }
+  return name;
+}
+
+// 返回给前端的 user 形状（统一含 email / avatar，avatar 未设置为 null）
+const userCard = (u) => ({
+  id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin,
+  email: u.email || '', avatar: u.avatar || null,
+});
+
 // POST /api/auth/send-code — 发送邮箱验证码（注册/登录共用；未注册邮箱登录时自动注册）
 r.post('/send-code', async (req, res) => {
   const { email, purpose = 'login' } = req.body || {};
   const mail = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: '邮箱格式不正确' });
-  if (!['login', 'register'].includes(purpose)) return res.status(400).json({ error: 'purpose 仅支持 login/register' });
+  if (!['login', 'register', 'bind'].includes(purpose)) return res.status(400).json({ error: 'purpose 仅支持 login/register/bind' });
 
   // 冷却：同邮箱 60s 内重复发送 → 429
   const last = db.prepare('SELECT created_at_ms FROM email_code WHERE email = ? ORDER BY id DESC LIMIT 1').get(mail);
@@ -58,16 +75,11 @@ r.post('/email-login', async (req, res) => {
   let user = db.prepare('SELECT * FROM user WHERE email = ?').get(mail);
   let migrated = 0;
   if (!user) {
-    // 自动注册：用户名取邮箱前缀（去非法字符），冲突加数字后缀
-    let base = (mail.split('@')[0] || 'user').replace(/[^A-Za-z0-9_]/g, '_').slice(0, 16);
-    if (!/^[A-Za-z0-9_]{2,20}$/.test(base)) base = 'user';
-    let name = base;
-    for (let n = 1; db.prepare('SELECT id FROM user WHERE username = ?').get(name); n++) {
-      name = `${base}${n}`.slice(0, 20);
-    }
+    // 自动注册：用户名由邮箱前缀生成（冲突加数字后缀）
+    const name = genUsername(mail);
     const rr = db.prepare('INSERT INTO user (username, password_hash, nickname, email) VALUES (?,?,?,?)')
       .run(name, hashPassword(randomBytes(16).toString('hex')), mail.split('@')[0], mail);
-    user = { id: rr.lastInsertRowid, username: name, nickname: mail.split('@')[0], is_admin: 0 };
+    user = { id: rr.lastInsertRowid, username: name, nickname: mail.split('@')[0], is_admin: 0, email: mail, avatar: null };
     // 把本机匿名数据接管到该账号：'local' 备赛计划 + 匿名学习日程 + 匿名日程笔记
     // 笔记按 (user_id, note_date) 唯一，账号已有同日笔记的 'local' 行保留（仍可通过列表查询看到）
     migrated += db.prepare("UPDATE user_schedule SET user_id = ? WHERE user_id = 'local'").run(user.id).changes;
@@ -80,57 +92,91 @@ r.post('/email-login', async (req, res) => {
 
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, user.id);
-  res.json({
-    token,
-    user: { id: user.id, username: user.username, nickname: user.nickname, is_admin: user.is_admin, email: mail },
-    migrated,
-  });
+  res.json({ token, user: userCard(user), migrated });
 });
 
-// POST /api/auth/register — 注册（密码；email 选填，填了之后也可用邮箱验证码登录）
+// POST /api/auth/register — 注册（邮箱 + 密码；登录名由邮箱前缀自动生成）
 r.post('/register', (req, res) => {
-  const { username, password, nickname, email } = req.body || {};
-  const name = String(username || '').trim();
-  if (!/^[A-Za-z0-9_]{2,20}$/.test(name)) {
-    return res.status(400).json({ error: '用户名需为 2-20 位字母/数字/下划线' });
+  const { email, password, nickname } = req.body || {};
+  const mail = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+    return res.status(400).json({ error: '邮箱格式不正确' });
   }
   if (!password || String(password).length < 6) {
     return res.status(400).json({ error: '密码至少 6 位' });
   }
-  const exists = db.prepare('SELECT id FROM user WHERE username = ?').get(name);
-  if (exists) return res.status(409).json({ error: '用户名已存在' });
-  const mail = email ? String(email).trim().toLowerCase() : '';
-  if (mail) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: '邮箱格式不正确' });
-    if (db.prepare('SELECT id FROM user WHERE email = ?').get(mail)) {
-      return res.status(409).json({ error: '该邮箱已被绑定，可直接用邮箱验证码登录' });
-    }
+  if (db.prepare('SELECT id FROM user WHERE email = ?').get(mail)) {
+    return res.status(409).json({ error: '该邮箱已被绑定，可直接用邮箱验证码登录' });
   }
+  const name = genUsername(mail);
 
   const r2 = db.prepare('INSERT INTO user (username, password_hash, nickname, email) VALUES (?,?,?,?)')
-    .run(name, hashPassword(password), (nickname || '').trim() || name, mail || null);
+    .run(name, hashPassword(password), (nickname || '').trim() || name, mail);
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, r2.lastInsertRowid);
   res.status(201).json({
-    token, user: { id: r2.lastInsertRowid, username: name, nickname: (nickname || '').trim() || name, is_admin: 0 },
+    token, user: { id: r2.lastInsertRowid, username: name, nickname: (nickname || '').trim() || name, is_admin: 0, email: mail, avatar: null },
   });
 });
 
-// POST /api/auth/login — 登录
+// POST /api/auth/login — 登录（邮箱 + 密码；兼容存量 username + 密码）
 r.post('/login', (req, res) => {
-  const { username, password } = req.body || {};
-  const u = db.prepare('SELECT * FROM user WHERE username = ?').get(String(username || '').trim());
+  const { username, email, password } = req.body || {};
+  // 前端统一传 email 字段；存量调用传 username。username 精确匹配（老账号可能含大写）；email 入库统一小写 → 小写匹配
+  const raw = String(username ?? email ?? '').trim();
+  const u = db.prepare('SELECT * FROM user WHERE username = ? OR email = ?').get(raw, raw.toLowerCase());
   if (!u || !verifyPassword(password || '', u.password_hash)) {
-    return res.status(401).json({ error: '用户名或密码错误' });
+    return res.status(401).json({ error: '邮箱或密码错误' });
   }
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, u.id);
-  res.json({ token, user: { id: u.id, username: u.username, nickname: u.nickname, is_admin: u.is_admin } });
+  res.json({ token, user: userCard(u) });
+});
+
+// PUT /api/auth/profile — 更新昵称 / 头像（authRequired）
+r.put('/profile', authRequired, (req, res) => {
+  const { nickname, avatar } = req.body || {};
+  const cols = [], vals = [];
+  if (nickname !== undefined) {
+    const nk = String(nickname).trim();
+    if (!nk) return res.status(400).json({ error: '昵称不能为空' });
+    if (nk.length > 20) return res.status(400).json({ error: '昵称最多 20 个字符' });
+    cols.push('nickname = ?'); vals.push(nk);
+  }
+  if (avatar !== undefined) {
+    if (avatar && !/^data:image\/(jpeg|png|webp);base64,/.test(String(avatar))) {
+      return res.status(400).json({ error: '头像格式不支持（仅支持 jpeg/png/webp 的 dataURL）' });
+    }
+    if (String(avatar).length > 150000) return res.status(400).json({ error: '头像过大，请更换小一点的文件' });
+    cols.push('avatar = ?'); vals.push(avatar ? String(avatar) : null); // null/'' → 清除头像
+  }
+  if (!cols.length) return res.status(400).json({ error: '没有可更新的内容' });
+  vals.push(req.user.id);
+  db.prepare(`UPDATE user SET ${cols.join(', ')} WHERE id = ?`).run(...vals);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.json({ user: userCard(u) });
+});
+
+// PUT /api/auth/email — 绑定 / 更换邮箱（新邮箱验证码校验，purpose=bind）
+r.put('/email', authRequired, (req, res) => {
+  const { email, code } = req.body || {};
+  const mail = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: '邮箱格式不正确' });
+  const row = db.prepare('SELECT * FROM email_code WHERE email = ? AND code = ? AND purpose = ? AND expire_at > ? ORDER BY id DESC LIMIT 1')
+    .get(mail, String(code || '').trim(), 'bind', Date.now());
+  if (!row) return res.status(400).json({ error: '验证码错误或已过期，请重新获取' });
+  db.prepare('DELETE FROM email_code WHERE email = ?').run(mail); // 一次性使用
+  // 唯一性先查后改（依赖 UNIQUE 索引兜底会抛约束异常 → 500）
+  const dup = db.prepare('SELECT id FROM user WHERE email = ? AND id != ?').get(mail, req.user.id);
+  if (dup) return res.status(409).json({ error: '该邮箱已被其他账号绑定' });
+  db.prepare('UPDATE user SET email = ? WHERE id = ?').run(mail, req.user.id);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.json({ user: userCard(u) });
 });
 
 // GET /api/auth/me — 当前用户（含所属小组摘要）
 r.get('/me', authRequired, (req, res) => {
-  const u = db.prepare('SELECT id, username, nickname, email, is_admin FROM user WHERE id = ?').get(req.user.id) || req.user;
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id) || req.user;
   const teams = db.prepare(
     `SELECT t.id, t.name, t.desc, t.invite_code, t.owner_id, tm.role_id, tr.name AS role_name, tr.level AS role_level,
             (SELECT COUNT(*) FROM team_member m2 WHERE m2.team_id = t.id) AS member_count
@@ -138,7 +184,7 @@ r.get('/me', authRequired, (req, res) => {
      LEFT JOIN team_role tr ON tr.id = tm.role_id
      WHERE tm.user_id = ? ORDER BY t.create_time DESC`
   ).all(req.user.id);
-  res.json({ user: u, teams: teams.map((t) => ({
+  res.json({ user: userCard(u), teams: teams.map((t) => ({
     ...t, is_owner: t.owner_id === req.user.id,
   })) });
 });

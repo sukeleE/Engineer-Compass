@@ -16,6 +16,12 @@ export function setAuth(token, user) {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
+// 局部更新用户信息（昵称/头像/邮箱变更后全站同步；勿用 setAuth——会覆盖 token 且可能缺字段）
+export function patchUser(patch) {
+  auth.user = { ...(auth.user || {}), ...patch };
+  localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+}
+
 export function clearAuth() {
   auth.token = '';
   auth.user = null;

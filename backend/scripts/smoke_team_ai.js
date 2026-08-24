@@ -28,10 +28,10 @@ ok('有 active 竞赛', Array.isArray(r.data) && r.data.length > 0);
 const comp = r.data[0];
 
 // 1) 注册组长 + 组员
-r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_a', password: 'test123456' }) });
+r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_a', password: 'test123456', email: Y + '_a@test.dev' }) });
 ok('注册组长', r.status === 201, `got ${r.status}`);
 const tokA = r.data.token;
-r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_b', password: 'test123456' }) });
+r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_b', password: 'test123456', email: Y + '_b@test.dev' }) });
 ok('注册组员', r.status === 201, `got ${r.status}`);
 const tokB = r.data.token;
 const uidB = r.data.user.id;
