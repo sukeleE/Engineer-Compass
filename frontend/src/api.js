@@ -99,11 +99,11 @@ export const api = {
   teamMyTasks: () => req('/team/my-tasks'),
   // AI 智能分组：按成员信息+部门+竞赛建议分组（仅建议，应用复用 teamMemberRole）
   teamAiGrouping: (id) => req(`/team/${id}/ai-grouping`, { method: 'POST' }),
-  teamLog: (id, content) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify({ content }) }),
+  teamLog: (id, card) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify(card) }),
   teamLogs: (id) => req(`/team/${id}/logs`),
   // 讨论
   teamMessages: (id) => req(`/team/${id}/messages`),
-  teamMessage: (id, content) => req(`/team/${id}/message`, { method: 'POST', body: JSON.stringify({ content }) }),
+  teamMessage: (id, card) => req(`/team/${id}/message`, { method: 'POST', body: JSON.stringify(card) }),
   teamMessageDelete: (id, mid) => req(`/team/${id}/message/${mid}`, { method: 'DELETE' }),
   teamLogComment: (id, lid, content) => req(`/team/${id}/comment/log/${lid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   teamMessageComment: (id, mid, content) => req(`/team/${id}/comment/message/${mid}`, { method: 'POST', body: JSON.stringify({ content }) }),

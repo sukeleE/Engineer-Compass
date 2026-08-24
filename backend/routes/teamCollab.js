@@ -28,6 +28,8 @@ function sanitizeAttachments(attachments) {
 }
 
 const parseAtt = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
+// 旧版前端把 {content, attachments} 整个对象存库串化为 "[object Object]"（文字已不可恢复），读取时清洗为空串
+const cleanContent = (s) => (String(s || '') === '[object Object]' ? '' : String(s || ''));
 
 // 批量挂评论：把 type（log/message）目标的评论按 target_id 分组附加
 function attachComments(teamId, type, targets) {
@@ -134,6 +136,9 @@ r.post('/:id/log', (req, res) => {
   const deny = requirePerm(ctx, res, 'progress');
   if (deny) return deny;
   const { content, attachments } = req.body || {};
+  if (content !== undefined && typeof content !== 'string') {
+    return res.status(400).json({ error: '汇报内容格式错误' });
+  }
   if (!String(content || '').replace(/<[^>]*>/g, '').trim() && !(attachments || []).length) {
     return res.status(400).json({ error: '汇报内容或附件至少填写一项' });
   }
@@ -152,7 +157,7 @@ r.get('/:id/logs', (req, res) => {
     `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id, u.nickname
      FROM progress_log l JOIN user u ON u.id = l.user_id
      WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT 100`
-  ).all(ctx.team.id).map((l) => ({ ...l, attachments: parseAtt(l.attachments) }));
+  ).all(ctx.team.id).map((l) => ({ ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments) }));
   res.json(attachComments(ctx.team.id, 'log', rows));
 });
 
@@ -209,7 +214,7 @@ r.get('/:id/messages', (req, res) => {
     `SELECT m.id, m.content, m.attachments, m.create_time, u.id AS user_id, u.nickname
      FROM team_message m JOIN user u ON u.id = m.user_id
      WHERE m.team_id = ? ORDER BY m.create_time DESC LIMIT 200`
-  ).all(ctx.team.id).map((m) => ({ ...m, attachments: parseAtt(m.attachments) }));
+  ).all(ctx.team.id).map((m) => ({ ...m, content: cleanContent(m.content), attachments: parseAtt(m.attachments) }));
   res.json(attachComments(ctx.team.id, 'message', rows));
 });
 
@@ -219,6 +224,9 @@ r.post('/:id/message', (req, res) => {
   const deny = requirePerm(ctx, res, 'message');
   if (deny) return deny;
   const { content, attachments } = req.body || {};
+  if (content !== undefined && typeof content !== 'string') {
+    return res.status(400).json({ error: '消息内容格式错误' });
+  }
   if (!String(content || '').trim() && !(attachments || []).length) {
     return res.status(400).json({ error: '消息内容或图片至少填写一项' });
   }
