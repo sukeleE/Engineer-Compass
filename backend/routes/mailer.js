@@ -1,4 +1,7 @@
 // 邮件发送（零依赖）：SMTP 客户端（node:net / node:tls 内置实现）+ 开发模式降级
+// ⚠️ 时序敏感：本模块顶层在 import 时读取 process.env（模块加载早于任何入口代码）。
+//    必须用 `node --env-file-if-exists=.env` 启动（package.json start / deploy.sh 已带），
+//    否则 .env 里的 SMTP_* 在模块加载时还是空 → hasSMTP 恒 false，验证码退回 dev 模式。
 // .env 配置：
 //   SMTP_HOST=smtp.qq.com  SMTP_PORT=465  SMTP_USER=xxx@qq.com  SMTP_PASS=授权码  SMTP_FROM=可选（默认 SMTP_USER）
 // 未配置 SMTP → dev 模式：控制台打印邮件内容，sendMail 返回 { dev: true }（调用方把验证码带给前端）

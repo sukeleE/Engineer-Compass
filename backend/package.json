@@ -5,11 +5,11 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --env-file-if-exists=.env server.js",
     "import": "node scripts/import_data.js"
   },
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.9"
   },
   "dependencies": {
     "cors": "^2.8.5",

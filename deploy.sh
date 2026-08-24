@@ -26,9 +26,12 @@ git pull
 echo "✅ 代码已更新（当前: $(git log --oneline -1)）"
 
 # 3. 后端：装依赖（没变则秒级）+ 重启（启动时自动迁移表结构，无需手动操作）
+# 注意：--node-args 指定 --env-file-if-exists 让 .env 在进程最早期加载（早于所有模块 import，
+#      否则 mailer/database 在模块加载时读 env 会是空值 → SMTP 与 DB_PATH 失效）
 cd "$BACKEND_DIR"
 npm install --omit=dev
-pm2 restart compass --update-env || pm2 start server.js --name compass --cwd "$BACKEND_DIR"
+pm2 describe compass >/dev/null 2>&1 && pm2 delete compass
+pm2 start server.js --name compass --cwd "$BACKEND_DIR" --node-args="--env-file-if-exists=.env"
 echo "✅ 后端已重启"
 
 # 4. 前端：构建 + 发布到 Nginx
