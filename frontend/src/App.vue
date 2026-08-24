@@ -44,3 +44,18 @@ import auth from './auth.js';
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 }
 </style>
+
+<!-- 全局弹窗样式（append-to-body 的弹窗脱离组件树，scoped 样式够不到） -->
+<style>
+.editor-dlg.el-dialog {
+  height: 640px; max-height: calc(100vh - 40px);
+  display: flex; flex-direction: column;
+}
+.editor-dlg .el-dialog__header { flex-shrink: 0; }
+.editor-dlg .el-dialog__body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.editor-dlg .el-dialog__body > .dn-tools,
+.editor-dlg .el-dialog__body > .dlg-status-sel,
+.editor-dlg .el-dialog__body > .el-select { flex-shrink: 0; }
+.editor-dlg .rich-editor { flex: 1; min-height: 0; }
+.editor-dlg .el-dialog__footer { flex-shrink: 0; }
+</style>

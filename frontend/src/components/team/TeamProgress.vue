@@ -150,7 +150,7 @@ reload().catch((e) => ElMessage.error(e.message));
     </div>
 
     <!-- 汇报编写弹窗（富文本 + 附件，与浏览区分开） -->
-    <el-dialog v-model="reportDlg" :title="editingLogId ? '✏️ 编辑进度汇报' : '📝 编写进度汇报'" width="680px" top="4vh" :close-on-click-modal="false"
+    <el-dialog v-model="reportDlg" :title="editingLogId ? '✏️ 编辑进度汇报' : '📝 编写进度汇报'" width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false"
       destroy-on-close append-to-body>
       <RichEditor v-model="reportHtml" placeholder="今天做了什么？卡在哪？下一步？（支持加粗/列表/插入图片）" />
       <div class="rp-tools">
