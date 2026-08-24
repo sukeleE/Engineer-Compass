@@ -254,13 +254,15 @@ onMounted(() => {
       <!-- ✅ 当日完成事项：按类型 emoji 分组 -->
       <div class="dlg-items">
         <template v-if="dlgHasItems">
-          <div v-for="key in ['comp', 'study', 'team']" :key="key" v-if="calDlgItems[key].length" class="di-group">
-            <div class="di-title">{{ TYPE_META[key].emoji }} {{ TYPE_META[key].label }}</div>
-            <div v-for="(it, i) in calDlgItems[key]" :key="i" class="di-item">
-              <b>{{ it.plan_name }}</b>
-              <span class="di-task">{{ it.task }}</span>
+          <template v-for="key in ['comp', 'study', 'team']" :key="key">
+            <div v-if="calDlgItems[key].length" class="di-group">
+              <div class="di-title">{{ TYPE_META[key].emoji }} {{ TYPE_META[key].label }}</div>
+              <div v-for="(it, i) in calDlgItems[key]" :key="i" class="di-item">
+                <b>{{ it.plan_name }}</b>
+                <span class="di-task">{{ it.task }}</span>
+              </div>
             </div>
-          </div>
+          </template>
         </template>
         <div v-else class="di-none">✨ 这天没有完成的事项</div>
       </div>

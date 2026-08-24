@@ -10,6 +10,10 @@ import TeamDetail from './TeamDetail.vue';
 const router = useRouter();
 const route = useRoute();
 
+const teams = ref([]);
+const loading = ref(false);
+const selTeam = ref(null); // 选中的小组对象
+
 // ?team=<id> 深链：从「我的」小组卡片直达对应工作台；选中变化同步回 URL
 function selectByQuery(id) {
   const t = teams.value.find((x) => x.id === Number(id));
@@ -19,9 +23,6 @@ watch(selTeam, (t) => {
   if (t) router.replace({ query: { ...route.query, team: t.id } }).catch(() => {});
 });
 watch(() => route.query.team, (id) => { if (id) selectByQuery(id); });
-const teams = ref([]);
-const loading = ref(false);
-const selTeam = ref(null); // 选中的小组对象
 const showCreate = ref(false);
 const showJoin = ref(false);
 const newTeam = ref({ name: '', desc: '', comp_id: null });
