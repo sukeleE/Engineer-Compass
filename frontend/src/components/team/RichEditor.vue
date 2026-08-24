@@ -61,8 +61,13 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .rich-editor { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff;
-  :deep(.re-toolbar) { border-bottom: 1px solid var(--border); }
-  :deep(.re-body) { height: 180px; overflow-y: hidden; }
+  :deep(.re-toolbar) {
+    border-bottom: 1px solid var(--border);
+    // 工具栏紧凑化：压小内边距/按钮，腾出空间给正文
+    .w-e-toolbar { padding: 3px 8px; }
+    .w-e-bar-item { padding: 2px 3px; }
+  }
+  :deep(.re-body) { height: 300px; overflow-y: hidden; }
   :deep(.w-e-text-container) { z-index: 1; }
 }
 </style>
