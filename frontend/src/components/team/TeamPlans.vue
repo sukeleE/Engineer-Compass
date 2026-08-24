@@ -48,10 +48,8 @@ onMounted(() => load());
       <div class="mp-head">
         <b class="u-link" @click="toProfile(m)">{{ m.nickname }}</b>
         <el-tag v-if="m.is_owner" size="small" type="warning">👑 组长</el-tag>
-        <template v-else>
-          <el-tag v-for="rn in m.role_names || []" :key="rn" size="small" style="margin-right:4px">{{ rn }}</el-tag>
-          <el-tag v-if="!(m.role_names || []).length" size="small">组员</el-tag>
-        </template>
+        <el-tag v-for="rn in m.role_names || []" :key="rn" size="small" style="margin-right:4px">{{ rn }}</el-tag>
+        <el-tag v-if="!(m.role_names || []).length && !m.is_owner" size="small">组员</el-tag>
         <span class="mp-count">
           备赛 {{ m.schedules.length }} · 学习 {{ m.studies.length }}
         </span>

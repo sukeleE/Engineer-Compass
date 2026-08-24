@@ -165,7 +165,7 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
             </div>
             <div class="tl-meta">
               {{ t.member_count }} 名成员
-              <template v-if="!t.is_owner && (t.role_names || []).length">
+              <template v-if="(t.role_names || []).length">
                 <el-tag v-for="rn in t.role_names" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
               </template>
             </div>

@@ -294,7 +294,7 @@ function checkRoleIds(ctx, res, ids) {
   return [...new Set(ids)];
 }
 
-// POST /api/team/:id/member — 调整成员角色（member 权限；role_ids 数组替换全部角色，兼容旧 role_id 单值）
+// POST /api/team/:id/member — 调整成员角色（member 权限；role_ids 数组替换全部角色，兼容旧 role_id 单值；组长也可被分配多角色）
 r.post('/:id/member', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   const deny = requirePerm(ctx, res, 'member');
@@ -302,7 +302,6 @@ r.post('/:id/member', (req, res) => {
   const { user_id, role_ids, role_id } = req.body || {};
   const target = db.prepare('SELECT * FROM team_member WHERE team_id = ? AND user_id = ?').get(ctx.team.id, Number(user_id));
   if (!target) return res.status(404).json({ error: '成员不存在' });
-  if (Number(user_id) === ctx.team.owner_id) return res.status(400).json({ error: '不能修改组长的角色' });
   const ids = checkRoleIds(ctx, res, Array.isArray(role_ids) ? role_ids.map(Number) : (role_id != null ? [Number(role_id)] : []));
   if (!ids) return;
   db.exec('BEGIN');
@@ -315,11 +314,10 @@ r.post('/:id/member', (req, res) => {
   res.json({ message: '已更新成员角色' });
 });
 
-// POST /api/team/:id/member/self-role — 成员自选角色（≤3，仅限自己；组长无需自选）
+// POST /api/team/:id/member/self-role — 成员自选角色（≤3，仅限自己；组长也可自选多角色）
 r.post('/:id/member/self-role', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
-  if (ctx.isOwner) return res.status(400).json({ error: '组长无需自选角色' });
   const { role_ids } = req.body || {};
   const ids = checkRoleIds(ctx, res, Array.isArray(role_ids) ? role_ids.map(Number) : []);
   if (!ids) return;
@@ -342,6 +340,7 @@ r.delete('/:id/member/:uid', (req, res) => {
   if (uid === ctx.team.owner_id) return res.status(400).json({ error: '不能移除组长' });
   const r2 = db.prepare('DELETE FROM team_member WHERE team_id = ? AND user_id = ?').run(ctx.team.id, uid);
   if (r2.changes === 0) return res.status(404).json({ error: '成员不存在' });
+  db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, uid);
   res.json({ message: '已移除成员' });
 });
 
@@ -356,11 +355,12 @@ r.post('/:id/transfer', (req, res) => {
   db.exec('BEGIN');
   try {
     db.prepare('UPDATE team SET owner_id = ? WHERE id = ?').run(Number(user_id), ctx.team.id);
-    // 新旧组长角色清理（桥表 + 旧字段同步）
-    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, Number(user_id));
-    db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, ctx.team.owner_id);
-    db.prepare('UPDATE team_member SET role_id = NULL WHERE team_id = ? AND user_id = ?').run(ctx.team.id, Number(user_id));
-    db.prepare('UPDATE team_member SET role_id = NULL WHERE team_id = ? AND user_id = ?').run(ctx.team.id, ctx.team.owner_id);
+    // 角色保留：组长也可承担部门角色，转让只换组长身份不清角色（旧字段同步各自首个角色）
+    for (const uid of [Number(user_id), ctx.team.owner_id]) {
+      db.prepare(`UPDATE team_member SET role_id = (SELECT t.role_id FROM team_member_role t
+                   WHERE t.team_id = ? AND t.user_id = ? ORDER BY t.role_id LIMIT 1)
+                 WHERE team_id = ? AND user_id = ?`).run(ctx.team.id, uid, ctx.team.id, uid);
+    }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   res.json({ message: '已转让组长' });

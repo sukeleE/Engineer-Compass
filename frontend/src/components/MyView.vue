@@ -11,6 +11,12 @@ import AuthView from './AuthView.vue';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const router = useRouter();
+// 小组角色摘要：组长显示「组长 · 角色」（组长也可多角色），普通成员显示角色名/组员
+const teamRoleText = (t) => {
+  const roles = (t.role_names || []).join('、');
+  if (t.is_owner) return roles ? `组长 · ${roles}` : '组长';
+  return roles || '组员';
+};
 const loading = ref(false);
 const profile = ref(null); // api.me()：{ user, teams[] }
 const schedules = ref([]);
@@ -243,7 +249,7 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
       <router-link to="/team" class="stat-card">
         <b class="sc-num">{{ profile?.teams?.length || 0 }}</b>
         <span class="sc-label">加入小组</span>
-        <span class="sc-sub">{{ profile?.teams?.map((t) => t.is_owner ? '组长' : (t.role_names || []).join('、') || '组员').join(' / ') || '尚未加入小组' }}</span>
+        <span class="sc-sub">{{ profile?.teams?.map(teamRoleText).join(' / ') || '尚未加入小组' }}</span>
       </router-link>
     </section>
 
@@ -263,10 +269,8 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
             <span class="ti-desc">{{ t.desc || '—' }}</span>
           </div>
           <el-tag size="small" :type="t.is_owner ? 'danger' : 'info'" v-if="t.is_owner">👑 组长</el-tag>
-          <template v-else>
-            <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" style="margin-right:4px">{{ rn }}</el-tag>
-            <el-tag v-if="!(t.role_names || []).length" size="small" type="info">组员</el-tag>
-          </template>
+          <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" style="margin-right:4px">{{ rn }}</el-tag>
+          <el-tag v-if="!(t.role_names || []).length && !t.is_owner" size="small" type="info">组员</el-tag>
           <span class="ti-count">{{ t.member_count }} 人</span>
         </router-link>
       </div>

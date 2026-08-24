@@ -1,7 +1,7 @@
 // 成员多角色冒烟测试（node 内联 fetch）
 // 覆盖：join 默认组员角色入桥表、组长数组分配（≤3）、第三角色 400、
-//      成员自选 self-role、权限并集（两角色任一权限可用）、旧单角色兼容、
-//      角色删除清理桥表、转让组长清理、GET /:id members 聚合、my-tasks role_names
+//      成员自选 self-role、组长多角色（自选 + 被分配）、权限并集（两角色任一权限可用）、旧单角色兼容、
+//      角色删除清理桥表、转让组长保留角色、GET /:id members 聚合、my-tasks role_names
 import db from '../db/database.js';
 
 const BASE = 'http://localhost:3000/api';
@@ -29,6 +29,7 @@ console.log('— 准备');
 let r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_a', password: 'test123456', email: Y + '_a@test.dev' }) });
 ok('注册组长', r.status === 201, `got ${r.status} ${r.data.error || ''}`);
 const tokA = r.data.token;
+const uidA = r.data.user.id;
 r = await req('/auth/register', { method: 'POST', body: JSON.stringify({ username: Y + '_b', password: 'test123456', email: Y + '_b@test.dev' }) });
 ok('注册组员B', r.status === 201, `got ${r.status} ${r.data.error || ''}`);
 const tokB = r.data.token;
@@ -103,11 +104,25 @@ ok('C 两个角色生效', Array.isArray(c1.role_names) && c1.role_names.include
 r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokC,
   body: JSON.stringify({ role_ids: [roleIds['机械组'], roleIds['资料组'], roleIds['软件组'], roleIds['电控组']] }) });
 ok('C 自选 4 个 → 400', r.status === 400, `got ${r.status} ${r.data.error || ''}`);
-r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokA, body: JSON.stringify({ role_ids: [roleIds['机械组']] }) });
-ok('组长 self-role → 400（无需自选）', r.status === 400, `got ${r.status} ${r.data.error || ''}`);
 r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokC,
   body: JSON.stringify({ role_ids: [99999] }) });
 ok('自选不存在角色 → 404', r.status === 404, `got ${r.status} ${r.data.error || ''}`);
+
+// 8b) 组长多角色：组长也可自选 + 被分配（新需求）
+console.log('— 组长多角色');
+r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokA, body: JSON.stringify({ role_ids: [roleIds['机械组']] }) });
+ok('组长 self-role → 200（组长多角色）', r.status === 200, `got ${r.status} ${r.data.error || ''}`);
+r = await req(`/team/${teamId}`, { token: tokA });
+const a0 = r.data.members.find((m) => m.id === uidA);
+ok('组长自选角色生效（role_names 含机械组）', Array.isArray(a0.role_names) && a0.role_names.includes('机械组'), JSON.stringify(a0.role_names));
+ok('组长 is_owner 且带角色', a0.is_owner === true);
+r = await req(`/team/${teamId}/member`, { method: 'POST', token: tokA,
+  body: JSON.stringify({ user_id: uidA, role_ids: [roleIds['机械组'], roleIds['软件组']] }) });
+ok('组长被分配两个角色 → 200（不再 400）', r.status === 200, `got ${r.status} ${r.data.error || ''}`);
+r = await req(`/team/${teamId}`, { token: tokA });
+const a0b = r.data.members.find((m) => m.id === uidA);
+ok('组长两个角色都在 role_names', Array.isArray(a0b.role_names) && a0b.role_names.includes('机械组') && a0b.role_names.includes('软件组'), JSON.stringify(a0b.role_names));
+ok('组长 me.roles 两角色', Array.isArray(r.data.me.roles) && r.data.me.roles.length === 2, JSON.stringify(r.data.me.roles?.map((x) => x.name)));
 
 // 9) 权限并集：B 现在只有软件组(task)；给 B 换成 [机械组(progress), 电控组(message)]
 //    → B 无 task 权限但无权限管理，走 progress 相关接口验证并集
@@ -144,19 +159,20 @@ const mt = r.data.find((x) => Number(x.team_id) === Number(teamId));
 ok('my-tasks role_names=[机械组]', Array.isArray(mt?.role_names) && mt.role_names.length === 1 && mt.role_names[0] === '机械组', JSON.stringify(mt?.role_names));
 ok('my-tasks 兼容 role_name=机械组', mt?.role_name === '机械组', `got ${mt?.role_name}`);
 
-// 12) 转让组长：新组长 C 的角色被清理（桥表）；A 角色清空（原 owner）
-console.log('— 转让组长');
+// 12) 转让组长：角色保留（组长也可多角色，转让只换组长身份）
+console.log('— 转让组长（角色保留）');
 r = await req(`/team/${teamId}/transfer`, { method: 'POST', token: tokA, body: JSON.stringify({ user_id: uidC }) });
 ok('A 转让给 C → 200', r.status === 200, `got ${r.status} ${r.data.error || ''}`);
 r = await req(`/team/${teamId}`, { token: tokC });
 const c2 = r.data.members.find((m) => m.id === uidC);
-ok('新组长 C 角色清空', Array.isArray(c2.role_names) && c2.role_names.length === 0, JSON.stringify(c2.role_names));
+ok('新组长 C 角色保留（机械组+资料组）', Array.isArray(c2.role_names) && c2.role_names.includes('机械组') && c2.role_names.includes('资料组'), JSON.stringify(c2.role_names));
 ok('新组长 C is_owner=true', c2.is_owner === true);
 const a1 = r.data.members.find((m) => m.username === Y + '_a');
-ok('原组长 A 角色清空', Array.isArray(a1.role_names) && a1.role_names.length === 0, JSON.stringify(a1.role_names));
-// 转让后 C 是组长，不能再 self-role
-r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokC, body: JSON.stringify({ role_ids: [roleIds['机械组']] }) });
-ok('转让后 C self-role → 400', r.status === 400, `got ${r.status} ${r.data.error || ''}`);
+ok('原组长 A 角色保留（机械组+软件组）', Array.isArray(a1.role_names) && a1.role_names.includes('机械组') && a1.role_names.includes('软件组'), JSON.stringify(a1.role_names));
+ok('A 不再是组长', a1.is_owner === false);
+// 转让后 C 是组长，仍可自选角色
+r = await req(`/team/${teamId}/member/self-role`, { method: 'POST', token: tokC, body: JSON.stringify({ role_ids: [roleIds['机械组'], roleIds['资料组']] }) });
+ok('转让后 C（组长）self-role → 200', r.status === 200, `got ${r.status} ${r.data.error || ''}`);
 
 // 13) 清理：解散小组 + 删测试用户
 console.log('— 清理');

@@ -117,7 +117,7 @@ async function setMemberRoles(m, roleIds) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
-// —— 成员自选角色（≤3；非组长成员在自己那一行可打开）——
+// —— 成员自选角色（≤3；组长也可自选/被分配，行内同样开放）——
 const selfDlg = ref(false);
 const selfRoleIds = ref([]);
 
@@ -192,16 +192,16 @@ loadInvite();
           </b>
           <span class="m-user">@{{ m.username }}</span>
         </div>
-        <template v-if="perms.member && !m.is_owner">
+        <template v-if="perms.member">
           <el-select :model-value="m.role_ids || []" size="small" multiple collapse-tags collapse-tags-tooltip
             :multiple-limit="3" style="width: 220px" placeholder="分配角色（≤3）"
             @change="(v) => setMemberRoles(m, v)">
             <el-option v-for="r in roles" :key="r.id" :value="r.id" :label="r.name" />
           </el-select>
           <el-button v-if="me.is_owner && !m.is_me" size="small" text @click="transfer(m)">转让</el-button>
-          <el-button size="small" text type="danger" @click="removeMember(m)">移除</el-button>
+          <el-button v-if="!m.is_owner" size="small" text type="danger" @click="removeMember(m)">移除</el-button>
         </template>
-        <template v-else-if="m.is_me && !me.is_owner">
+        <template v-else-if="m.is_me">
           <el-button size="small" type="primary" plain @click="openSelfRole">🎭 自选角色</el-button>
         </template>
         <template v-else>

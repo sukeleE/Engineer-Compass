@@ -88,10 +88,8 @@ onMounted(load);
       <div class="mt-team-head">
         <b>{{ t.team_name }}</b>
         <el-tag v-if="t.is_owner" size="small" type="warning">👑 组长</el-tag>
-        <template v-else>
-          <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" effect="plain" style="margin-right:4px">{{ rn }}</el-tag>
-          <el-tag v-if="!(t.role_names || []).length" size="small" type="info" effect="plain">无角色</el-tag>
-        </template>
+        <el-tag v-for="rn in t.role_names || []" :key="rn" size="small" type="info" effect="plain" style="margin-right:4px">{{ rn }}</el-tag>
+        <el-tag v-if="!(t.role_names || []).length && !t.is_owner" size="small" type="info" effect="plain">无角色</el-tag>
       </div>
 
       <div v-for="plan in t.plans" :key="plan.id" class="mt-plan">
