@@ -1,7 +1,7 @@
 // 小组协作接口：进度任务对齐 / 进度汇报 / 讨论 / 资料共享 / 设备预约
 import { Router } from 'express';
 import db from '../db/database.js';
-import { authRequired, teamCtx, requirePerm } from './middleware.js';
+import { authRequired, teamCtx, requirePerm, hasPerm } from './middleware.js';
 import { normalizePlan } from './schedule.js';
 
 const r = Router();
@@ -161,6 +161,37 @@ r.get('/:id/logs', (req, res) => {
   res.json(attachComments(ctx.team.id, 'log', rows));
 });
 
+// PUT /api/team/:id/log/:lid — 编辑进度汇报（本人或组长）
+r.put('/:id/log/:lid', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const log = db.prepare('SELECT * FROM progress_log WHERE id = ? AND team_id = ?').get(Number(req.params.lid), ctx.team.id);
+  if (!log) return res.status(404).json({ error: '汇报不存在' });
+  if (log.user_id !== req.user.id && !ctx.isOwner) return res.status(403).json({ error: '仅本人或组长可编辑' });
+  const { content, attachments } = req.body || {};
+  if (content !== undefined && typeof content !== 'string') return res.status(400).json({ error: '汇报内容格式错误' });
+  // 附件不传时保留原附件；传入则重新校验归一化
+  let attJson = log.attachments;
+  if (attachments !== undefined) {
+    try { attJson = JSON.stringify(sanitizeAttachments(attachments)); }
+    catch (e) { return res.status(413).json({ error: e.message }); }
+  }
+  db.prepare('UPDATE progress_log SET content = ?, attachments = ? WHERE id = ?')
+    .run(content !== undefined ? content : log.content, attJson, log.id);
+  res.json({ message: '汇报已更新' });
+});
+
+// DELETE /api/team/:id/log/:lid — 删除进度汇报（本人或组长）
+r.delete('/:id/log/:lid', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const log = db.prepare('SELECT * FROM progress_log WHERE id = ? AND team_id = ?').get(Number(req.params.lid), ctx.team.id);
+  if (!log) return res.status(404).json({ error: '汇报不存在' });
+  if (log.user_id !== req.user.id && !ctx.isOwner) return res.status(403).json({ error: '仅本人或组长可删除' });
+  db.prepare('DELETE FROM progress_log WHERE id = ?').run(log.id);
+  res.json({ message: '汇报已删除' });
+});
+
 // ==================== 计划同步（成员备赛计划 + 学习日程，供小组对齐） ====================
 
 // GET /api/team/:id/plans — 小组成员的竞赛备赛计划与学习日程
@@ -243,10 +274,33 @@ r.delete('/:id/message/:mid', (req, res) => {
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const msg = db.prepare('SELECT * FROM team_message WHERE id = ? AND team_id = ?').get(Number(req.params.mid), ctx.team.id);
   if (!msg) return res.status(404).json({ error: '消息不存在' });
-  const canMod = ctx.isOwner || requirePerm(ctx, res, 'task') === null || msg.user_id === req.user.id;
+  // 原写法 requirePerm 副作用先发 403 导致本人也删不了；改用 hasPerm 无副作用短路判断
+  const canMod = ctx.isOwner || msg.user_id === req.user.id || hasPerm(ctx, 'task');
   if (!canMod) return res.status(403).json({ error: '仅本人或管理员可删除' });
   db.prepare('DELETE FROM team_message WHERE id = ?').run(msg.id);
   res.json({ message: '已删除' });
+});
+
+// PUT /api/team/:id/message/:mid — 编辑讨论消息（本人或组长/管理员）
+r.put('/:id/message/:mid', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const msg = db.prepare('SELECT * FROM team_message WHERE id = ? AND team_id = ?').get(Number(req.params.mid), ctx.team.id);
+  if (!msg) return res.status(404).json({ error: '消息不存在' });
+  // 注意：requirePerm 无权限时会副作用式先发 403，故本人/组长判断必须在前（短路）；改用无副作用的 hasPerm
+  const canMod = ctx.isOwner || msg.user_id === req.user.id || hasPerm(ctx, 'task');
+  if (!canMod) return res.status(403).json({ error: '仅本人或管理员可编辑' });
+  const { content, attachments } = req.body || {};
+  if (content !== undefined && typeof content !== 'string') return res.status(400).json({ error: '消息内容格式错误' });
+  // 附件不传时保留原附件；传入则重新校验归一化
+  let attJson = msg.attachments;
+  if (attachments !== undefined) {
+    try { attJson = JSON.stringify(sanitizeAttachments(attachments)); }
+    catch (e) { return res.status(413).json({ error: e.message }); }
+  }
+  db.prepare('UPDATE team_message SET content = ?, attachments = ? WHERE id = ?')
+    .run(content !== undefined ? content : msg.content, attJson, msg.id);
+  res.json({ message: '消息已更新' });
 });
 
 // ==================== 资料共享 ====================
