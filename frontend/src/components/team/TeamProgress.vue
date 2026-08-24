@@ -2,7 +2,7 @@
 // 进度对齐：任务列表（组长建任务/分配负责人/进度跟踪）+ 成员进度汇报时间线（富文本 + 附件 + 评论）
 // 编写汇报独立成弹窗，与时间线浏览区区分
 import { ref, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import { openImage } from '../../utils/imageViewer.js';
 import RichEditor from './RichEditor.vue';
@@ -16,10 +16,11 @@ const logs = ref([]);
 const showNew = ref(false);
 const newTask = ref({ title: '', desc: '', deadline: '', assignee_id: null });
 
-// —— 汇报编写弹窗 ——
+// —— 汇报编写/编辑弹窗 ——
 const reportDlg = ref(false);
 const reportHtml = ref('');
 const reportAtts = ref([]); // [{name,size,mime,data}]
+const editingLogId = ref(null); // null=新汇报；有值=编辑该条
 const fileInput = ref(null);
 const MAX_ATT_TOTAL = 25 * 1024 * 1024;
 
@@ -80,6 +81,15 @@ async function pickAtts(e) {
 function openReport() {
   reportHtml.value = '';
   reportAtts.value = [];
+  editingLogId.value = null;
+  reportDlg.value = true;
+}
+
+// 编辑已有汇报：预填内容与附件（附件浅拷贝，避免改坏时间线原数据）
+function editLog(l) {
+  reportHtml.value = l.content || '';
+  reportAtts.value = (l.attachments || []).map((a) => ({ ...a }));
+  editingLogId.value = l.id;
   reportDlg.value = true;
 }
 
@@ -87,12 +97,30 @@ async function submitReport() {
   const text = reportHtml.value.replace(/<[^>]*>/g, '').trim();
   if (!text && !reportAtts.value.length) return ElMessage.warning('写点今天的进展，或附上文件');
   try {
-    await api.teamLog(props.teamId, { content: reportHtml.value, attachments: reportAtts.value });
+    if (editingLogId.value) {
+      await api.teamLogUpdate(props.teamId, editingLogId.value, { content: reportHtml.value, attachments: reportAtts.value });
+      ElMessage.success('汇报已更新');
+    } else {
+      await api.teamLog(props.teamId, { content: reportHtml.value, attachments: reportAtts.value });
+      ElMessage.success('进度已汇报');
+    }
     reportDlg.value = false;
     await reload();
-    ElMessage.success('进度已汇报');
   } catch (e) { ElMessage.error(e.message); }
 }
+
+async function removeLog(l) {
+  try { await ElMessageBox.confirm('确定删除这条进度汇报？评论与附件将一并删除', '删除汇报', { type: 'warning' }); }
+  catch { return; }
+  try {
+    await api.teamLogDelete(props.teamId, l.id);
+    logs.value = logs.value.filter((x) => x.id !== l.id);
+    ElMessage.success('汇报已删除');
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// 可编辑/删除：本人或组长
+const canEditLog = (l) => l.user_id === props.me.user_id || props.me.is_owner;
 
 // 富文本内容里的图片：点击 → 全屏预览
 function onRichClick(e, l) {
@@ -122,7 +150,7 @@ reload().catch((e) => ElMessage.error(e.message));
     </div>
 
     <!-- 汇报编写弹窗（富文本 + 附件，与浏览区分开） -->
-    <el-dialog v-model="reportDlg" title="📝 编写进度汇报" width="780px" :close-on-click-modal="false"
+    <el-dialog v-model="reportDlg" :title="editingLogId ? '✏️ 编辑进度汇报' : '📝 编写进度汇报'" width="780px" top="6vh" :close-on-click-modal="false"
       destroy-on-close append-to-body>
       <RichEditor v-model="reportHtml" placeholder="今天做了什么？卡在哪？下一步？（支持加粗/列表/插入图片）" />
       <div class="rp-tools">
@@ -191,7 +219,12 @@ reload().catch((e) => ElMessage.error(e.message));
     <div class="tp-logs">
       <h4>🗣️ 成员进度汇报</h4>
       <el-timeline v-if="logs.length">
-        <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="`${l.nickname} · ${l.create_time?.slice(5, 16)}`">
+        <el-timeline-item v-for="l in logs" :key="l.id">
+          <template #timestamp>
+            <span class="log-ts">{{ l.nickname }} · {{ l.create_time?.slice(5, 16) }}</span>
+            <el-button v-if="canEditLog(l)" size="small" text type="primary" title="编辑该汇报" @click="editLog(l)">✏️</el-button>
+            <el-button v-if="canEditLog(l)" size="small" text type="danger" title="删除该汇报" @click="removeLog(l)">🗑</el-button>
+          </template>
           <div v-if="l.content" class="log-rich" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
           <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
           <CommentThread :team-id="teamId" type="log" :target="l" />
@@ -234,4 +267,9 @@ reload().catch((e) => ElMessage.error(e.message));
   }
 }
 .tp-logs { margin-top: 18px; h4 { margin: 0 0 10px; } .tp-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; } }
+.log-ts { margin-right: 6px; font-size: 12.5px; }
+.log-rich {
+  :deep(video) { max-width: 100%; max-height: 320px; border-radius: 8px; }
+  :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
+}
 </style>

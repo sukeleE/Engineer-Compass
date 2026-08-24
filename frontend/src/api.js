@@ -101,9 +101,12 @@ export const api = {
   teamAiGrouping: (id) => req(`/team/${id}/ai-grouping`, { method: 'POST' }),
   teamLog: (id, card) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify(card) }),
   teamLogs: (id) => req(`/team/${id}/logs`),
+  teamLogUpdate: (id, lid, card) => req(`/team/${id}/log/${lid}`, { method: 'PUT', body: JSON.stringify(card) }),
+  teamLogDelete: (id, lid) => req(`/team/${id}/log/${lid}`, { method: 'DELETE' }),
   // 讨论
   teamMessages: (id) => req(`/team/${id}/messages`),
   teamMessage: (id, card) => req(`/team/${id}/message`, { method: 'POST', body: JSON.stringify(card) }),
+  teamMessageUpdate: (id, mid, card) => req(`/team/${id}/message/${mid}`, { method: 'PUT', body: JSON.stringify(card) }),
   teamMessageDelete: (id, mid) => req(`/team/${id}/message/${mid}`, { method: 'DELETE' }),
   teamLogComment: (id, lid, content) => req(`/team/${id}/comment/log/${lid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   teamMessageComment: (id, mid, content) => req(`/team/${id}/comment/message/${mid}`, { method: 'POST', body: JSON.stringify({ content }) }),

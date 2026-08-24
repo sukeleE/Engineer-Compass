@@ -1,6 +1,7 @@
 <script setup>
-// 富文本编辑器（wangEditor）：图片直接 base64 内嵌（customUpload 本地转码，无需服务器接口）
+// 富文本编辑器（wangEditor）：图片直接 base64 内嵌（customUpload 本地转码，无需服务器接口）；视频支持粘贴/输入外链 URL
 import { ref, shallowRef, onBeforeUnmount, watch } from 'vue';
+import { ElMessage } from 'element-plus';
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue';
 import '@wangeditor/editor/dist/css/style.css';
 
@@ -13,20 +14,27 @@ const html = ref(props.modelValue || '');
 watch(() => props.modelValue, (v) => { if (v !== html.value) html.value = v || ''; });
 watch(html, (v) => emit('update:modelValue', v));
 
-const toolbarConfig = { excludeKeys: ['group-video', 'fullScreen'] };
+const toolbarConfig = { excludeKeys: ['uploadVideo', 'fullScreen'] }; // 保留 insertVideo（粘贴视频链接）
 const editorConfig = {
   placeholder: props.placeholder,
   MENU_CONF: {
     // 图片：本地 FileReader 转 base64 后插入（不经过服务器）
     uploadImage: {
+      imageMaxSize: 10 * 1024 * 1024,
       customUpload(file, insertFn) {
         if (file.size > 10 * 1024 * 1024) {
-          window.$message?.warning?.('图片不能超过 10MB');
+          ElMessage.warning('图片不能超过 10MB');
           return;
         }
         const reader = new FileReader();
         reader.onload = () => insertFn(reader.result, file.name, file.name);
         reader.readAsDataURL(file);
+      },
+    },
+    // 视频：输入外链 URL（mp4 直接播放；B站/腾讯等平台地址自动转 iframe）
+    insertVideo: {
+      onInsertedVideo() {
+        ElMessage.success('🎬 视频链接已插入');
       },
     },
   },

@@ -1,6 +1,6 @@
 <script setup>
 // 日程笔记面板（备赛日程页右侧）：每日富文本笔记 + 学习状态 + 本月历史回看
-// 与月历联动：切换月份/日期即切换视角；父组件通过 active 通知可见时刷新
+// 编写/回看统一走「📝 写笔记 / 点历史条目」→ 居中大弹窗（查看/编辑/删除）
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
@@ -20,6 +20,8 @@ const monthNotes = ref([]);
 const saving = ref(false);
 const deleting = ref(false);
 const loading = ref(false);
+const dlg = ref(false);      // 笔记弹窗
+const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
 
 // 当前日期对应的笔记（本月列表内查找；跨月时重拉列表）
 const activeNote = computed(() => monthNotes.value.find((n) => n.note_date === date.value) || null);
@@ -54,6 +56,20 @@ function onDateChange() {
   loadMonth().then(applyDate);
 }
 
+// 打开笔记弹窗：d 目标日期；mode view（有笔记回看）/ edit（编写或编辑）
+function openDlg(d, mode) {
+  date.value = d;
+  dlgMode.value = mode;
+  applyDate(); // 与当前日期相同时 watch 不触发，手动回填
+  dlg.value = true;
+}
+
+// 编辑态切到查看态（保存后回看刚写的内容）
+function backToView() {
+  dlgMode.value = 'view';
+  applyDate();
+}
+
 async function saveNote() {
   if (!content.value.trim() && !status.value) return ElMessage.warning('写点内容或选个状态再保存');
   saving.value = true;
@@ -65,7 +81,7 @@ async function saveNote() {
       schedule_id: scheduleId.value || null,
     });
     await loadMonth();
-    applyDate();
+    backToView();
     ElMessage.success('📝 笔记已保存');
   } catch (e) {
     ElMessage.error(`保存失败：${e.message}`);
@@ -85,6 +101,7 @@ async function deleteNote(n) {
       scheduleId.value = null;
     }
     await loadMonth();
+    dlg.value = false;
     ElMessage.success('已删除');
   } catch (e) {
     ElMessage.error(e.message);
@@ -93,16 +110,11 @@ async function deleteNote(n) {
   }
 }
 
-function goDate(d) {
-  date.value = d; // 触发 watch → applyDate
-}
-
 // 可见（视图切回 / 首次挂载）时刷新，保证与月历新增的笔记同步
 function refresh() {
   loadMonth().then(applyDate);
 }
 watch(() => props.active, (v) => { if (v) refresh(); });
-// 任何日期变更都回填对应笔记（同月历史点击走这里；跨月由 onDateChange 拉新数据后再回填）
 watch(date, applyDate);
 onMounted(() => { if (props.active) refresh(); });
 </script>
@@ -111,40 +123,15 @@ onMounted(() => { if (props.active) refresh(); });
   <div class="sn-panel">
     <div class="sn-head">
       <b>📝 日程笔记</b>
-      <span class="sn-sub">每日学习记录 · 月历点击日期可回看</span>
+      <span class="sn-sub">每日学习记录 · 点日期可回看</span>
     </div>
 
-    <!-- 日期 + 学习状态 -->
-    <div class="sn-tools">
-      <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" size="small"
-        :clearable="false" class="sn-date" @change="onDateChange" />
-      <el-select v-model="status" size="small" placeholder="今日状态" clearable class="sn-status">
-        <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key"
-          :label="`${st.emoji} ${st.label}`" />
-      </el-select>
-    </div>
+    <el-button type="primary" class="sn-write" size="large" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
 
-    <!-- 关联备赛（选填，日历回看时展示竞赛名） -->
-    <el-select v-if="schedules.length" v-model="scheduleId" size="small" clearable filterable
-      placeholder="关联备赛（选填）" class="sn-schedule">
-      <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
-    </el-select>
-
-    <div v-loading="loading" class="sn-editor-wrap">
-      <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…" />
-      <div class="sn-actions">
-        <el-button size="small" type="primary" :loading="saving" @click="saveNote">💾 保存</el-button>
-        <el-button v-if="activeNote" size="small" type="danger" plain :loading="deleting" @click="deleteNote(activeNote)">
-          删除今日笔记
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 本月历史 -->
     <div class="sn-list-head">本月笔记（{{ history.length }}）</div>
-    <div class="sn-list">
+    <div class="sn-list" v-loading="loading">
       <div v-for="n in history" :key="n.id" class="sn-item" :class="{ cur: n.note_date === date }"
-        :title="'回看 ' + n.note_date" @click="goDate(n.note_date)">
+        :title="'回看 ' + n.note_date" @click="openDlg(n.note_date, 'view')">
         <span class="sn-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
         <div class="sn-item-main">
           <div class="sn-item-top">
@@ -155,8 +142,50 @@ onMounted(() => { if (props.active) refresh(); });
         </div>
         <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
       </div>
-      <span v-if="!history.length" class="sn-empty">这个月还没有笔记 — 从上方开始记录吧</span>
+      <span v-if="!history.length" class="sn-empty">这个月还没有笔记 — 点上方「写笔记」开始记录吧</span>
     </div>
+
+    <!-- 编写 / 回看弹窗（居中大尺寸） -->
+    <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
+      width="780px" top="6vh" :close-on-click-modal="false" destroy-on-close append-to-body>
+      <!-- 回看模式 -->
+      <template v-if="dlgMode === 'view' && activeNote">
+        <div v-if="statusOf(activeNote.status)" class="dn-status"
+          :style="{ color: statusOf(activeNote.status).color, background: statusOf(activeNote.status).color + '1a' }">
+          {{ statusOf(activeNote.status).emoji }} 今日状态：{{ statusOf(activeNote.status).label }}
+        </div>
+        <div v-if="activeNote.content" class="dn-body" v-html="activeNote.content"></div>
+        <div v-else class="dn-empty">这天只记录了状态，没有文字内容</div>
+      </template>
+      <!-- 编写 / 编辑模式 -->
+      <template v-else>
+        <div class="dn-tools">
+          <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" size="small"
+            :clearable="false" @change="onDateChange" />
+          <el-select v-model="status" size="small" placeholder="今日学习状态" clearable>
+            <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key"
+              :label="`${st.emoji} ${st.label}`" />
+          </el-select>
+          <el-select v-if="schedules.length" v-model="scheduleId" size="small" clearable filterable
+            placeholder="关联备赛（选填）" class="dn-schedule">
+            <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
+          </el-select>
+        </div>
+        <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…（支持插图 / 粘贴视频链接）" />
+      </template>
+      <template #footer>
+        <template v-if="dlgMode === 'view' && activeNote">
+          <el-button size="small" type="danger" plain :loading="deleting" @click="deleteNote(activeNote)">🗑 删除</el-button>
+          <el-button size="small" type="primary" plain @click="dlgMode = 'edit'">✏️ 编辑</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" @click="dlg = false">取消</el-button>
+          <el-button v-if="activeNote" size="small" type="danger" plain :loading="deleting"
+            @click="deleteNote(activeNote)">🗑 删除</el-button>
+          <el-button size="small" type="primary" :loading="saving" @click="saveNote">💾 保存</el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -174,19 +203,11 @@ onMounted(() => { if (props.active) refresh(); });
     .sn-sub { font-size: 11px; color: var(--text-2); }
   }
 
-  .sn-tools { display: flex; gap: 8px; margin-bottom: 8px;
-    .sn-date { flex: 1; }
-    .sn-status { width: 128px; }
-  }
-  .sn-schedule { width: 100%; margin-bottom: 8px; }
+  .sn-write { width: 100%; margin-bottom: 12px; }
 
-  .sn-editor-wrap { :deep(.re-body) { height: 170px; } }
+  .sn-list-head { margin: 0 0 6px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
 
-  .sn-actions { display: flex; gap: 8px; margin-top: 8px; }
-
-  .sn-list-head { margin: 14px 0 6px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
-
-  .sn-list { display: flex; flex-direction: column; gap: 6px; }
+  .sn-list { display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
 
   .sn-item {
     display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px;
@@ -206,4 +227,18 @@ onMounted(() => { if (props.active) refresh(); });
 
   .sn-empty { color: #94a3b8; font-size: 12px; padding: 8px 0; text-align: center; }
 }
+
+// 弹窗内
+.dn-tools { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+  .el-date-picker { width: 150px; }
+  .dn-schedule { width: 200px; }
+}
+.dn-status { display: inline-block; font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px; margin-bottom: 12px; }
+.dn-body { line-height: 1.9; font-size: 14px; max-height: 55vh; overflow-y: auto;
+  :deep(img) { max-width: 100%; border-radius: 8px; }
+  :deep(video) { max-width: 100%; border-radius: 8px; }
+  :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
+  :deep(a) { color: #2563eb; }
+}
+.dn-empty { color: #94a3b8; font-size: 13px; text-align: center; padding: 40px 0; }
 </style>

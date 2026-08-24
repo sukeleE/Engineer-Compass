@@ -468,7 +468,7 @@ onMounted(load);
     </div>
 
     <!-- 点击日期 → 回看 / 记录当天笔记 -->
-    <el-dialog v-model="calDlg" :title="`${calDlgDate} ${WEEK_CN[new Date(calDlgDate + 'T00:00:00').getDay()]}`" width="580px" destroy-on-close>
+    <el-dialog v-model="calDlg" :title="`${calDlgDate} ${WEEK_CN[new Date(calDlgDate + 'T00:00:00').getDay()]}`" width="780px" top="6vh" destroy-on-close>
       <div v-if="calDlgMode === 'view' && calDlgNote" class="dlg-note-view">
         <div v-if="statusOf(calDlgNote.status)" class="dlg-status"
           :style="{ color: statusOf(calDlgNote.status).color, background: statusOf(calDlgNote.status).color + '1a' }">
@@ -654,8 +654,11 @@ onMounted(load);
     font-size: 13px; font-weight: 600; margin-bottom: 10px;
   }
   .dlg-body {
-    line-height: 1.8; font-size: 14px; color: #1e293b; overflow-y: auto; max-height: 46vh;
+    line-height: 1.8; font-size: 14px; color: #1e293b; overflow-y: auto; max-height: 55vh;
     :deep(img) { max-width: 100%; border-radius: 6px; }
+    :deep(video) { max-width: 100%; border-radius: 6px; }
+    :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 6px; border: none; }
+    :deep(a) { color: #2563eb; }
   }
   .dlg-empty { color: #94a3b8; font-size: 13px; padding: 10px 0; }
 }

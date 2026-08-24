@@ -47,10 +47,28 @@ async function send() {
 }
 
 async function remove(m) {
-  const canDel = m.user_id === props.me.user_id || props.perms.task;
-  if (!canDel) return ElMessage.warning('仅本人或管理员可删除');
+  if (!canMod(m)) return ElMessage.warning('仅本人或管理员可删除');
   try {
     await api.teamMessageDelete(props.teamId, m.id);
+    await load();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// 可改/可删：本人或组长/管理员
+const canMod = (m) => m.user_id === props.me.user_id || props.perms.task;
+
+// 原地编辑：消息体切换为输入框
+const editId = ref(null);
+const editText = ref('');
+function startEdit(m) {
+  editId.value = m.id;
+  editText.value = m.content || '';
+}
+async function saveEdit(m) {
+  if (!editText.value.trim()) return ElMessage.warning('消息内容不能为空');
+  try {
+    await api.teamMessageUpdate(props.teamId, m.id, { content: editText.value.trim(), attachments: m.attachments || [] });
+    editId.value = null;
     await load();
   } catch (e) { ElMessage.error(e.message); }
 }
@@ -66,10 +84,17 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         <div class="ci-head">
           <b>{{ m.nickname }}</b>
           <span class="ci-time">{{ m.create_time?.slice(5, 16) }}</span>
-          <el-button v-if="m.user_id === me.user_id || perms.task" size="small" text type="danger"
-            @click="remove(m)">删</el-button>
+          <span class="ci-ops">
+            <el-button v-if="canMod(m)" size="small" text type="primary" title="编辑消息" @click="startEdit(m)">✏️</el-button>
+            <el-button v-if="canMod(m)" size="small" text type="danger" title="删除消息" @click="remove(m)">🗑</el-button>
+          </span>
         </div>
-        <div v-if="m.content" class="ci-body">{{ m.content }}</div>
+        <div v-if="editId === m.id" class="ci-edit">
+          <el-input v-model="editText" size="small" placeholder="修改消息…" @keyup.enter="saveEdit(m)" />
+          <el-button size="small" type="primary" @click="saveEdit(m)">保存</el-button>
+          <el-button size="small" @click="editId = null">取消</el-button>
+        </div>
+        <div v-else-if="m.content" class="ci-body">{{ m.content }}</div>
         <AttachmentList v-if="m.attachments?.length" :attachments="m.attachments" />
         <CommentThread :team-id="teamId" type="message" :target="m" />
       </div>
@@ -98,8 +123,9 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
   &.mine { background: #eff6ff; border-color: #bfdbfe; }
   .ci-head { display: flex; align-items: center; gap: 8px; b { font-size: 13px; }
     .ci-time { color: #94a3b8; font-size: 11.5px; }
-    .el-button { margin-left: auto; }
+    .ci-ops { margin-left: auto; display: flex; align-items: center; gap: 2px; }
   }
+  .ci-edit { display: flex; gap: 6px; margin-top: 6px; .el-input { flex: 1; } }
   .ci-body { font-size: 13.5px; line-height: 1.7; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
 }
 .chat-input { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;
