@@ -76,6 +76,8 @@ export const api = {
   updateProfile: (card) => req('/auth/profile', { method: 'PUT', body: JSON.stringify(card) }),
   bindEmail: (card) => req('/auth/email', { method: 'PUT', body: JSON.stringify(card) }),
   feedback: (card) => req('/feedback', { method: 'POST', body: JSON.stringify(card) }),
+  // 公开主页（只读）：基本资料 + 竞赛计划 + 学习日程 + 参加的小组
+  userPublic: (id) => req(`/users/${id}/public`),
   // 项目小组
   teamCreate: (card) => req('/team', { method: 'POST', body: JSON.stringify(card) }),
   teamJoin: (inviteCode) => req('/team/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),

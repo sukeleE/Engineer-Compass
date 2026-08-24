@@ -1,8 +1,14 @@
 <script setup>
 // 成员与角色：成员列表（改角色/移除）+ 高自由度自定义角色 + 邀请码 + 转让/解散
 import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
+import auth from '../../auth.js';
+
+const router = useRouter();
+// 点击成员头像/昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
+const toProfile = (m) => router.push(m.id === auth.user?.id ? '/me' : `/user/${m.id}`);
 
 const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array, roles: Array });
 
@@ -176,9 +182,12 @@ loadInvite();
         <el-button v-if="perms.member" size="small" type="primary" plain :loading="aiLoading" @click="aiGrouping">🧠 AI 智能分组</el-button>
       </div>
       <div v-for="m in members" :key="m.id" class="member-row" :class="{ me: m.is_me }">
-        <span class="m-avatar">{{ m.nickname?.[0] || '?' }}</span>
+        <span class="m-avatar" :title="m.nickname" @click="toProfile(m)">
+          <img v-if="m.avatar" :src="m.avatar" alt="" />
+          <template v-else>{{ m.nickname?.[0] || '?' }}</template>
+        </span>
         <div class="m-info">
-          <b>{{ m.nickname }}<el-tag v-if="m.is_owner" size="small" type="warning" style="margin-left:6px">👑 组长</el-tag>
+          <b class="u-link" @click="toProfile(m)">{{ m.nickname }}<el-tag v-if="m.is_owner" size="small" type="warning" style="margin-left:6px">👑 组长</el-tag>
             <el-tag v-if="m.is_me" size="small" type="info" effect="plain" style="margin-left:4px">我</el-tag>
           </b>
           <span class="m-user">@{{ m.username }}</span>
@@ -297,8 +306,12 @@ loadInvite();
   .m-avatar {
     width: 32px; height: 32px; border-radius: 50%; background: #2563eb; color: #fff;
     display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
+    cursor: pointer; overflow: hidden; transition: box-shadow .15s;
+    &:hover { box-shadow: 0 0 0 2px #bfdbfe; }
+    img { width: 100%; height: 100%; object-fit: cover; }
   }
   .m-info { flex: 1; min-width: 0; b { font-size: 13.5px; } .m-user { color: var(--text-2); font-size: 12px; margin-left: 6px; } }
+  .u-link { cursor: pointer; &:hover { color: #2563eb; } }
 }
 .role-form { background: #f8fafc; border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;
   .rf-row { display: flex; gap: 8px; align-items: center; }

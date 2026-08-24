@@ -5,6 +5,7 @@ import ScheduleView from './components/ScheduleView.vue';
 import StudyView from './components/StudyView.vue';
 import TeamView from './components/TeamView.vue';
 import MyView from './components/MyView.vue';
+import ProfileView from './components/ProfileView.vue';
 import AuthView from './components/AuthView.vue';
 import AdminView from './components/AdminView.vue';
 
@@ -17,6 +18,8 @@ export default createRouter({
     { path: '/study', redirect: '/schedule?tab=study' },
     { path: '/team', name: 'team', component: TeamView },
     { path: '/me', name: 'me', component: MyView },
+    // 用户公开主页（只读）：小组内点击成员头像/昵称进入
+    { path: '/user/:id', name: 'user-profile', component: ProfileView },
     { path: '/login', name: 'login', component: AuthView },
     { path: '/admin', name: 'admin', component: AdminView },
   ],

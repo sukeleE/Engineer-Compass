@@ -1,10 +1,16 @@
 <script setup>
 // 小组讨论（支持附图）
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
+import auth from '../../auth.js';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
+
+const router = useRouter();
+// 点击作者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
+const toProfile = (m) => router.push(m.user_id === auth.user?.id ? '/me' : `/user/${m.user_id}`);
 
 const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array });
 
@@ -85,7 +91,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <div v-if="!msgs.length" class="chat-empty">还没有讨论 — 来聊第一句吧 💬</div>
       <div v-for="m in msgs" :key="m.id" class="chat-item" :class="{ mine: m.user_id === me.user_id }">
         <div class="ci-head">
-          <b>{{ m.nickname }}</b>
+          <b class="u-link" @click="toProfile(m)">{{ m.nickname }}</b>
           <el-tag v-for="rn in roleNamesOf(m.user_id)" :key="rn" size="small" effect="plain" style="margin-left:2px">{{ rn }}</el-tag>
           <span class="ci-time">{{ m.create_time?.slice(5, 16) }}</span>
           <span class="ci-ops">
@@ -126,6 +132,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
   border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: #f8fafc;
   &.mine { background: #eff6ff; border-color: #bfdbfe; }
   .ci-head { display: flex; align-items: center; gap: 8px; b { font-size: 13px; }
+    .u-link { cursor: pointer; &:hover { color: #2563eb; } }
     .ci-time { color: #94a3b8; font-size: 11.5px; }
     .ci-ops { margin-left: auto; display: flex; align-items: center; gap: 2px; }
   }

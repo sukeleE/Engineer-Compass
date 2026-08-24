@@ -257,7 +257,7 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
     <section v-if="profile?.teams?.length" class="me-block">
       <h3>🏗️ 我的小组</h3>
       <div class="team-list">
-        <router-link v-for="t in profile.teams" :key="t.id" to="/team" class="team-item">
+        <router-link v-for="t in profile.teams" :key="t.id" :to="`/team?team=${t.id}`" class="team-item">
           <div class="ti-info">
             <b>{{ t.name }}</b>
             <span class="ti-desc">{{ t.desc || '—' }}</span>

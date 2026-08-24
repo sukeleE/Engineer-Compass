@@ -2,12 +2,18 @@
 // 进度对齐：任务列表（组长建任务/分配负责人/进度跟踪）+ 成员进度汇报时间线（富文本 + 附件 + 评论）
 // 编写汇报独立成弹窗，与时间线浏览区区分
 import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
+import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
 import RichEditor from './RichEditor.vue';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
+
+const router = useRouter();
+// 点击作者头像/昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
+const toProfile = (x) => router.push(x.user_id === auth.user?.id ? '/me' : `/user/${x.user_id}`);
 
 const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array, tasks: Array });
 
@@ -225,8 +231,8 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="l.create_time?.slice(5, 16)">
           <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
           <div class="log-head">
-            <span class="log-avatar" v-if="l.avatar"><img :src="l.avatar" alt="" /></span>
-            <span class="log-author">{{ l.nickname || '未知成员' }}</span>
+            <span class="log-avatar u-link" v-if="l.avatar" @click="toProfile(l)"><img :src="l.avatar" alt="" /></span>
+            <span class="log-author u-link" @click="toProfile(l)">{{ l.nickname || '未知成员' }}</span>
             <el-tag v-for="rn in roleNamesOf(l.user_id)" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
             <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
             <span class="log-actions">
@@ -285,6 +291,7 @@ reload().catch((e) => ElMessage.error(e.message));
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .log-author { font-size: 13.5px; font-weight: 600; }
+  .u-link { cursor: pointer; &:hover { color: #2563eb; } }
   .log-actions { margin-left: auto; display: flex; gap: 2px; }
 }
 .log-rich {

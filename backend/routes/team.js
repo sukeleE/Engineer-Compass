@@ -177,7 +177,7 @@ r.get('/:id', (req, res) => {
 
   const roleMap = roleMapOf(ctx.team.id);
   const members = db.prepare(
-    `SELECT u.id, u.username, u.nickname, tm.join_time
+    `SELECT u.id, u.username, u.nickname, u.avatar, tm.join_time
      FROM team_member tm JOIN user u ON u.id = tm.user_id
      WHERE tm.team_id = ? ORDER BY tm.join_time`
   ).all(ctx.team.id).map((m) => {

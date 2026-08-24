@@ -1,13 +1,24 @@
 <script setup>
 // 项目小组：我的小组列表 + 创建/加入 + 组内工作台（TeamDetail）
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, watch, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth, { clearAuth } from '../auth.js';
 import TeamDetail from './TeamDetail.vue';
 
 const router = useRouter();
+const route = useRoute();
+
+// ?team=<id> 深链：从「我的」小组卡片直达对应工作台；选中变化同步回 URL
+function selectByQuery(id) {
+  const t = teams.value.find((x) => x.id === Number(id));
+  if (t) selTeam.value = t;
+}
+watch(selTeam, (t) => {
+  if (t) router.replace({ query: { ...route.query, team: t.id } }).catch(() => {});
+});
+watch(() => route.query.team, (id) => { if (id) selectByQuery(id); });
 const teams = ref([]);
 const loading = ref(false);
 const selTeam = ref(null); // 选中的小组对象
@@ -32,6 +43,8 @@ async function load() {
       if (!still) selTeam.value = null;
       else selTeam.value = still;
     }
+    // ?team=<id> 深链：列表加载完成后选中对应小组
+    if (route.query.team) selectByQuery(route.query.team);
   } catch (e) {
     if (e.message.includes('401') || e.message.includes('登录')) clearAuth();
     ElMessage.error(e.message);
@@ -160,8 +173,8 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
         </aside>
         <el-empty v-else class="team-empty" description="还没有小组 — 创建或输入邀请码加入" />
 
-        <!-- 右：组内工作台 -->
-        <TeamDetail v-if="selTeam" :team-id="selTeam.id" :my-role="selTeam.role_name" />
+        <!-- 右：组内工作台（:key 强制重建——切组时子组件 onMounted 重新加载，避免显示旧组数据） -->
+        <TeamDetail v-if="selTeam" :key="selTeam.id" :team-id="selTeam.id" :my-role="selTeam.role_name" />
         <div v-else-if="teams.length" class="detail-placeholder">
           <div class="dp-icon">🏗️</div>
           <p>选择左侧小组进入工作台</p>

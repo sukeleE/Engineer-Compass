@@ -1,10 +1,15 @@
 <script setup>
 // 资料共享：上传（base64）/ 图片直接预览（点击放大）/ 下载 / 删除
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
+
+const router = useRouter();
+// 点击上传者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
+const toProfile = (f) => router.push(f.user_id === auth.user?.id ? '/me' : `/user/${f.user_id}`);
 
 const props = defineProps({ teamId: Number, me: Object, perms: Object, members: Array });
 
@@ -95,7 +100,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <div class="f-info">
         <b>{{ f.file_name }}</b>
         <span class="f-meta">
-          {{ fmtSize(f.file_size) }} · {{ f.uploader }}
+          {{ fmtSize(f.file_size) }} · <span class="u-link" @click="toProfile(f)">{{ f.uploader }}</span>
           <el-tag v-for="rn in roleNamesOf(f.user_id)" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
           · {{ f.create_time?.slice(0, 10) }}
         </span>
@@ -124,7 +129,9 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     &:hover { transform: scale(1.03); }
   }
   .f-info { flex: 1; min-width: 0; b { display: block; font-size: 13.5px; word-break: break-all; }
-    .f-meta { color: var(--text-2); font-size: 12px; }
+    .f-meta { color: var(--text-2); font-size: 12px;
+      .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+    }
   }
   .f-dl { color: #2563eb; font-size: 13px; text-decoration: none; &:hover { text-decoration: underline; } }
 }
