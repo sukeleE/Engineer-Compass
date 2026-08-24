@@ -12,10 +12,14 @@ BACKUP_DIR=$APP_DIR/backups   # 数据库备份目录
 
 cd "$APP_DIR"
 
-# 1. 备份数据库（更新前安全网，一条命令可回滚数据）
-mkdir -p "$BACKUP_DIR"
-cp "$BACKEND_DIR/data/compass.db" "$BACKUP_DIR/compass-$(date +%Y%m%d-%H%M%S).db"
-echo "✅ 数据库已备份"
+# 1. 备份数据库（更新前安全网，一条命令可回滚数据；首次部署无库则跳过）
+if [ -f "$BACKEND_DIR/data/compass.db" ]; then
+  mkdir -p "$BACKUP_DIR"
+  cp "$BACKEND_DIR/data/compass.db" "$BACKUP_DIR/compass-$(date +%Y%m%d-%H%M%S).db"
+  echo "✅ 数据库已备份"
+else
+  echo "ℹ️ 首次部署：暂无数据库（后端启动时自动创建），跳过备份"
+fi
 
 # 2. 拉取最新代码
 git pull
