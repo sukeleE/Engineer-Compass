@@ -4,6 +4,7 @@ import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import TechTreeChart from './TechTreeChart.vue';
+import PlanChat from './PlanChat.vue';
 
 const props = defineProps({ open: Boolean, compId: Number });
 const emit = defineEmits(['close']);
@@ -14,6 +15,7 @@ const activeTab = ref('info');
 const selProcess = ref(null);
 const joined = ref(null); // 加入日程的结果 { id, plan, note }
 const joining = ref(false);
+const showChat = ref(false); // AI 对话生成备赛日程弹窗
 
 const TYPE_COLORS = {
   电子机器人: '#3b82f6', 机械: '#f59e0b', 综合: '#10b981', 数学基础: '#8b5cf6',
@@ -89,6 +91,13 @@ async function join() {
   } finally {
     joining.value = false;
   }
+}
+
+// 对话式生成完成（后端已保存）→ 展示计划
+async function onChatDone(r) {
+  showChat.value = false;
+  joined.value = { id: r.plan_id, plan: r.plan };
+  ElMessage.success('✅ 备赛日程已按对话生成，可在顶部「📋 我的备赛日程」查看');
 }
 </script>
 
@@ -254,9 +263,12 @@ async function join() {
             <template v-if="!joined">
               <div class="join-intro">
                 <p>确认要参加 <b>{{ comp.name }}</b> 吗？</p>
-                <p class="join-tip">系统将结合当前日期自动生成个性化备赛计划：分月任务清单、每周学习时长、阶段达标指标、采购清单建议。</p>
+                <p class="join-tip">💬 对话生成：AI 先确认你的基础、备赛周期与每周投入，再产出个性化日程；⚡ 一键生成：直接结合当前日期自动生成。</p>
               </div>
-              <el-button type="primary" size="large" :loading="joining" @click="join">➕ 加入我的备赛日程</el-button>
+              <div class="join-actions">
+                <el-button type="primary" size="large" @click="showChat = true">💬 AI 对话生成备赛日程</el-button>
+                <el-button size="large" :loading="joining" @click="join">⚡ 一键生成</el-button>
+              </div>
             </template>
             <template v-else>
               <div class="plan-head">
@@ -285,6 +297,9 @@ async function join() {
             </template>
           </el-tab-pane>
         </el-tabs>
+
+        <!-- AI 对话生成备赛日程（先确认水平/周期/投入，再生成） -->
+        <PlanChat v-model="showChat" mode="schedule" :comp-id="comp.id" @done="onChatDone" />
       </template>
     </div>
   </el-dialog>
@@ -338,6 +353,7 @@ async function join() {
 .stack-label { color: var(--text-2); font-size: 13px; }
 
 .join-intro { margin-bottom: 16px; p { margin: 6px 0; } .join-tip { color: var(--text-2); font-size: 13px; } }
+.join-actions { display: flex; gap: 10px; align-items: center; }
 
 // 学习资源
 .media-block { margin-bottom: 16px;

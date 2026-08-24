@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth, { clearAuth } from '../auth.js';
 import TeamDetail from './TeamDetail.vue';
+import PlanChat from './PlanChat.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -25,6 +26,7 @@ watch(selTeam, (t) => {
 watch(() => route.query.team, (id) => { if (id) selectByQuery(id); });
 const showCreate = ref(false);
 const showJoin = ref(false);
+const showChat = ref(false); // AI 对话建组弹窗
 const newTeam = ref({ name: '', desc: '', comp_id: null });
 const joinCode = ref('');
 const comps = ref([]); // 竞赛列表（AI 智能建组用）
@@ -54,19 +56,22 @@ async function load() {
   }
 }
 
-async function create() {
+// 建组：直接创建，或带「AI 对话」确认的 departments+plan（chatResult）一并提交
+async function create(chatResult) {
   if (!newTeam.value.name.trim()) return ElMessage.warning('请输入小组名称');
   loading.value = true;
   try {
-    const res = await api.teamCreate(newTeam.value);
+    const card = chatResult ? { ...newTeam.value, departments: chatResult.departments, plan: chatResult.plan } : newTeam.value;
+    const res = await api.teamCreate(card);
     if (res.ai_depts?.length) {
-      ElMessage.success(`已创建「${res.name}」，AI 已拆分为部门：${res.ai_depts.join('、')}（备赛计划已生成）`);
+      ElMessage.success(`已创建「${res.name}」，已按对话确认拆分为部门：${res.ai_depts.join('、')}（备赛计划已生成）`);
     } else if (res.plan_id) {
       ElMessage.success(`已创建「${res.name}」，备赛计划已生成（AI 服务不可用，已用模板兜底）`);
     } else {
       ElMessage.success(`已创建「${res.name}」，邀请码 ${res.invite_code}`);
     }
     showCreate.value = false;
+    showChat.value = false;
     newTeam.value = { name: '', desc: '', comp_id: null };
     await load();
     const t = teams.value.find((x) => x.id === res.id);
@@ -142,9 +147,17 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
           <el-form-item label="③ 小组简介"><el-input v-model="newTeam.desc" type="textarea" :rows="2" placeholder="选填" /></el-form-item>
           <el-alert v-if="newTeam.comp_id" type="success" :closable="false" class="ai-tip"
             title="🧠 创建后将自动：AI 拆分部门（如机械组/电控组/软件组）→ 按部门生成备赛计划，组长可直接分配成员" />
-          <el-button type="primary" :loading="loading" @click="create">🏗️ 创建小组（你将成为组长）</el-button>
+          <div class="create-actions">
+            <el-button type="success" plain @click="showChat = true">💬 AI 对话智能建组</el-button>
+            <el-button type="primary" :loading="loading" @click="create()">🏗️ 直接创建（你将成为组长）</el-button>
+          </div>
+          <div class="create-tip">💬 AI 对话：AI 先询问分组方式与备赛周期，确认后再生成部门与计划；直接创建则走一键 AI（或手动建组）</div>
         </el-form>
       </el-dialog>
+
+      <!-- AI 对话建组：先与 AI 确认部门分组与备赛周期 → 按对话确认的方案建组 -->
+      <PlanChat v-model="showChat" mode="team-create" :comp-id="newTeam.comp_id"
+        @done="(r) => create(r)" />
       <el-dialog :model-value="showJoin" title="邀请码加入" width="420px" @update:model-value="(v) => (showJoin = v)">
         <el-form label-position="top">
           <el-form-item label="邀请码">
@@ -188,6 +201,8 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
 <style lang="scss" scoped>
 .team-page { padding: 20px 24px; max-width: 1280px; margin: 0 auto; }
 .ai-tip { margin-bottom: 12px; border-radius: 8px; }
+.create-actions { display: flex; gap: 8px; }
+.create-tip { margin-top: 8px; color: #94a3b8; font-size: 12px; }
 .need-login { text-align: center; padding: 80px 0;
   .nl-icon { font-size: 48px; }
   h2 { margin: 12px 0 6px; }

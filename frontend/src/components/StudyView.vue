@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import { fmtDate } from '../utils/noteStatus.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
+import PlanChat from './PlanChat.vue';
 
 const form = ref({ topic: '', level: '零基础', goal: '', hours: 10 });
 const generating = ref(false);
@@ -14,6 +15,8 @@ const detail = ref(null);
 const saving = ref(false);
 const loadingDetail = ref(false);
 const manualDlg = ref(false);
+const chatCreate = ref(false); // AI 对话生成学习日程
+const chatEdit = ref(false); // AI 对话修改学习日程
 
 // 平台元数据（与 CompDialog 学习资源一致）
 const PLATFORM_META = {
@@ -147,6 +150,22 @@ async function removePhase(i) {
 }
 
 // 自编计划创建成功 → 刷新列表并选中新计划
+// 对话式生成/修改完成（后端已保存）→ 刷新列表与详情
+async function onChatDone(r, isEdit) {
+  if (isEdit) {
+    chatEdit.value = false;
+    detail.value = await api.studyDetail(r.plan_id);
+    await loadList();
+    ElMessage.success('✅ 学习日程已按对话修改');
+    return;
+  }
+  chatCreate.value = false;
+  await loadList();
+  const item = list.value.find((s) => s.id === r.plan_id);
+  if (item) select(item);
+  ElMessage.success('✅ 学习日程已生成');
+}
+
 async function onManualCreated(res) {
   await loadList();
   const item = list.value.find((s) => s.id === res.id);
@@ -193,16 +212,22 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
         <el-input-number v-model="form.hours" :min="2" :max="80" size="large" style="width: 130px">
           <template #prefix>周</template>
         </el-input-number>
-        <el-button type="primary" size="large" :loading="generating" @click="generate">✨ AI 生成</el-button>
+        <el-button type="primary" size="large" @click="chatCreate = true">💬 AI 对话生成</el-button>
+        <el-button size="large" :loading="generating" @click="generate">⚡ 快速生成</el-button>
       </div>
       <div v-if="generating" class="gen-loading">
         <span class="spinner"></span> AI 正在规划学习路径与资料检索关键词…
       </div>
+      <div class="gen-chat-tip">💬 AI 对话生成：AI 会先确认你的学习主题、水平、目标与时间投入，再产出计划</div>
     </div>
 
     <!-- 自编计划弹窗（手动编写，不经 AI） -->
     <ManualPlanDialog v-model="manualDlg" mode="study"
       @created="onManualCreated" />
+
+    <!-- 对话式 AI：生成 / 修改学习日程（AI 先确认主题与投入，已勾选任务自动保留） -->
+    <PlanChat v-model="chatCreate" mode="study" @done="(r) => onChatDone(r, false)" />
+    <PlanChat v-model="chatEdit" mode="study-edit" :study-id="detail?.id" @done="(r) => onChatDone(r, true)" />
 
     <!-- 列表 + 详情 -->
     <div class="study-body">
@@ -245,7 +270,10 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
               </div>
               <p v-if="detail.plan?.summary" class="dh-summary">{{ detail.plan.summary }}</p>
             </div>
-            <el-button size="small" type="danger" plain @click="removeStudy(detail)">删除</el-button>
+            <div class="dh-ops">
+              <el-button size="small" type="success" plain @click="chatEdit = true">💬 AI 修改</el-button>
+              <el-button size="small" type="danger" plain @click="removeStudy(detail)">删除</el-button>
+            </div>
           </div>
 
           <div class="detail-progress">
@@ -358,6 +386,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   .gen-form { display: flex; gap: 10px; flex-wrap: wrap;
     .el-input { flex: 1; min-width: 220px; }
   }
+  .gen-chat-tip { margin-top: 10px; color: #64748b; font-size: 12.5px; }
   .gen-loading { margin-top: 12px; color: #2563eb; font-size: 13px; display: flex; align-items: center; gap: 8px;
     .spinner { width: 14px; height: 14px; border: 2px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -402,6 +431,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
     h3 { margin: 0 0 8px; font-size: 18px; }
     .dh-tags { display: flex; gap: 6px; flex-wrap: wrap; }
     .dh-summary { margin: 8px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+    .dh-ops { display: flex; gap: 8px; flex-shrink: 0; }
   }
   .detail-progress { margin-bottom: 16px; }
 }

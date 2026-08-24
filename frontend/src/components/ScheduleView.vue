@@ -12,6 +12,7 @@ import StudyView from './StudyView.vue';
 import MyTeamTasks from './team/MyTeamTasks.vue';
 import auth from '../auth.js';
 import { fmtDate } from '../utils/noteStatus.js';
+import PlanChat from './PlanChat.vue';
 
 // 页面 tab：calendar 月历（默认）| comp 竞赛日程 | study 学习日程 | team 小组任务（支持 ?tab=xx 深链）
 const route = useRoute();
@@ -126,6 +127,23 @@ async function optimize(s) {
   }
 }
 
+// 对话式 AI 修改（schedule-edit，后端已保存；已勾选任务自动保留）
+const chatSid = ref(null);
+const chatOpen = ref(false);
+function openChat(s) {
+  chatSid.value = s.id;
+  chatOpen.value = true;
+}
+function onChatDone(r) {
+  chatOpen.value = false;
+  const s = schedules.value.find((x) => x.id === chatSid.value);
+  if (s && r.plan?.phases) {
+    s.phases = r.plan.phases;
+    s.is_custom = 0;
+  }
+  ElMessage.success('✅ 备赛日程已按对话修改');
+}
+
 async function remove(s) {
   try {
     await ElMessageBox.confirm(`删除「${s.comp_name}」的备赛日程？`, '删除确认', { type: 'warning' });
@@ -189,7 +207,8 @@ onMounted(load);
             </div>
             <div class="s-actions">
               <el-button size="small" :loading="savingId === s.id" @click="save(s)">💾 保存</el-button>
-              <el-button size="small" type="warning" plain @click="optimize(s)">🤖 AI 优化</el-button>
+              <el-button size="small" type="success" plain @click="openChat(s)">💬 AI 修改</el-button>
+              <el-button size="small" type="warning" plain @click="optimize(s)">⚡ AI 优化</el-button>
               <el-dropdown trigger="click" style="margin: 0 4px">
                 <el-button size="small" plain>⬇️ 导出</el-button>
                 <template #dropdown>
@@ -218,7 +237,7 @@ onMounted(load);
           </div>
 
           <!-- 无阶段数据兜底 -->
-          <div v-if="!s.phases?.length" class="phase-empty">该日程暂无阶段数据，可点「🤖 AI 优化」重新生成</div>
+          <div v-if="!s.phases?.length" class="phase-empty">该日程暂无阶段数据，可点「💬 AI 修改」重新生成</div>
 
           <!-- 分阶段任务 -->
           <div v-for="(ph, i) in s.phases" :key="i" class="phase-block">
@@ -311,6 +330,9 @@ onMounted(load);
 
     <!-- 日程笔记浮窗：四个 tab 共享，可拖动、可收起 -->
     <ScheduleNotes :schedules="schedules" />
+
+    <!-- 对话式 AI 修改备赛日程（AI 先确认调整方向，已勾选任务自动保留） -->
+    <PlanChat v-model="chatOpen" mode="schedule-edit" :schedule-id="chatSid" @done="onChatDone" />
   </main>
 </template>
 

@@ -7,6 +7,7 @@ import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { fmtDate } from '../../utils/noteStatus.js';
 import TeamPlans from './TeamPlans.vue';
+import PlanChat from '../PlanChat.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
@@ -90,6 +91,19 @@ async function toggle(prow, phIdx, task) {
 }
 
 // —— 编辑（组长）——
+// —— 对话式 AI（生成 / 修改）——
+const genChat = ref(false); // 对话生成弹窗
+const editChat = ref(false); // 对话修改弹窗
+const editChatPlanId = ref(null);
+function openGenChat() {
+  if (!genCompId.value) return ElMessage.warning('请先选择竞赛');
+  genChat.value = true;
+}
+function openEditChat(p) {
+  editChatPlanId.value = p.id;
+  editChat.value = true;
+}
+
 const editDlg = ref(false);
 const editPlan = ref(null); // { id, title, phases[] }
 function openEdit(prow) {
@@ -133,8 +147,9 @@ onMounted(() => { load(); loadComps(); });
       <el-select v-model="genCompId" filterable placeholder="选择竞赛" style="width: 300px">
         <el-option v-for="c in comps" :key="c.id" :label="c.name" :value="c.id" />
       </el-select>
-      <el-button type="primary" :loading="genLoading" @click="generate">🧠 AI 生成小组计划</el-button>
-      <span class="gen-tip">AI 将结合小组部门（{{ deptOptions.join('、') }}）拆分任务</span>
+      <el-button type="success" plain @click="openGenChat">💬 AI 对话生成</el-button>
+      <el-button :loading="genLoading" @click="generate">⚡ 一键生成</el-button>
+      <span class="gen-tip">💬 对话生成：AI 先确认分组方式与计划周期再出计划；一键生成：直接按现有部门拆分（AI 将结合部门 {{ deptOptions.join('、') }}）</span>
     </div>
 
     <div v-loading="loading" style="min-height: 60px">
@@ -151,7 +166,8 @@ onMounted(() => { load(); loadComps(); });
             <span class="pb-time">{{ String(p.update_time || p.create_time || '').slice(0, 16) }} 更新</span>
           </div>
           <div class="pb-ops">
-            <el-button v-if="canEdit" size="small" @click="openEdit(p)">✏️ 编辑</el-button>
+            <el-button v-if="canEdit" size="small" type="success" plain @click="openEditChat(p)">💬 AI 修改</el-button>
+            <el-button v-if="canEdit" size="small" @click="openEdit(p)">✏️ 手动编辑</el-button>
             <el-button v-if="canEdit" size="small" type="danger" plain @click="removePlan(p)">删除</el-button>
           </div>
         </div>
@@ -245,6 +261,12 @@ onMounted(() => { load(); loadComps(); });
         <el-button type="primary" @click="saveEdit">保存计划</el-button>
       </template>
     </el-dialog>
+
+    <!-- 对话式 AI：生成 / 修改小组计划（AI 先提问分组与周期，确认后落地；已勾选任务自动保留） -->
+    <PlanChat v-model="genChat" mode="team-generate" :team-id="teamId" :comp-id="genCompId"
+      @done="() => { genChat = false; ElMessage.success('🎉 小组计划已生成'); load(); }" />
+    <PlanChat v-model="editChat" mode="team-edit" :team-id="teamId" :plan-id="editChatPlanId"
+      @done="() => { editChat = false; ElMessage.success('✅ 计划已按对话修改'); load(); }" />
   </div>
 </template>
 

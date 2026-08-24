@@ -62,6 +62,8 @@ export const api = {
   studyDetail: (id) => req(`/study/${id}`),
   studyUpdate: (id, planJson) => req(`/study/${id}`, { method: 'POST', body: JSON.stringify({ plan_json: planJson }) }),
   studyDelete: (id) => req(`/study/${id}`, { method: 'DELETE' }),
+  // 对话式 AI 计划：统一「先对话、后成稿」（team-create/team-generate/team-edit/schedule/schedule-edit/study/study-edit）
+  planChat: (cfg, messages) => req('/plan-chat', { method: 'POST', body: JSON.stringify({ ...cfg, messages }) }, AI_TIMEOUT),
   // 日程笔记（每日学习笔记 + 学习状态）
   notesMonth: (month) => req(`/notes?month=${month}`),
   noteByDate: (date) => req(`/notes/${date}`),

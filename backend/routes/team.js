@@ -30,8 +30,9 @@ const roleMapOf = (teamId) => {
 
 // POST /api/team — 创建小组（组长=创建者，自动建默认"组员"角色）
 // 可选 comp_id：AI 按竞赛智能拆分部门（team_role）并生成备赛计划（team_plan）；AI 失败时用子赛项模板兜底
+// 对话式建组：直接传 departments [{name,duty}] + plan {phases}（来自 /api/plan-chat team-create 对话），跳过 AI
 r.post('/', async (req, res) => {
-  const { name, desc, comp_id } = req.body || {};
+  const { name, desc, comp_id, departments, plan: planBody } = req.body || {};
   const tname = String(name || '').trim();
   if (!tname) return res.status(400).json({ error: '小组名称必填' });
   if (tname.length > 30) return res.status(400).json({ error: '小组名称过长（≤30字）' });
@@ -56,11 +57,31 @@ r.post('/', async (req, res) => {
     throw e;
   }
 
-  // —— AI 智能拆解（部门 + 备赛计划）——
+  // —— 部门与计划：对话结果（departments+plan）优先，否则 AI 智能拆解（部门 + 备赛计划）——
   const aiDepts = []; // 新部门角色 [{id, name}]
   let plan = null, template = false;
   const comp = comp_id ? db.prepare('SELECT * FROM competition WHERE id = ? AND status = ?').get(Number(comp_id), 'active') : null;
-  if (comp) {
+  if (Array.isArray(departments) && departments.length) {
+    // 对话式建组：按对话确认的部门建角色（level 递增，默认组员权限；「通用」是任务标签不是部门角色）
+    let lv = 0;
+    for (const d of departments.slice(0, 8)) {
+      const dn = String(d?.name || '').trim();
+      if (!dn || dn === '通用') continue;
+      lv += 1;
+      const rr = db.prepare('INSERT INTO team_role (team_id, name, level, permissions) VALUES (?,?,?,?)')
+        .run(teamId, dn, lv, JSON.stringify(DEFAULT_MEMBER_PERMS));
+      aiDepts.push({ id: rr.lastInsertRowid, name: dn });
+    }
+  }
+  if (planBody && typeof planBody === 'object') {
+    const norm = normTeamPlan(planBody, aiDepts);
+    if (norm.phases.length) {
+      const planJson = { ...(comp ? { comp_id: comp.id, comp_name: comp.name } : {}), ...norm };
+      const rr = db.prepare('INSERT INTO team_plan (team_id, comp_id, title, plan_json) VALUES (?,?,?,?)')
+        .run(teamId, comp?.id ?? null, comp?.name ?? tname, JSON.stringify(planJson));
+      plan = { id: rr.lastInsertRowid, plan: planJson };
+    }
+  } else if (comp) {
     try {
       const now = new Date();
       const system = `你是工科竞赛团队组建顾问，为竞赛小组设计部门与备赛计划。
@@ -393,8 +414,8 @@ function normTeamPlan(plan, roles) {
       if (!text) return null;
       const dept = String(raw.dept || raw.部门 || '').trim();
       const role = roles.find((x) => x.name === dept);
-      // done_by 必须保留（老任务无该字段 → null），否则组长编辑保存会抹掉完成人
-      return { text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null, done_by: raw.done_by || null };
+      // done_by/done_at 必须保留（老任务无该字段 → null），否则组长编辑保存会抹掉完成人与完成日期（月历按完成日聚合）
+      return { text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null, done_by: raw.done_by || null, done_at: raw.done_at || null };
     }).filter(Boolean),
   })).filter((p) => p.tasks.length);
   return { phases };
