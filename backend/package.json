@@ -1,0 +1,18 @@
+{
+  "name": "engineer-compass-backend",
+  "version": "0.1.0",
+  "description": "Engineer-Compass 工科竞赛导航系统 后端（Express + node:sqlite）",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "import": "node scripts/import_data.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

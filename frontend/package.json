@@ -1,0 +1,25 @@
+{
+  "name": "engineer-compass-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@wangeditor/editor": "^5.1.23",
+    "@wangeditor/editor-for-vue": "^5.1.12",
+    "echarts": "^5.6.0",
+    "element-plus": "^2.9.7",
+    "gsap": "^3.13.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.3",
+    "sass": "^1.85.1",
+    "vite": "^6.3.5"
+  }
+}

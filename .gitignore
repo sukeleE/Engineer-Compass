@@ -141,3 +141,14 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ===== 本项目定制（Engineer-Compass）=====
+# 密钥（DeepSeek key 等）
+backend/.env
+
+# Claude 本地配置
+.claude/
+
+# 运行时数据（数据库）
+backend/data/
+backups/

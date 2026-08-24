@@ -1,0 +1,2 @@
+# 部署脚本强制 LF（Windows 检出时避免 CRLF 导致 bash 报错）
+*.sh text eol=lf

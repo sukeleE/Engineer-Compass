@@ -1,0 +1,80 @@
+// 全局样式：赛道主题色 + 基础排版
+:root {
+  --c-电子机器人: #3b82f6;
+  --c-机械: #f59e0b;
+  --c-综合: #10b981;
+  --c-数学基础: #8b5cf6;
+  --c-设计艺术: #ec4899;
+  --c-经管商科: #14b8a6;
+  --c-医学技能: #ef4444;
+  --c-default: #64748b;
+
+  --bg: #f8fafc;
+  --card-bg: #ffffff;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-2: #64748b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+}
+
+#app { min-height: 100vh; }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 20px 24px 10px;
+  .brand h1 {
+    margin: 0;
+    font-size: 26px;
+    letter-spacing: 1px;
+    span { color: var(--text-2); font-size: 14px; font-weight: 400; margin-left: 8px; }
+  }
+  .brand .sub { color: var(--text-2); margin: 4px 0 0; font-size: 13px; }
+
+  .nav {
+    display: flex;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    a {
+      text-decoration: none;
+      color: var(--text-2);
+      font-size: 13px;
+      padding: 7px 18px;
+      border-radius: 999px;
+      transition: all .2s;
+      &:hover { color: var(--text); background: #f1f5f9; }
+      &.router-link-active {
+        background: #2563eb;
+        color: #fff;
+        font-weight: 600;
+      }
+    }
+  }
+}
+
+// 赛道颜色工具
+.type-color {
+  &.电子机器人 { color: var(--c-电子机器人); }
+  &.机械 { color: var(--c-机械); }
+  &.综合 { color: var(--c-综合); }
+  &.数学基础 { color: var(--c-数学基础); }
+  &.设计艺术 { color: var(--c-设计艺术); }
+  &.经管商科 { color: var(--c-经管商科); }
+  &.医学技能 { color: var(--c-医学技能); }
+}

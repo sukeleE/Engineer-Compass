@@ -1,0 +1,114 @@
+<script setup>
+// 小组讨论（支持附图）
+import { ref, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
+import { api } from '../../api.js';
+import AttachmentList from './AttachmentList.vue';
+import CommentThread from './CommentThread.vue';
+
+const props = defineProps({ teamId: Number, me: Object, perms: Object });
+
+const msgs = ref([]);
+const input = ref('');
+const imgAtts = ref([]); // 待发送图片
+const imgInput = ref(null);
+const sending = ref(false);
+
+async function load() {
+  msgs.value = await api.teamMessages(props.teamId);
+}
+
+// 选图（最多 5 张，单张 ≤10MB）
+async function pickImgs(e) {
+  const files = [...(e.target.files || [])];
+  e.target.value = '';
+  if (imgAtts.value.length + files.length > 5) return ElMessage.warning('一次最多 5 张图');
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) { ElMessage.warning(`「${f.name}」不是图片`); continue; }
+    if (f.size > 10 * 1024 * 1024) { ElMessage.warning(`「${f.name}」超过 10MB`); continue; }
+    const data = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.readAsDataURL(f);
+    });
+    imgAtts.value.push({ name: f.name, size: f.size, mime: f.type, data });
+  }
+}
+
+async function send() {
+  if (!input.value.trim() && !imgAtts.value.length) return;
+  sending.value = true;
+  try {
+    await api.teamMessage(props.teamId, { content: input.value, attachments: imgAtts.value });
+    input.value = '';
+    imgAtts.value = [];
+    await load();
+  } catch (e) { ElMessage.error(e.message); } finally { sending.value = false; }
+}
+
+async function remove(m) {
+  const canDel = m.user_id === props.me.user_id || props.perms.task;
+  if (!canDel) return ElMessage.warning('仅本人或管理员可删除');
+  try {
+    await api.teamMessageDelete(props.teamId, m.id);
+    await load();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+onMounted(() => load().catch((e) => ElMessage.error(e.message)));
+</script>
+
+<template>
+  <div class="chat">
+    <div class="chat-list">
+      <div v-if="!msgs.length" class="chat-empty">还没有讨论 — 来聊第一句吧 💬</div>
+      <div v-for="m in msgs" :key="m.id" class="chat-item" :class="{ mine: m.user_id === me.user_id }">
+        <div class="ci-head">
+          <b>{{ m.nickname }}</b>
+          <span class="ci-time">{{ m.create_time?.slice(5, 16) }}</span>
+          <el-button v-if="m.user_id === me.user_id || perms.task" size="small" text type="danger"
+            @click="remove(m)">删</el-button>
+        </div>
+        <div v-if="m.content" class="ci-body">{{ m.content }}</div>
+        <AttachmentList v-if="m.attachments?.length" :attachments="m.attachments" />
+        <CommentThread :team-id="teamId" type="message" :target="m" />
+      </div>
+    </div>
+    <div class="chat-input">
+      <input ref="imgInput" type="file" accept="image/*" multiple hidden @change="pickImgs" />
+      <el-button :disabled="!perms.message" title="附图片" @click="imgInput.click()">🖼️</el-button>
+      <div v-if="imgAtts.length" class="img-preview">
+        <div v-for="(a, i) in imgAtts" :key="i" class="ip-item">
+          <img :src="`data:${a.mime};base64,${a.data}`" />
+          <el-button size="small" text type="danger" @click="imgAtts.splice(i, 1)">×</el-button>
+        </div>
+      </div>
+      <el-input v-model="input" placeholder="说点什么…（按 Enter 发送，可附图）" @keyup.enter="send" />
+      <el-button type="primary" :disabled="!perms.message" :loading="sending" @click="send">发送</el-button>
+    </div>
+    <div v-if="!perms.message" class="chat-noperm">你的角色没有「发消息」权限（可让组长在 成员与角色 页调整）</div>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.chat-list { max-height: 480px; overflow-y: auto; padding: 4px 2px; }
+.chat-empty { color: #94a3b8; text-align: center; padding: 50px 0; font-size: 13px; }
+.chat-item {
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: #f8fafc;
+  &.mine { background: #eff6ff; border-color: #bfdbfe; }
+  .ci-head { display: flex; align-items: center; gap: 8px; b { font-size: 13px; }
+    .ci-time { color: #94a3b8; font-size: 11.5px; }
+    .el-button { margin-left: auto; }
+  }
+  .ci-body { font-size: 13.5px; line-height: 1.7; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+}
+.chat-input { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+  .img-preview { display: flex; gap: 8px; width: 100%; flex-wrap: wrap;
+    .ip-item { position: relative;
+      img { height: 60px; border-radius: 6px; border: 1px solid var(--border); }
+      .el-button { position: absolute; top: -8px; right: -8px; padding: 2px 5px; }
+    }
+  }
+}
+.chat-noperm { color: #94a3b8; font-size: 12px; margin-top: 6px; }
+</style>
