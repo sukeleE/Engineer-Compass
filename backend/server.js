@@ -13,7 +13,7 @@ import team from './routes/team.js';
 import teamCollab from './routes/teamCollab.js';
 import { hasSMTP } from './routes/mailer.js';
 
-// 加载 .env（Node 24 内置）
+// 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
 
 const app = express();
@@ -34,7 +34,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true, name: 'Engineer-Compass API', time: new Date().toISOString(),
     ai: !!process.env.DEEPSEEK_API_KEY,
-    mail: hasSMTP,
+    mail: hasSMTP(),
   });
 });
 

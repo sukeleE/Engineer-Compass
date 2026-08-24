@@ -1,7 +1,6 @@
 // 邮件发送（零依赖）：SMTP 客户端（node:net / node:tls 内置实现）+ 开发模式降级
-// ⚠️ 时序敏感：本模块顶层在 import 时读取 process.env（模块加载早于任何入口代码）。
-//    必须用 `node --env-file-if-exists=.env` 启动（package.json start / deploy.sh 已带），
-//    否则 .env 里的 SMTP_* 在模块加载时还是空 → hasSMTP 恒 false，验证码退回 dev 模式。
+// ⚠️ 时序：本模块被 server.js 静态 import 链提前加载（早于 server.js 的 loadEnvFile('.env')），
+//    所以配置一律惰性读取（调用时读 process.env），绝不模块级快照 —— 否则 SMTP_* 恒为空。
 // .env 配置：
 //   SMTP_HOST=smtp.qq.com  SMTP_PORT=465  SMTP_USER=xxx@qq.com  SMTP_PASS=授权码  SMTP_FROM=可选（默认 SMTP_USER）
 // 未配置 SMTP → dev 模式：控制台打印邮件内容，sendMail 返回 { dev: true }（调用方把验证码带给前端）
@@ -9,30 +8,31 @@ import net from 'node:net';
 import tls from 'node:tls';
 import os from 'node:os';
 
-const cfg = {
+// 运行时读取配置（模块加载顺序无关）
+const cfg = () => ({
   host: process.env.SMTP_HOST || '',
   port: Number(process.env.SMTP_PORT) || 465,
   user: process.env.SMTP_USER || '',
   pass: process.env.SMTP_PASS || '',
   from: process.env.SMTP_FROM || process.env.SMTP_USER || 'Engineer-Compass <noreply@localhost>',
-};
-export const hasSMTP = !!(cfg.host && cfg.user && cfg.pass);
+});
+export const hasSMTP = () => { const c = cfg(); return !!(c.host && c.user && c.pass); };
 
 // MAIL FROM 地址解析（支持 "名称 <addr>" 形式）
-const fromAddr = (cfg.from.match(/<([^>]+)>/) || [null, cfg.from])[1];
+const fromAddrOf = (c) => (c.from.match(/<([^>]+)>/) || [null, c.from])[1];
 
-function tlsConnect() {
+function tlsConnect(c) {
   return new Promise((resolve, reject) => {
-    const s = tls.connect({ host: cfg.host, port: cfg.port, rejectUnauthorized: false });
+    const s = tls.connect({ host: c.host, port: c.port, rejectUnauthorized: false });
     s.setTimeout(10000);
     s.on('secureConnect', () => resolve(s));
     s.on('error', reject);
     s.on('timeout', () => s.destroy(new Error('SMTP 连接超时')));
   });
 }
-function netConnect() {
+function netConnect(c) {
   return new Promise((resolve, reject) => {
-    const s = net.connect({ host: cfg.host, port: cfg.port });
+    const s = net.connect({ host: c.host, port: c.port });
     s.setTimeout(10000);
     s.on('connect', () => resolve(s));
     s.on('error', reject);
@@ -84,17 +84,18 @@ function upgradeTls(sock) {
 }
 
 async function sendMail({ to, subject, html }) {
-  if (!hasSMTP) {
+  const c = cfg(); // 运行时读取（.env 已在 server.js 加载）
+  if (!hasSMTP()) {
     // 开发模式：不真正发邮件，控制台输出便于调试（前端通过 dev_code 拿到验证码）
     console.log(`\n===== [DEV MAIL] → ${to} =====\n主题: ${subject}\n${html.replace(/<[^>]+>/g, '').trim()}\n===== END =====`);
     return { dev: true };
   }
-  let sock = cfg.port === 465 ? await tlsConnect() : await netConnect();
+  let sock = c.port === 465 ? await tlsConnect(c) : await netConnect(c);
   try {
     let read = makeReader(sock);
     await read(); // 服务器 banner
     await cmd(sock, read, `EHLO ${os.hostname()}`, [250]);
-    if (cfg.port !== 465 && cfg.port !== 25) {
+    if (c.port !== 465 && c.port !== 25) {
       // 587 等：明文 EHLO 后 STARTTLS
       await cmd(sock, read, 'STARTTLS', [220]);
       sock = await upgradeTls(sock);
@@ -103,14 +104,14 @@ async function sendMail({ to, subject, html }) {
     }
     // AUTH LOGIN（base64 用户名 / 密码）
     await cmd(sock, read, 'AUTH LOGIN', [334]);
-    await cmd(sock, read, Buffer.from(cfg.user, 'utf8').toString('base64'), [334]);
-    await cmd(sock, read, Buffer.from(cfg.pass, 'utf8').toString('base64'), [235]);
-    await cmd(sock, read, `MAIL FROM:<${fromAddr}>`, [250]);
+    await cmd(sock, read, Buffer.from(c.user, 'utf8').toString('base64'), [334]);
+    await cmd(sock, read, Buffer.from(c.pass, 'utf8').toString('base64'), [235]);
+    await cmd(sock, read, `MAIL FROM:<${fromAddrOf(c)}>`, [250]);
     await cmd(sock, read, `RCPT TO:<${to}>`, [250, 251]);
     await cmd(sock, read, 'DATA', [354]);
     const b64 = Buffer.from(html, 'utf8').toString('base64');
     const body = [
-      `From: ${cfg.from}`,
+      `From: ${c.from}`,
       `To: <${to}>`,
       `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
       'MIME-Version: 1.0',
