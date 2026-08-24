@@ -103,6 +103,10 @@ function clearHistory() {
   width: 420px; height: 640px; max-height: calc(100vh - 120px); background: #fff; border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .2); border: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
+  // 移动端：面板铺满视口（去掉边距防止键盘弹起遮挡）
+  @media (max-width: 768px) {
+    right: 0; bottom: 0; width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0;
+  }
 }
 
 .chat-head {

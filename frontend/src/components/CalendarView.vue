@@ -330,6 +330,25 @@ onMounted(() => {
   }
 }
 
+// 移动端紧凑：格子压扁、emoji/日期字号缩小、工具栏允许换行
+@media (max-width: 768px) {
+  .cal-toolbar {
+    flex-wrap: wrap;
+    .cal-hint { margin-left: 0; width: 100%; }
+  }
+  .cal-grid { gap: 4px; }
+  .cal-cell {
+    min-height: 52px; border-radius: 6px; padding: 3px 4px;
+    .cal-day { font-size: 11px; }
+    .cal-emojis { margin-top: 2px; min-height: 14px; gap: 1px;
+      .cal-emoji { font-size: 11px; }
+      .cal-more { font-size: 9px; }
+    }
+  }
+  .cal-week { font-size: 10px; }
+  .cal-box { padding: 6px; }
+}
+
 // 已完成计划
 .done-plans {
   margin-top: 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;

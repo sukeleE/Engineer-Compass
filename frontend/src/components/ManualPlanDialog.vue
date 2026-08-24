@@ -132,5 +132,10 @@ async function submit() {
   .mp-ph-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
     .mp-idx { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
   }
+  // 移动端：阶段头控件换行堆叠
+  @media (max-width: 768px) {
+    .mp-ph-head { flex-wrap: wrap; }
+    .mp-ph-head .el-input { flex: 1 1 100%; }
+  }
 }
 </style>

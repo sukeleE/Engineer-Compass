@@ -317,6 +317,14 @@ loadInvite();
   .rf-row { display: flex; gap: 8px; align-items: center; }
   .rf-perms { margin-top: 10px; }
 }
+
+// 移动端：成员行/角色表单换行（220px select 横排放不下）
+@media (max-width: 768px) {
+  .member-row { flex-wrap: wrap; }
+  .member-row .m-info { flex: 1 1 100%; }
+  .rf-row { flex-wrap: wrap; }
+  .rf-row .el-select { width: 100% !important; }
+}
 .role-row {
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px;
   padding: 8px 12px; margin-bottom: 8px;

@@ -99,6 +99,11 @@ async function onChatDone(r) {
   joined.value = { id: r.plan_id, plan: r.plan };
   ElMessage.success('✅ 备赛日程已按对话生成，可在顶部「📋 我的备赛日程」查看');
 }
+
+// 窄屏 el-descriptions 降为 1 列（880px 弹窗在手机上靠全局兜底自适应）
+const narrowMq = window.matchMedia('(max-width: 768px)');
+const isNarrow = ref(narrowMq.matches);
+narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
 </script>
 
 <template>
@@ -132,7 +137,7 @@ async function onChatDone(r) {
               <span class="ob-icon">🏛️</span>
               <span>官网暂未收录 — 可在「🧠 AI 收录」页粘贴官方资料补充</span>
             </div>
-            <el-descriptions :column="2" border>
+            <el-descriptions :column="isNarrow ? 1 : 2" border>
               <el-descriptions-item label="全称">{{ comp.name }}</el-descriptions-item>
               <el-descriptions-item label="简称">{{ comp.short_name || '—' }}</el-descriptions-item>
               <el-descriptions-item label="赛道">
@@ -157,7 +162,7 @@ async function onChatDone(r) {
                 </el-tag>
                 <el-tag v-if="comp.source_type === 'ai_search'" size="small" type="warning" style="margin-left:6px">AI收录</el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="简介" :span="2">{{ comp.intro || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="简介" :span="isNarrow ? 1 : 2">{{ comp.intro || '—' }}</el-descriptions-item>
             </el-descriptions>
           </el-tab-pane>
 
@@ -353,7 +358,7 @@ async function onChatDone(r) {
 .stack-label { color: var(--text-2); font-size: 13px; }
 
 .join-intro { margin-bottom: 16px; p { margin: 6px 0; } .join-tip { color: var(--text-2); font-size: 13px; } }
-.join-actions { display: flex; gap: 10px; align-items: center; }
+.join-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 // 学习资源
 .media-block { margin-bottom: 16px;

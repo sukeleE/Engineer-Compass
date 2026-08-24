@@ -398,6 +398,15 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   @media (max-width: 900px) { grid-template-columns: 1fr; }
 }
 
+// 移动端：生成表单控件铺满
+@media (max-width: 768px) {
+  .gen-form {
+    flex-direction: column;
+    .el-input, .el-select, .el-input-number { width: 100% !important; min-width: 0; }
+  }
+  .study-list { max-height: 300px; overflow-y: auto; }
+}
+
 // 左：列表
 .study-list {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px;

@@ -25,6 +25,13 @@ const searching = ref(false);
 const dialogOpen = ref(false);
 const currentId = ref(null);
 
+// 移动端月份切换视图（≤768px 替代横向大网格）
+const mobileMonth = ref(new Date().getMonth() + 1);
+const mobilePending = ref(false); // true → 显示「时间待定」列表
+const shiftMonth = (d) => { mobileMonth.value = ((mobileMonth.value + d - 1 + 12) % 12) + 1; };
+const goToday = () => { mobileMonth.value = new Date().getMonth() + 1; mobilePending.value = false; };
+const mobileList = computed(() => (mobilePending.value ? noMonth.value : byMonth(mobileMonth.value)));
+
 const MONTHS = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
 const TYPE_COLORS = {
   电子机器人: '#3b82f6', 机械: '#f59e0b', 综合: '#10b981', 数学基础: '#8b5cf6',
@@ -184,6 +191,38 @@ onMounted(load);
       </div>
     </div>
 
+    <!-- 移动端月份视图（≤768px 显示，桌面隐藏）：‹ 月份 › 切换 + 时间待定 -->
+    <div v-loading="loading" class="timeline-mobile">
+      <div class="tm-ctrl">
+        <button class="tm-arrow" aria-label="上一月" @click="shiftMonth(-1)">‹</button>
+        <div class="tm-title" @click="goToday">
+          {{ mobilePending ? '⏳ 时间待定' : `${new Date().getFullYear()}年${mobileMonth}月` }}
+          <span class="tm-count">{{ mobileList.length }} 项</span>
+        </div>
+        <button class="tm-arrow" aria-label="下一月" @click="shiftMonth(1)">›</button>
+        <button class="tm-pending" :class="{ active: mobilePending }" @click="mobilePending = !mobilePending">
+          待定
+        </button>
+        <button class="tm-today" @click="goToday">今天</button>
+      </div>
+      <div v-if="!mobileList.length" class="tm-empty">
+        {{ mobilePending ? '暂无时间待定的竞赛' : `本月暂无竞赛，试试「今天」或筛选其他类别` }}
+      </div>
+      <div
+        v-for="c in mobileList" :key="c.id" class="t-card"
+        :style="{ borderLeftColor: colorOf(c.type) }"
+        @click="openComp(c)"
+      >
+        <div class="t-name">{{ c.short_name || c.name }}</div>
+        <div class="t-meta">
+          <span v-if="isTwoYear(c)" class="t-badge">隔年</span>
+          <span v-if="c.source_type !== 'official'" class="t-badge ai">AI</span>
+          <span class="t-stars">{{ '★'.repeat(c.difficulty || 0) }}<i>{{ '☆'.repeat(5 - (c.difficulty || 0)) }}</i></span>
+          <span class="t-type" :class="c.type">{{ c.type }}</span>
+        </div>
+      </div>
+    </div>
+
     <CompDialog :open="dialogOpen" :comp-id="currentId" @close="dialogOpen = false" />
     </el-tab-pane>
 
@@ -260,5 +299,41 @@ onMounted(load);
     &.ai { color: #6d28d9; background: #ede9fe; }
   }
   .t-stars { color: #f59e0b; font-size: 11px; i { color: #e2e8f0; font-style: normal; } }
+}
+
+// ===== 移动端月份视图（默认隐藏，≤768px 显示并隐藏桌面网格）=====
+.timeline-mobile { display: none; }
+
+@media (max-width: 768px) {
+  .timeline-scroll { display: none; }
+  .timeline-mobile {
+    display: flex; flex-direction: column; gap: 10px;
+    .tm-ctrl {
+      display: flex; align-items: center; gap: 8px;
+      .tm-arrow {
+        border: 1px solid var(--border); background: #fff; border-radius: 10px;
+        font-size: 18px; line-height: 1; padding: 8px 14px; cursor: pointer;
+      }
+      .tm-title {
+        flex: 1; text-align: center; font-weight: 700; font-size: 16px; cursor: pointer;
+        .tm-count { color: var(--text-2); font-size: 12px; font-weight: 400; margin-left: 6px; }
+      }
+      .tm-pending {
+        border: 1px solid var(--border); background: #fff; border-radius: 999px;
+        font-size: 13px; padding: 7px 14px; cursor: pointer; color: var(--text-2);
+        &.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+      }
+      .tm-today {
+        border: none; background: #eff6ff; color: #2563eb; border-radius: 999px;
+        font-size: 13px; padding: 7px 14px; cursor: pointer;
+      }
+    }
+    .tm-empty {
+      text-align: center; color: var(--text-2); font-size: 13px;
+      padding: 30px 0; border: 1px dashed var(--border); border-radius: 10px;
+    }
+    .t-card { padding: 12px 14px; }
+    .t-type { margin-left: auto; color: var(--text-2); font-size: 12px; }
+  }
 }
 </style>

@@ -326,6 +326,11 @@ onMounted(() => { load(); loadComps(); });
   .ed-tasks { margin-top: 10px; display: flex; flex-direction: column; gap: 6px;
     .ed-task { display: flex; gap: 6px; align-items: center; }
   }
+  // 移动端：编辑行内控件换行堆叠
+  @media (max-width: 768px) {
+    .ed-grid { flex-wrap: wrap; .el-input { flex: 1 1 100%; } }
+    .ed-task { flex-wrap: wrap; }
+  }
 }
 .ed-add-phase { margin-top: 2px; }
 </style>

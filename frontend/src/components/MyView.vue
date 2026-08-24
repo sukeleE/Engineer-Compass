@@ -321,6 +321,8 @@ onBeforeUnmount(() => { if (mailTimer) clearInterval(mailTimer); });
       transition: opacity .15s;
     }
     &:hover .av-mask { opacity: 1; }
+    // 触屏无 hover：更换头像遮罩恒显
+    @media (max-width: 768px) { .av-mask { opacity: 1; font-size: 11px; } }
   }
   .hide-file { display: none; }
   .me-info { flex: 1; min-width: 0;

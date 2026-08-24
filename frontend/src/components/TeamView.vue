@@ -218,6 +218,11 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
 .team-body { display: grid; grid-template-columns: 250px 1fr; gap: 16px; align-items: start;
   @media (max-width: 900px) { grid-template-columns: 1fr; }
 }
+
+// 移动端：折叠后小组列表限高滚动（避免切组要滚很久）
+@media (max-width: 768px) {
+  .team-list { max-height: 280px; overflow-y: auto; }
+}
 .team-list {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px;
   .tl-item {

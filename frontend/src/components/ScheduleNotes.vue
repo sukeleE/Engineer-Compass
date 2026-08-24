@@ -232,7 +232,7 @@ onMounted(() => { if (props.active) refresh(); });
 // 浮窗：fixed 右下角，可拖动（拖动后 left/top 覆盖 right/bottom），三 tab 共享
 .sn-float {
   position: fixed; right: 18px; bottom: 18px; z-index: 900;
-  width: 330px; max-height: calc(100vh - 70px); overflow-y: auto;
+  width: 330px; max-width: calc(100vw - 24px); max-height: calc(100vh - 70px); overflow-y: auto;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
   scrollbar-width: thin;

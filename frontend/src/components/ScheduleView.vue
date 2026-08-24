@@ -430,4 +430,13 @@ onMounted(load);
     border: 1px dashed var(--border); border-radius: 8px; font-size: 13px;
   }
 }
+
+// 移动端：按钮组换行、日期输入铺满
+@media (max-width: 768px) {
+  .s-head { flex-direction: column; align-items: stretch; }
+  .s-actions { flex-wrap: wrap; gap: 6px; }
+  .ph-head { flex-direction: column; align-items: stretch; }
+  .date-input { width: 100% !important; }
+  .add-task .el-input { flex: 1; }
+}
 </style>

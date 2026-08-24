@@ -78,3 +78,32 @@ html, body {
   &.经管商科 { color: var(--c-经管商科); }
   &.医学技能 { color: var(--c-医学技能); }
 }
+
+// ============ 移动端响应式底座（≤768px 主断点） ============
+// 说明：弹窗都是 append-to-body 脱离组件树，全局 class 兜底是唯一可靠方式；
+// 页面容器 padding 与输入控件宽度同理（内联/固定宽样式用 max-width 压住）。
+@media (max-width: 768px) {
+  // 弹窗宽度自适应（覆盖所有固定宽度弹窗：880/760/720/640/580/…）
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    margin-top: 6vh !important;
+  }
+  .el-message-box { width: calc(100vw - 24px) !important; }
+  .el-drawer { width: 100% !important; }
+
+  // 页面容器收紧左右内边距（各页 max-width 容器）
+  .timeline-page, .schedule-page, .team-page, .me-page, .profile-page, .admin-page, .study-page {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  // 固定宽度输入控件不溢出（内联 width 仍生效，max-width 压回视口）
+  .el-input, .el-select, .el-input-number { max-width: 100% !important; }
+
+  // 顶部导航 → 汉堡按钮
+  .nav { display: none; }
+  .menu-btn { display: block; }
+  .app-header { padding: 12px 14px 8px; }
+  .brand .sub { display: none; }
+}
