@@ -230,7 +230,8 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
     cursor: pointer; transition: all .2s;
     &:hover { border-color: #93c5fd; background: #f8fafc; }
     &.active { border-color: #2563eb; background: #eff6ff; }
-    .tl-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; b { font-size: 14px; } }
+    .tl-top { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+      b { font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
     .tl-meta { color: var(--text-2); font-size: 12px; margin: 3px 0; }
     .tl-code { font-size: 11.5px; color: #1d4ed8; font-family: monospace; letter-spacing: 1px; }
   }
