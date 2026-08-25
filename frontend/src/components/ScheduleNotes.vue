@@ -24,7 +24,7 @@ const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
 
 // —— 浮窗：收起（变圆形 📝 按钮，位于 AI 对话按钮左侧）/ 拖动 ——
-const collapsed = ref(false);
+const collapsed = ref(true); // 默认收起（圆形 📝 按钮），点击展开
 const dragRef = ref(null);
 const pos = ref({ left: null, top: null }); // null → 默认右下角
 const dragging = ref(null);
