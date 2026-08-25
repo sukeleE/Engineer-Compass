@@ -236,7 +236,7 @@ onMounted(() => { if (props.active) refresh(); });
 .sn-float {
   position: fixed; right: 18px; bottom: 86px; z-index: 1000;
   width: 330px; max-width: calc(100vw - 24px); max-height: calc(100vh - 100px); overflow-y: auto;
-  background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card-bg, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px;
   padding: 10px 12px; box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
   scrollbar-width: thin;
 
@@ -248,7 +248,17 @@ onMounted(() => { if (props.active) refresh(); });
     .sn-ctl { margin-left: auto; flex-shrink: 0; }
   }
 
-  .sn-write { width: 100%; margin-bottom: 10px; }
+  .sn-write {
+    width: 100%; margin-bottom: 10px;
+    // 防御：不依赖 Element Plus 主题变量——线上偶发变量层加载缺失时按钮会变成白字透明不可见
+    --el-button-bg-color: #2563eb;
+    --el-button-border-color: #2563eb;
+    --el-button-text-color: #fff;
+    --el-button-hover-bg-color: #1d4ed8;
+    --el-button-hover-border-color: #1d4ed8;
+    --el-button-active-bg-color: #1e40af;
+    background: #2563eb; border-color: #2563eb; color: #fff;
+  }
 
   .sn-list-head { margin: 0 0 6px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
 
