@@ -272,3 +272,12 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **轮询**：红点 15s 全局常驻；面板打开时 3s 快轮询计数（列表只在打开时拉取，避免阅读中列表跳动）
 - **前端**：MessageCenter.vue（仿 AIChatBox 样式：fab 52px 圆形 / 面板 420×640 / 移动端铺满视口）；App.vue 挂载；api.js 新增 notifications*/notificationsUnread/notificationsRead
 - **冒烟**：scripts/smoke_notifications.mjs 10 项断言全绿（注册→发帖→赞/藏/评→计数/分组/标已读→私信未读→自操作不通知→删帖级联清空）
+
+## 2026-08-25 工具 Dock：主浮标聚合三个工具（苹果悬浮窗式）
+
+- **入口**：右下角单个 🧰 主浮标（56px 深色半透明球，苹果悬浮球风，right:22px bottom:22px）；点击展开三个工具按钮（📝 日程笔记 / 💬 AI 对话 / 🔔 消息中心，48px 白圆钮 + 左侧黑底名称标签，主浮标上方纵向堆叠），再点主浮标收起并关闭面板
+- **红点转移**：消息中心未读（15s 轮询 `api.notificationsUnread`）在 dock 收起时显示于主浮标右上角，展开后转移到 🔔 工具按钮右上角（同一数据两处渲染，99+ 封顶）
+- **组件改造**：AIChatBox / MessageCenter / ScheduleNotes 全部改为纯面板（`props.open` 控制 + `emit('close')` 关闭，删除各自 fab 按钮）；互斥由 ToolDock 的 `activeTool` 单值天然保证，`close-fab-panel` 事件机制删除
+- **ScheduleNotes 提升全局**：原仅 /schedule 页内挂载（ScheduleView 传入 schedules），现挂 ToolDock 内所有页面可用；「关联备赛」数据改由 ToolDock 自拉 `api.scheduleList()`；可拖拽手柄保留
+- **轮询划分**：ToolDock 15s 常驻红点轮询 + 展开时刷新；MessageCenter 面板内打开时 3s 快轮询计数 + loadAll；未登录点消息工具提示登录
+- **文件**：ToolDock.vue 新建；App.vue（挂 ToolDock 替换两个独立浮窗）；ScheduleView.vue（删页内挂载）

@@ -24,7 +24,6 @@ async function refreshUnread() {
 }
 
 async function loadAll() {
-  if (!logged()) return;
   try {
     const [n, f] = await Promise.all([api.notifications(), api.friendList()]);
     notif.value = n;
@@ -39,13 +38,13 @@ async function goNotif(n) {
     api.notificationsRead([n.type]).catch(() => {});
     refreshUnread();
   }
-  open.value = false;
+  emit('close'); // 跳转前关闭面板
   router.push(`/share?post=${n.post.id}`);
 }
 
 // 私信跳转：跳到「我的」- 好友 tab，自动打开与对方的私聊弹窗
 function goDm(f) {
-  open.value = false;
+  emit('close'); // 跳转前关闭面板
   router.push(`/me?tab=friends&dm=${f.id}`);
 }
 
