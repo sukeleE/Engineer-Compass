@@ -154,10 +154,11 @@ onMounted(() => { if (props.active) refresh(); });
 </script>
 
 <template>
-  <!-- 收起态：圆形 📝 按钮（与全局 AI 对话 💬 按钮同款，位于其左侧），点击展开浮窗 -->
-  <button v-if="collapsed" class="sn-fab" title="展开日程笔记" @click="collapsed = false">📝</button>
+  <!-- 入口按钮：常驻不消失，仿 AI 对话——点击旋转 45°，面板在其上方展开，再点旋转复原并收起 -->
+  <button class="sn-fab" :class="{ active: !collapsed }" :title="collapsed ? '展开日程笔记' : '收起日程笔记'"
+    @click="collapsed = !collapsed">📝</button>
 
-  <div ref="dragRef" v-show="!collapsed" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
+  <div ref="dragRef" v-if="!collapsed" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
     <!-- 拖拽手柄 + 收起/展开 -->
     <div class="sn-head" @pointerdown.prevent="dragStart">
       <b>📝 日程笔记</b>
@@ -232,10 +233,11 @@ onMounted(() => { if (props.active) refresh(); });
 </template>
 
 <style lang="scss" scoped>
-// 浮窗：fixed 右下角，可拖动（拖动后 left/top 覆盖 right/bottom），三 tab 共享
+// 浮窗：fixed 在入口按钮上方展开（bottom 86px = 按钮 22+52+12 间距，同 AI 对话面板）；
+// 可拖动（拖动后 left/top 覆盖 right/bottom），三 tab 共享
 .sn-float {
-  position: fixed; right: 18px; bottom: 18px; z-index: 900;
-  width: 330px; max-width: calc(100vw - 24px); max-height: calc(100vh - 70px); overflow-y: auto;
+  position: fixed; right: 18px; bottom: 86px; z-index: 1000;
+  width: 330px; max-width: calc(100vw - 24px); max-height: calc(100vh - 100px); overflow-y: auto;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
   padding: 10px 12px; box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
   scrollbar-width: thin;
@@ -273,7 +275,8 @@ onMounted(() => { if (props.active) refresh(); });
   .sn-empty { color: #94a3b8; font-size: 12px; padding: 8px 0; text-align: center; }
 }
 
-// 收起态圆形按钮：与全局 AI 对话按钮同款样式；💬 位于 right:22px，本按钮 82px（22+52+8 间距）
+// 入口圆形按钮：与全局 AI 对话按钮同款样式（💬 位于 right:22px，本按钮 82px=22+52+8 间距）；
+// 点击展开时旋转 45°（同 AI 对话按钮 .active 交互），按钮常驻不消失
 .sn-fab {
   position: fixed; right: 82px; bottom: 22px; z-index: 1000;
   width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
@@ -281,6 +284,7 @@ onMounted(() => { if (props.active) refresh(); });
   box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
   transition: transform .2s;
   &:hover { transform: scale(1.08); }
+  &.active { transform: rotate(45deg); }
 }
 
 // 弹窗内
