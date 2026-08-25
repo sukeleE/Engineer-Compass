@@ -1,16 +1,18 @@
 <script setup>
 // 资源分享（贴吧式板块）：楼主开楼（富文本 + 多媒介附件 + 索引标签子板块）
 // 三种排序视图：最热门 / 最新 / 收藏最高；标签 chips 构成子板块；点赞 / 收藏 / 评论
-import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
 import { openImage } from '../utils/imageViewer.js';
+import { cnt, excerpt, firstImage } from '../utils/share.js';
 import RichEditor from './team/RichEditor.vue';
 import AttachmentList from './team/AttachmentList.vue';
 
 const router = useRouter();
+const route = useRoute();
 const toProfile = (uid) => router.push(uid === auth.user?.id ? '/me' : `/user/${uid}`);
 
 // —— 列表状态：排序视图 + 标签子板块 + 分页 ——
@@ -50,20 +52,13 @@ async function loadTags() {
 }
 function changeSort(s) { sort.value = s; page.value = 1; load(); }
 function pickTag(t) { tag.value = t; page.value = 1; load(); }
-onMounted(() => { load(); loadTags(); });
+// 深链：/share?post=ID 自动打开详情（用户管理页「我的帖子/收藏」跳转过来）
+function deepLink() {
+  const id = Number(route.query.post);
+  if (id) openPost({ id });
+}
+onMounted(() => { load(); loadTags(); deepLink(); });
 
-// —— 工具 ——
-const cnt = (n) => n ?? 0;
-const excerpt = (html, n = 90) => {
-  const text = String(html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-  return text.length > n ? text.slice(0, n) + '…' : text;
-};
-const firstImage = (p) => {
-  try {
-    const atts = typeof p.attachments === 'string' ? JSON.parse(p.attachments) : p.attachments || [];
-    return atts.find((a) => String(a.mime || '').startsWith('image/')) || null;
-  } catch { return null; }
-};
 const isMine = (p) => !!auth.user && (Number(p.author_id) === Number(auth.user.id) || auth.user.is_admin);
 const needLogin = () => {
   if (auth.token) return false;

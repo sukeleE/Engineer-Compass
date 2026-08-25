@@ -51,15 +51,22 @@ function decorate(row) {
   return { ...row, tags };
 }
 
-// GET /api/share/posts — 列表：?sort=hot|new|fav&tag=名称&page=&size=
+// GET /api/share/posts — 列表：?sort=hot|new|fav&tag=名称&scope=mine|favs&page=&size=
+// scope=mine 只看我发的；scope=favs 看我收藏的（需登录）
 r.get('/posts', optionalAuth, (req, res) => {
   const sort = SORTS[String(req.query.sort || 'hot')] || 'hot';
   const tag = String(req.query.tag || '').trim();
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(50, Math.max(1, Number(req.query.size) || 10));
   const me = uid(req);
+  const scope = String(req.query.scope || '');
+  if (scope && !req.user) return res.status(401).json({ error: '请先登录' });
 
-  const where = tag ? 'AND p.id IN (SELECT pt.post_id FROM share_post_tag pt JOIN share_tag t ON t.id = pt.tag_id WHERE t.name = ?)' : '';
+  const where = [
+    tag ? 'AND p.id IN (SELECT pt.post_id FROM share_post_tag pt JOIN share_tag t ON t.id = pt.tag_id WHERE t.name = ?)' : '',
+    scope === 'mine' ? 'AND p.user_id = ?' : '',
+    scope === 'favs' ? 'AND p.id IN (SELECT post_id FROM share_fav WHERE user_id = ?)' : '',
+  ].filter(Boolean).join(' ');
   const orderBy = {
     hot: `(SELECT COUNT(*) FROM share_like l WHERE l.post_id = p.id) DESC,
           (SELECT COUNT(*) FROM share_comment c WHERE c.post_id = p.id) DESC, p.id DESC`,
@@ -67,7 +74,7 @@ r.get('/posts', optionalAuth, (req, res) => {
     fav: `(SELECT COUNT(*) FROM share_fav f WHERE f.post_id = p.id) DESC, p.id DESC`,
   }[sort];
 
-  const params = tag ? [tag] : [];
+  const params = [...(tag ? [tag] : []), ...(scope ? [me] : [])];
   const total = db.prepare(`SELECT COUNT(*) AS n FROM share_post p WHERE 1=1 ${where}`).get(...params).n;
   const rows = db.prepare(
     `SELECT p.id, p.title, p.content, p.attachments, p.create_time, p.update_time,
@@ -83,7 +90,7 @@ r.get('/posts', optionalAuth, (req, res) => {
      LIMIT ? OFFSET ?`
   ).all(me, me, ...params, size, (page - 1) * size);
 
-  res.json({ rows: rows.map(decorate), total, page, size, sort, tag });
+  res.json({ rows: rows.map(decorate), total, page, size, sort, tag, scope });
 });
 
 // GET /api/share/posts/:id — 详情（含评论）

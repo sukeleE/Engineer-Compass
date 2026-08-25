@@ -15,6 +15,7 @@ import feedback from './routes/feedback.js';
 import users from './routes/users.js';
 import planChat from './routes/planChat.js';
 import share from './routes/share.js';
+import friends from './routes/friends.js';
 import { hasSMTP } from './routes/mailer.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
@@ -36,6 +37,7 @@ app.use('/api/feedback', feedback);
 app.use('/api/users', users);
 app.use('/api/plan-chat', planChat);
 app.use('/api/share', share);
+app.use('/api/friends', friends);
 
 // 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；mail=true 表示邮箱登录发真邮件）
 app.get('/api/health', (req, res) => {

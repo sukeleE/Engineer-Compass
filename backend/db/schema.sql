@@ -329,3 +329,33 @@ CREATE TABLE IF NOT EXISTS share_comment (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_share_comment_post ON share_comment(post_id);
+
+-- 表29~31 好友与私聊：好友申请 + 好友关系（双向行，A-B 与 B-A 各一行）+ 私聊消息
+CREATE TABLE IF NOT EXISTS friend_request (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  to_id       INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  status      TEXT DEFAULT 'pending',          -- pending / accepted / rejected
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(from_id, to_id)
+);
+
+CREATE TABLE IF NOT EXISTS friend (
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  friend_id   INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, friend_id)
+);
+CREATE INDEX IF NOT EXISTS idx_friend_user ON friend(user_id);
+
+CREATE TABLE IF NOT EXISTS dm_message (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  to_id       INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  content     TEXT NOT NULL,                   -- 私信内容（1-2000 字）
+  is_read     INTEGER DEFAULT 0,               -- 对方是否已读
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dm_pair ON dm_message(from_id, to_id);
+CREATE INDEX IF NOT EXISTS idx_dm_unread ON dm_message(to_id, is_read);

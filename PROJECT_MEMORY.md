@@ -249,3 +249,14 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **表**：share_post / share_tag / share_post_tag / share_like / share_fav / share_comment（schema.sql 表 23~28，外键级联删除）
 - **接口**：/api/share/*（routes/share.js；读写需登录，浏览匿名可看）；收藏/点赞 toggle 返回最新计数
 - **前端**：ShareView.vue（排序 radio + 标签 chips 子板块 + 帖子卡片 + 发帖/详情弹窗，复用 RichEditor / AttachmentList / openImage）；api.js 新增 share* 方法
+
+## 2026-08-25 用户管理页增强：我的帖子/收藏 + 好友私聊
+
+- **入口**：/me 用户管理页改为四个标签：📊 概览（原有内容）/ 📝 我的帖子 / ⭐ 我的收藏 / 👥 好友私聊
+- **我的帖子/收藏**：复用 share 列表接口加 `scope=mine|favs`（需登录，未登录 401）；点卡片 → `/share?post=ID` 深链自动打开详情弹窗（ShareView onMounted deepLink）
+- **好友**：搜索用户（用户名/昵称 LIKE，排除自己）→ 发申请；对方已申请过自己时再发直接互为好友（双向自动接受）；申请接受写 friend 表双向行（A-B 与 B-A 各一行）；删除好友双向清；重复申请被拦截、被拒后重发
+- **私聊**：dm_message 表，GET /friends/dm/:uid 拉最近 100 条升序并顺带把对方发来的标已读（轮询一次往返）；前端弹窗 3s 轮询、关闭即停；好友列表带未读红点 + 最近消息预览（关联子查询）
+- **表**：friend_request（status pending/accepted/rejected）/ friend（双向行 PK user_id+friend_id）/ dm_message（is_read，idx_dm_pair + idx_dm_unread）——schema.sql 表 29~31
+- **接口**：/api/friends/*（routes/friends.js，全部 authRequired）：GET /（列表含 unread+last_msg）、GET /requests（incoming/outgoing）、GET /search、POST /request、POST /request/:id/accept|reject、DELETE /:friendId、GET|POST /dm/:uid、POST /dm/:uid/read
+- **前端**：MyView.vue 重构（el-tabs 四标签，切标签懒加载）；utils/share.js 抽取 cnt/excerpt/atts/firstImage/attDataURL（ShareView 同步改用）；api.js 新增 friend*/dm* 方法
+- **冒烟**：scripts/smoke_friends.mjs 25 项断言全绿（注册→搜索→申请→同意→私聊→已读→scope 过滤→删好友→清理）

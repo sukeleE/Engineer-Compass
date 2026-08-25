@@ -143,4 +143,15 @@ export const api = {
   shareComment: (id, content) => req(`/share/posts/${id}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
   shareCommentDelete: (cid) => req(`/share/comments/${cid}`, { method: 'DELETE' }),
   shareTags: () => req('/share/tags'),
+  // 好友与私聊
+  friendList: () => req('/friends'),
+  friendRequests: () => req('/friends/requests'),
+  friendSearch: (q) => req(`/friends/search?q=${encodeURIComponent(q)}`),
+  friendRequest: (toId) => req('/friends/request', { method: 'POST', body: JSON.stringify({ to_id: toId }) }),
+  friendAccept: (id) => req(`/friends/request/${id}/accept`, { method: 'POST' }),
+  friendReject: (id) => req(`/friends/request/${id}/reject`, { method: 'POST' }),
+  friendRemove: (fid) => req(`/friends/${fid}`, { method: 'DELETE' }),
+  dmList: (uid) => req(`/friends/dm/${uid}`),
+  dmSend: (uid, content) => req(`/friends/dm/${uid}`, { method: 'POST', body: JSON.stringify({ content }) }),
+  dmRead: (uid) => req(`/friends/dm/${uid}/read`, { method: 'POST' }),
 };
