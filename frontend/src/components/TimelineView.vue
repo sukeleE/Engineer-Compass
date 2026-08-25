@@ -38,9 +38,10 @@ const mobileGroups = computed(() => {
   const pend = f.filter((c) => !c.start_month);
   if (mobilePending.value) return [{ label: '⏳ 时间待定', items: pend }];
   if (mobileAll.value) {
-    const gs = MONTHS.map((m) => {
-      const items = withM.filter((c) => c.start_month === m);
-      return { label: `${m} · ${items.length} 项`, items };
+    // MONTHS 是显示标签（'1月'…），start_month 是数字 1-12，用索引+1 比较
+    const gs = MONTHS.map((label, i) => {
+      const items = withM.filter((c) => c.start_month === i + 1);
+      return { label: `${label} · ${items.length} 项`, items };
     }).filter((g) => g.items.length);
     if (pend.length) gs.push({ label: `⏳ 时间待定 · ${pend.length} 项`, items: pend });
     return gs;
