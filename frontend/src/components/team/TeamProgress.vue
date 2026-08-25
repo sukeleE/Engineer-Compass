@@ -280,6 +280,11 @@ reload().catch((e) => ElMessage.error(e.message));
     }
     .tc-progress { display: flex; align-items: center; gap: 8px; }
   }
+  // 移动端：进度条独占一行，状态/进度/删除控件换到下一行（窄屏单行放不下）
+  @media (max-width: 768px) {
+    .tc-progress { flex-wrap: wrap; }
+    .tc-progress .el-progress { flex: 1 1 100% !important; } /* 压过内联 style="flex:1" */
+  }
 }
 .tp-logs { margin-top: 18px; h4 { margin: 0 0 10px; } .tp-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; } }
 .log-head {

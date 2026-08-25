@@ -306,6 +306,10 @@ onMounted(load);
 
 @media (max-width: 768px) {
   .timeline-scroll { display: none; }
+  // 筛选栏：难度(110px)+搜索(200px)+按钮单行放不下（≈382px>360px 屏），换行堆叠
+  .filters .right { flex-wrap: wrap; }
+  .filters .right .el-select { flex: 1; min-width: 0; }
+  .filters .right .el-input { flex: 1 1 100%; }
   .timeline-mobile {
     display: flex; flex-direction: column; gap: 10px;
     .tm-ctrl {

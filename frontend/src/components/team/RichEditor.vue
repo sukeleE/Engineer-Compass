@@ -64,8 +64,8 @@ onBeforeUnmount(() => {
   display: flex; flex-direction: column;
   :deep(.re-toolbar) {
     border-bottom: 1px solid var(--border); flex-shrink: 0;
-    // 工具栏紧凑化：压小内边距/按钮，腾出空间给正文
-    .w-e-toolbar { padding: 3px 8px; }
+    // 工具栏紧凑化：压小内边距/按钮，腾出空间给正文；窄屏允许换行（不换行时右侧按钮被 overflow:hidden 裁掉）
+    .w-e-toolbar { padding: 3px 8px; flex-wrap: wrap; }
     .w-e-bar-item { padding: 2px 3px; }
   }
   :deep(.re-body) { flex: 1; min-height: 320px; overflow-y: hidden; }

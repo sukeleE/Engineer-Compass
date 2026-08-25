@@ -30,6 +30,7 @@ html, body {
 #app { min-height: 100vh; }
 
 .app-header {
+  position: relative; /* 汉堡下拉面板 .menu-panel 的绝对定位锚点（否则锚到视口） */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -83,6 +84,8 @@ html, body {
 // 说明：弹窗都是 append-to-body 脱离组件树，全局 class 兜底是唯一可靠方式；
 // 页面容器 padding 与输入控件宽度同理（内联/固定宽样式用 max-width 压住）。
 @media (max-width: 768px) {
+  // 兜底：任何漏网元素不再产生页面级横向滚动（根因修复优先，此为保险）
+  html, body { overflow-x: hidden; }
   // 弹窗宽度自适应（覆盖所有固定宽度弹窗：880/760/720/640/580/…）
   .el-dialog {
     width: calc(100vw - 24px) !important;
@@ -92,11 +95,17 @@ html, body {
   .el-message-box { width: calc(100vw - 24px) !important; }
   .el-drawer { width: 100% !important; }
 
+  // 弹窗/确认框内长 URL、长文本不撑破宽度
+  .el-dialog__body, .el-message-box__message { overflow-wrap: anywhere; }
+
   // 页面容器收紧左右内边距（各页 max-width 容器）
   .timeline-page, .schedule-page, .team-page, .me-page, .profile-page, .admin-page, .study-page {
     padding-left: 12px;
     padding-right: 12px;
   }
+
+  // admin 左栏固定 min-width 在 320px 窄屏会溢出，退回自适应
+  .admin-page .p-main { min-width: 0; }
 
   // 固定宽度输入控件不溢出（内联 width 仍生效，max-width 压回视口）
   .el-input, .el-select, .el-input-number { max-width: 100% !important; }
