@@ -47,6 +47,7 @@ html, body {
 
   .nav {
     display: flex;
+    flex-wrap: nowrap; /* 导航链接禁止换行（字体放大/窄窗口时中文会字间断行竖排） */
     gap: 8px;
     background: #fff;
     border: 1px solid var(--border);
@@ -56,6 +57,7 @@ html, body {
       text-decoration: none;
       color: var(--text-2);
       font-size: 13px;
+      white-space: nowrap; /* 链接文字永不内部换行 */
       padding: 7px 18px;
       border-radius: 999px;
       transition: all .2s;
@@ -125,8 +127,8 @@ html, body {
   .brand .sub { display: none; }
 }
 
-// 平板竖屏 / 手机横屏（768-900px）：导航链接挤在一行会换行难看，同样收进汉堡菜单
-@media (max-width: 900px) {
+// 窄屏（≤1024px）：顶部导航链接收进汉堡菜单（防链接挤压/字间断行；小屏体验统一）
+@media (max-width: 1024px) {
   .nav { display: none; }
   .menu-btn { display: block; }
   .app-header { padding: 12px 14px 8px; }

@@ -80,19 +80,22 @@ watch(() => route.path, closeMenu);
 
 /* 移动端：标题缩小 + 隐藏英文副标（「🎯 工科竞赛导航 Engineer-Compass」一行放不下会换行） */
 @media (max-width: 768px) {
-  .brand h1 { font-size: 19px; letter-spacing: 0; span { display: none; } }
+  .brand h1 { font-size: 19px; letter-spacing: 0; white-space: nowrap; span { display: none; } }
 }
 
-/* 移动端下拉菜单：绝对定位在 header 下方 */
+/* 移动端下拉菜单：绝对定位在 header 下方；宽度自适应内容，极窄视口截断不竖排 */
 .menu-panel {
   position: absolute; top: calc(100% + 6px); right: 12px; z-index: 1200;
   background: #fff; border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, .14);
-  padding: 8px; min-width: 200px; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px; min-width: 200px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; gap: 2px;
   a {
     display: flex; align-items: center; gap: 10px;
     text-decoration: none; color: var(--text); font-size: 15px;
+    white-space: nowrap; /* 链接文字永不内部换行（字体放大时防竖排） */
     padding: 12px 16px; border-radius: 8px;
+    overflow: hidden; text-overflow: ellipsis;
     &:hover, &.router-link-active { background: #eff6ff; color: #2563eb; font-weight: 600; }
   }
   .menu-me {
