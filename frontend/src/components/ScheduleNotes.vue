@@ -72,7 +72,8 @@ async function loadMonth() {
   try {
     monthNotes.value = await api.notesMonth(date.value.slice(0, 7));
   } catch (e) {
-    ElMessage.error(`加载笔记失败：${e.message}`);
+    // 未登录不打扰（提升全局后每次进站都会挂载并拉取）
+    if (!e?.message?.includes('未登录')) ElMessage.error(`加载笔记失败：${e.message}`);
   } finally {
     loading.value = false;
   }
