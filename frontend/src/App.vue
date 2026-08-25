@@ -23,6 +23,7 @@ watch(() => route.path, closeMenu);
         <router-link to="/">🗓️ 竞赛时间轴</router-link>
         <router-link to="/schedule">📅 日程规划</router-link>
         <router-link to="/team">🏗️ 项目小组</router-link>
+        <router-link to="/share">📤 资源分享</router-link>
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
           <span class="me-avatar">
             <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
@@ -37,6 +38,7 @@ watch(() => route.path, closeMenu);
         <router-link to="/">🗓️ 竞赛时间轴</router-link>
         <router-link to="/schedule">📅 日程规划</router-link>
         <router-link to="/team">🏗️ 项目小组</router-link>
+        <router-link to="/share">📤 资源分享</router-link>
         <router-link to="/me" class="menu-me">
           <span class="me-avatar">
             <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />

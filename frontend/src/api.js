@@ -132,4 +132,15 @@ export const api = {
   teamBookings: (id) => req(`/team/${id}/bookings`),
   teamBooking: (id, card) => req(`/team/${id}/booking`, { method: 'POST', body: JSON.stringify(card) }),
   teamBookingApprove: (id, bid, status) => req(`/team/${id}/booking/${bid}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  // 资源分享（贴吧式板块）
+  sharePosts: (params) => req(`/share/posts${qs(params)}`),
+  sharePost: (id) => req(`/share/posts/${id}`),
+  shareCreate: (card) => req('/share/posts', { method: 'POST', body: JSON.stringify(card) }),
+  shareUpdate: (id, card) => req(`/share/posts/${id}`, { method: 'PUT', body: JSON.stringify(card) }),
+  shareDelete: (id) => req(`/share/posts/${id}`, { method: 'DELETE' }),
+  shareLike: (id) => req(`/share/posts/${id}/like`, { method: 'POST' }),
+  shareFav: (id) => req(`/share/posts/${id}/fav`, { method: 'POST' }),
+  shareComment: (id, content) => req(`/share/posts/${id}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
+  shareCommentDelete: (cid) => req(`/share/comments/${cid}`, { method: 'DELETE' }),
+  shareTags: () => req('/share/tags'),
 };

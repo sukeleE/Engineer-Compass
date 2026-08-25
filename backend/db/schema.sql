@@ -283,3 +283,49 @@ CREATE INDEX IF NOT EXISTS idx_stack_comp    ON tech_stack(comp_id);
 CREATE INDEX IF NOT EXISTS idx_stack_process ON tech_stack(process_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_user ON user_schedule(user_id);
 CREATE INDEX IF NOT EXISTS idx_media_comp    ON media_resource(comp_id, category);
+
+-- 表23~28 资源分享（贴吧式）：帖子 + 附件 + 标签子板块 + 点赞 + 收藏 + 评论
+CREATE TABLE IF NOT EXISTS share_post (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,                 -- 标题（1-60 字）
+  content     TEXT DEFAULT '',               -- 富文本 HTML
+  attachments TEXT DEFAULT '[]',             -- [{name,size,mime,data}] base64
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_share_post_user ON share_post(user_id);
+
+CREATE TABLE IF NOT EXISTS share_tag (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL UNIQUE           -- 索引标签（楼主自建，构成子板块）
+);
+
+CREATE TABLE IF NOT EXISTS share_post_tag (
+  post_id     INTEGER NOT NULL REFERENCES share_post(id) ON DELETE CASCADE,
+  tag_id      INTEGER NOT NULL REFERENCES share_tag(id) ON DELETE CASCADE,
+  PRIMARY KEY (post_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS share_like (
+  post_id     INTEGER NOT NULL REFERENCES share_post(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS share_fav (
+  post_id     INTEGER NOT NULL REFERENCES share_post(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS share_comment (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id     INTEGER NOT NULL REFERENCES share_post(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  content     TEXT NOT NULL,                 -- 评论（1-1000 字，纯文本）
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_share_comment_post ON share_comment(post_id);
