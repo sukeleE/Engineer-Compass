@@ -31,6 +31,12 @@ watch(
   },
   { immediate: true }
 );
+
+// 移动端 tab 标签换短文案：6 个 tab 全标签含 emoji 时，任何字号都放不进 375px（纯缩放有物理上限）
+const mqNarrow = window.matchMedia('(max-width: 768px)');
+const isNarrow = ref(mqNarrow.matches);
+mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
+function lab(full, short) { return isNarrow.value ? short : full; }
 </script>
 
 <template>
@@ -53,22 +59,22 @@ watch(
       </div>
 
       <el-tabs v-model="active">
-        <el-tab-pane label="📊 进度对齐" name="progress">
+        <el-tab-pane :label="lab('📊 进度对齐', '进度')" name="progress">
           <TeamProgress :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" :tasks="detail.tasks" />
         </el-tab-pane>
-        <el-tab-pane label="🎯 备赛计划" name="plans">
+        <el-tab-pane :label="lab('🎯 备赛计划', '计划')" name="plans">
           <TeamPlanView :team-id="detail.team.id" :me="detail.me" :roles="detail.roles" :perms="detail.perms" />
         </el-tab-pane>
-        <el-tab-pane label="💬 讨论" name="chat">
+        <el-tab-pane :label="lab('💬 讨论', '讨论')" name="chat">
           <TeamChat :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" />
         </el-tab-pane>
-        <el-tab-pane label="📁 资料共享" name="files">
+        <el-tab-pane :label="lab('📁 资料共享', '资料')" name="files">
           <TeamFiles :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" />
         </el-tab-pane>
-        <el-tab-pane label="🔧 设备预约" name="devices">
+        <el-tab-pane :label="lab('🔧 设备预约', '设备')" name="devices">
           <TeamDevices :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :devices="detail.devices" />
         </el-tab-pane>
-        <el-tab-pane label="👥 成员与角色" name="members">
+        <el-tab-pane :label="lab('👥 成员与角色', '成员')" name="members">
           <TeamMembers :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" :roles="detail.roles" />
         </el-tab-pane>
       </el-tabs>

@@ -102,6 +102,9 @@ html, body {
   // 小组工作台 6 个 tab / 竞赛详情 5 个 tab 在 375px 屏都超宽）
   .el-tabs__nav-wrap { overflow-x: auto; overflow-y: hidden; }
   .el-tabs__nav-wrap::-webkit-scrollbar { display: none; }
+  // 多 Tab 页签：字号/内边距压缩（14px→12px、0 20px→0 8px），配合各组件移动端短标签，
+  // 让全部页签在屏幕内可见（仅字号缩放有物理上限，短标签是必需组合）
+  .el-tabs__item { font-size: 12px; padding: 0 8px; }
 
   // 页面容器收紧左右内边距（各页 max-width 容器）
   .timeline-page, .schedule-page, .team-page, .me-page, .profile-page, .admin-page, .study-page {

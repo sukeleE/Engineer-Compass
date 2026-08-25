@@ -22,6 +22,12 @@ watch(viewTab, (v) => {
   router.replace({ query: { ...route.query, tab: v } }).catch(() => {});
 });
 
+// 移动端 tab 标签换短文案（4 个 tab 全标签含 emoji 在窄屏放不下）
+const mqNarrow = window.matchMedia('(max-width: 768px)');
+const isNarrow = ref(mqNarrow.matches);
+mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
+function lab(full, short) { return isNarrow.value ? short : full; }
+
 const schedules = ref([]);
 const loading = ref(false);
 const savingId = ref(null);
@@ -171,11 +177,11 @@ onMounted(load);
   <main class="schedule-page">
     <!-- 四 tab：月历默认；笔记浮窗四 tab 共用，挂在 tabs 外层 -->
     <el-tabs v-model="viewTab" class="page-tabs">
-    <el-tab-pane label="🗓️ 月历" name="calendar">
+    <el-tab-pane :label="lab('🗓️ 月历', '月历')" name="calendar">
       <CalendarView />
     </el-tab-pane>
 
-    <el-tab-pane label="🏆 竞赛日程" name="comp">
+    <el-tab-pane :label="lab('🏆 竞赛日程', '竞赛')" name="comp">
     <div class="page-head">
       <h2>📋 我的备赛日程</h2>
       <div class="head-right">
@@ -314,13 +320,13 @@ onMounted(load);
     </div>
     </el-tab-pane>
 
-    <el-tab-pane label="📚 学习日程" name="study">
+    <el-tab-pane :label="lab('📚 学习日程', '学习')" name="study">
       <div class="study-wrap">
         <StudyView />
       </div>
     </el-tab-pane>
 
-    <el-tab-pane label="🏗️ 小组任务" name="team">
+    <el-tab-pane :label="lab('🏗️ 小组任务', '小组')" name="team">
       <template v-if="auth.token">
         <MyTeamTasks />
       </template>

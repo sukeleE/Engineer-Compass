@@ -104,6 +104,8 @@ async function onChatDone(r) {
 const narrowMq = window.matchMedia('(max-width: 768px)');
 const isNarrow = ref(narrowMq.matches);
 narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
+// 窄屏 tab 标签换短文案（5 个 tab 全标签在 375px 放不下）
+function lab(full, short) { return isNarrow.value ? short : full; }
 </script>
 
 <template>
@@ -123,7 +125,7 @@ narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
 
         <el-tabs v-model="activeTab">
           <!-- Tab1 基础信息 -->
-          <el-tab-pane label="基础信息" name="info">
+          <el-tab-pane :label="lab('基础信息', '信息')" name="info">
             <!-- 竞赛官网横幅 -->
             <a v-if="comp.official_url" class="official-banner" :href="comp.official_url" target="_blank">
               <span class="ob-icon">🏛️</span>
@@ -167,7 +169,7 @@ narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
           </el-tab-pane>
 
           <!-- Tab2 备赛流程 -->
-          <el-tab-pane label="备赛流程" name="process">
+          <el-tab-pane :label="lab('备赛流程', '流程')" name="process">
             <el-timeline v-if="comp.process?.length">
               <el-timeline-item
                 v-for="p in comp.process" :key="p.id"
@@ -185,7 +187,7 @@ narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
           </el-tab-pane>
 
           <!-- Tab3 树状技术栈 -->
-          <el-tab-pane label="树状技术栈" name="stack">
+          <el-tab-pane :label="lab('树状技术栈', '技术栈')" name="stack">
             <div class="stack-toolbar">
               <span class="stack-label">选择子赛项：</span>
               <el-select v-model="selProcess" style="width: 380px" placeholder="选择子赛项查看技术栈">
@@ -197,7 +199,7 @@ narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
           </el-tab-pane>
 
           <!-- Tab4 学习资源（视频/文章，按分类 + 技术栈节点） -->
-          <el-tab-pane label="🎬 学习资源" name="media">
+          <el-tab-pane :label="lab('🎬 学习资源', '资源')" name="media">
             <el-empty v-if="!(comp.media || []).length" description="暂无学习资源数据" />
             <template v-else>
               <!-- 竞赛介绍 -->
@@ -264,7 +266,7 @@ narrowMq.addEventListener('change', (e) => { isNarrow.value = e.matches; });
           </el-tab-pane>
 
           <!-- Tab5 参赛选择 -->
-          <el-tab-pane label="参赛选择" name="join">
+          <el-tab-pane :label="lab('参赛选择', '参赛')" name="join">
             <template v-if="!joined">
               <div class="join-intro">
                 <p>确认要参加 <b>{{ comp.name }}</b> 吗？</p>
