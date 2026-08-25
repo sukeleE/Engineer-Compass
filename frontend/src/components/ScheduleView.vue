@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
-import ScheduleNotes from './ScheduleNotes.vue';
+// 日程笔记面板已提升到全局 ToolDock（此页不再挂载）
 import CalendarView from './CalendarView.vue';
 import StudyView from './StudyView.vue';
 import MyTeamTasks from './team/MyTeamTasks.vue';
@@ -333,9 +333,6 @@ onMounted(load);
       <CalendarView />
     </el-tab-pane>
     </el-tabs>
-
-    <!-- 日程笔记浮窗：四个 tab 共享，可拖动、可收起 -->
-    <ScheduleNotes :schedules="schedules" />
 
     <!-- 对话式 AI 修改备赛日程（AI 先确认调整方向，已勾选任务自动保留） -->
     <PlanChat v-model="chatOpen" mode="schedule-edit" :schedule-id="chatSid" @done="onChatDone" />

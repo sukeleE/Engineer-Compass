@@ -1,30 +1,26 @@
 <script setup>
 // 全局消息中心（右下角浮窗，仿 AIChatBox）：评论/点赞/收藏通知 + 好友私信
 // 有未读时按钮右上角显示红点数字；面板分「私信评论 / 点赞 / 收藏」三组（小红书风格）
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
-import auth from '../auth.js';
 
+// 纯面板：由 ToolDock 控制开关；面板打开期间 3s 快轮询未读计数（红点徽标轮询在 ToolDock）
+const props = defineProps({ open: Boolean });
+const emit = defineEmits(['close']);
 const router = useRouter();
-const open = ref(false);
 const tab = ref('dm');
-const unread = ref(0); // 总未读（通知三组 + 私信）
 const counts = ref({ comments: 0, likes: 0, favs: 0, dm: 0 });
 const notif = ref({ comments: [], likes: [], favs: [] });
 const friends = ref([]); // 好友列表（带 unread/last_msg/last_time）
 
-let unreadTimer = null;
 let fastTimer = null;
-const logged = () => !!auth.user?.id;
 
 async function refreshUnread() {
-  if (!logged()) return;
   try {
     counts.value = await api.notificationsUnread();
-    unread.value = counts.value.total || 0;
-  } catch { /* 未登录/网络错误静默 */ }
+  } catch { /* 网络错误静默 */ }
 }
 
 async function loadAll() {
@@ -35,14 +31,6 @@ async function loadAll() {
     friends.value = f;
   } catch { /* 静默 */ }
 }
-
-function toggle() {
-  if (!logged()) { ElMessage.info('请先登录后再查看消息'); return; }
-  open.value = !open.value;
-  if (open.value) window.dispatchEvent(new CustomEvent('close-fab-panel')); // 让 AI 浮窗收起，避免重叠
-}
-
-function onCloseOther() { open.value = false; }
 
 // 通知跳转：标已读 + 跳到帖子详情（评论区可直接回复）
 async function goNotif(n) {
@@ -84,18 +72,11 @@ const dmUnread = () => (counts.value.comments || 0) + (counts.value.dm || 0);
 const likeUnread = () => counts.value.likes || 0;
 const favUnread = () => counts.value.favs || 0;
 
-onMounted(() => {
-  refreshUnread();
-  unreadTimer = setInterval(refreshUnread, 15000); // 后台常驻轮询红点
-  window.addEventListener('close-fab-panel', onCloseOther);
-});
 onBeforeUnmount(() => {
-  clearInterval(unreadTimer);
   clearInterval(fastTimer);
-  window.removeEventListener('close-fab-panel', onCloseOther);
 });
 
-watch(open, (v) => {
+watch(() => props.open, (v) => {
   if (v) {
     refreshUnread();
     loadAll();
@@ -108,19 +89,14 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <!-- 悬浮按钮：未读红点 -->
-  <button class="mfab" :class="{ active: open }" @click="toggle">🔔
-    <span v-if="unread > 0" class="m-badge">{{ unread > 99 ? '99+' : unread }}</span>
-  </button>
-
-  <!-- 消息面板 -->
+  <!-- 消息面板（由 ToolDock 控制开关） -->
   <transition name="chat">
-    <div v-if="open" class="m-panel">
+    <div v-if="props.open" class="m-panel">
       <div class="m-head">
         <b>🔔 消息中心</b>
         <div class="m-actions">
-          <el-button v-if="unread > 0" link size="small" @click="readAll">全部已读</el-button>
-          <el-button link size="small" @click="open = false">收起</el-button>
+          <el-button v-if="counts.total > 0" link size="small" @click="readAll">全部已读</el-button>
+          <el-button link size="small" @click="emit('close')">收起</el-button>
         </div>
       </div>
 
@@ -240,23 +216,6 @@ watch(open, (v) => {
 </template>
 
 <style lang="scss" scoped>
-// 悬浮按钮（仿 AIChatBox.fab，位置在 AI 按钮正上方）
-.mfab {
-  position: fixed; right: 22px; bottom: 86px; z-index: 1000;
-  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
-  font-size: 24px; background: #2563eb; color: #fff;
-  box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
-  transition: transform .2s;
-  &:hover { transform: scale(1.08); }
-  &.active { transform: rotate(45deg); }
-  .m-badge {
-    position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-    padding: 0 4px; border-radius: 999px; background: #ef4444; color: #fff;
-    font-size: 11px; line-height: 18px; text-align: center;
-    border: 2px solid #fff; box-sizing: border-box;
-  }
-}
-
 .m-panel {
   position: fixed; right: 22px; bottom: 140px; z-index: 1000;
   width: 420px; height: 640px; max-height: calc(100vh - 120px);

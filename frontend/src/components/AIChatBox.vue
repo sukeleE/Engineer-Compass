@@ -1,19 +1,11 @@
 <script setup>
-// 全局 AI 对话悬浮框（右下角）：上下文感知当前查看的竞赛
-import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+// 全局 AI 对话面板（由 ToolDock 控制开关）：上下文感知当前查看的竞赛
+import { ref, watch, nextTick } from 'vue';
 import { store } from '../store.js';
 import { api } from '../api.js';
 
-const open = ref(false);
-
-// 与消息中心浮窗互斥：对方展开时自己收起（两个面板同位置，避免重叠）
-function onCloseOther() { open.value = false; }
-function toggle() {
-  open.value = !open.value;
-  if (open.value) window.dispatchEvent(new CustomEvent('close-fab-panel'));
-}
-onMounted(() => window.addEventListener('close-fab-panel', onCloseOther));
-onBeforeUnmount(() => window.removeEventListener('close-fab-panel', onCloseOther));
+const props = defineProps({ open: Boolean });
+const emit = defineEmits(['close']);
 const messages = ref(JSON.parse(localStorage.getItem('ec_chat_history') || '[]'));
 const input = ref('');
 const sending = ref(false);
@@ -23,7 +15,7 @@ watch(messages, (v) => {
   localStorage.setItem('ec_chat_history', JSON.stringify(v.slice(-50)));
 }, { deep: true });
 
-watch(open, async () => { await nextTick(); scrollBottom(); });
+watch(() => props.open, async () => { await nextTick(); scrollBottom(); });
 
 function scrollBottom() {
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight, behavior: 'smooth' });
@@ -57,12 +49,9 @@ function clearHistory() {
 </script>
 
 <template>
-  <!-- 悬浮按钮 -->
-  <button class="fab" :class="{ active: open }" @click="toggle">💬</button>
-
-  <!-- 聊天面板 -->
+  <!-- 聊天面板（由 ToolDock 控制开关） -->
   <transition name="chat">
-    <div v-if="open" class="chat-panel">
+    <div v-if="props.open" class="chat-panel">
       <div class="chat-head">
         <b>🤖 竞赛助手</b>
         <div class="chat-ctx">
@@ -70,7 +59,7 @@ function clearHistory() {
         </div>
         <div class="chat-actions">
           <el-button link size="small" @click="clearHistory">清空</el-button>
-          <el-button link size="small" @click="open = false">收起</el-button>
+          <el-button link size="small" @click="emit('close')">收起</el-button>
         </div>
       </div>
       <div ref="listRef" class="chat-list">
@@ -97,16 +86,6 @@ function clearHistory() {
 </template>
 
 <style lang="scss" scoped>
-.fab {
-  position: fixed; right: 22px; bottom: 22px; z-index: 1000;
-  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
-  font-size: 24px; background: #2563eb; color: #fff;
-  box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
-  transition: transform .2s;
-  &:hover { transform: scale(1.08); }
-  &.active { transform: rotate(45deg); }
-}
-
 .chat-panel {
   position: fixed; right: 22px; bottom: 86px; z-index: 1000;
   width: 420px; height: 640px; max-height: calc(100vh - 120px); background: #fff; border-radius: 14px;

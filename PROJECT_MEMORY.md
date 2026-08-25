@@ -260,3 +260,15 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **接口**：/api/friends/*（routes/friends.js，全部 authRequired）：GET /（列表含 unread+last_msg）、GET /requests（incoming/outgoing）、GET /search、POST /request、POST /request/:id/accept|reject、DELETE /:friendId、GET|POST /dm/:uid、POST /dm/:uid/read
 - **前端**：MyView.vue 重构（el-tabs 四标签，切标签懒加载）；utils/share.js 抽取 cnt/excerpt/atts/firstImage/attDataURL（ShareView 同步改用）；api.js 新增 friend*/dm* 方法
 - **冒烟**：scripts/smoke_friends.mjs 25 项断言全绿（注册→搜索→申请→同意→私聊→已读→scope 过滤→删好友→清理）
+
+## 2026-08-25 消息中心（右下角浮窗 + 红点 + 三组通知）
+
+- **入口**：全局右下角 🔔 悬浮按钮（AI 浮窗正上方，bottom:86px），未读>0 右上角红点数字（99+ 封顶）；与 AI 浮窗互斥（close-fab-panel 自定义事件，展开一方收起另一方）
+- **分组**：面板内三 tab：私信评论（好友私信列表 + 评论通知）/ 点赞 / 收藏；未读条目浅蓝底 + 左侧蓝条（小红书风格）
+- **通知来源**：他人对分享帖的点赞/收藏/评论（自己操作自己的帖子不通知）；私信未读沿用 dm_message.is_read
+- **表**：notification（user_id 接收者 / actor_id 触发者 / type like|fav|comment / post_id / comment_id / is_read）——schema.sql 表 32；帖删级联清通知
+- **接口**：/api/notifications/*（routes/notifications.js 新建）：GET /（comments/likes/favs 三组各 ≤50 条，JOIN actor 与帖子，LEFT JOIN 评论内容）、GET /unread-count（含 dm 聚合）、POST /read {types} 批量标已读
+- **跳转**：通知 → `/share?post=ID`（ShareView 深链打开详情弹窗评论区回复）；私信 → `/me?tab=friends&dm=ID`（MyView deepLink 自动切好友 tab + 打开私聊弹窗 + router.replace 清 query）
+- **轮询**：红点 15s 全局常驻；面板打开时 3s 快轮询计数（列表只在打开时拉取，避免阅读中列表跳动）
+- **前端**：MessageCenter.vue（仿 AIChatBox 样式：fab 52px 圆形 / 面板 420×640 / 移动端铺满视口）；App.vue 挂载；api.js 新增 notifications*/notificationsUnread/notificationsRead
+- **冒烟**：scripts/smoke_notifications.mjs 10 项断言全绿（注册→发帖→赞/藏/评→计数/分组/标已读→私信未读→自操作不通知→删帖级联清空）

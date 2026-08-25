@@ -10,7 +10,9 @@ import { NOTE_STATUS, statusOf, excerpt, fmtDate } from '../utils/noteStatus.js'
 const props = defineProps({
   schedules: { type: Array, default: () => [] }, // 供「关联备赛」选择
   active: { type: Boolean, default: true },      // 视图可见 → 自动刷新
+  open: { type: Boolean, default: false },       // 面板展开（由 ToolDock 控制）
 });
+const emit = defineEmits(['close']);
 
 const date = ref(fmtDate(new Date()));
 const status = ref('');
@@ -23,8 +25,7 @@ const loading = ref(false);
 const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
 
-// —— 浮窗：收起（变圆形 📝 按钮，位于 AI 对话按钮左侧）/ 拖动 ——
-const collapsed = ref(true); // 默认收起（圆形 📝 按钮），点击展开
+// —— 浮窗：可拖动手柄（面板由 ToolDock 控制开关） ——
 const dragRef = ref(null);
 const pos = ref({ left: null, top: null }); // null → 默认右下角
 const dragging = ref(null);
@@ -154,20 +155,16 @@ onMounted(() => { if (props.active) refresh(); });
 </script>
 
 <template>
-  <!-- 入口按钮：常驻不消失，仿 AI 对话——点击旋转 45°，面板在其上方展开，再点旋转复原并收起 -->
-  <button class="sn-fab" :class="{ active: !collapsed }" :title="collapsed ? '展开日程笔记' : '收起日程笔记'"
-    @click="collapsed = !collapsed">📝</button>
-
-  <div ref="dragRef" v-if="!collapsed" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
-    <!-- 拖拽手柄 + 收起/展开 -->
+  <!-- 日程笔记面板（由 ToolDock 控制开关），可拖动手柄 -->
+  <div ref="dragRef" v-if="props.open" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
+    <!-- 拖拽手柄 + 收起 -->
     <div class="sn-head" @pointerdown.prevent="dragStart">
       <b>📝 日程笔记</b>
       <span class="sn-sub">拖动此栏可移动</span>
-      <el-button size="small" text class="sn-ctl" :title="collapsed ? '展开' : '收起'"
-        @click="collapsed = !collapsed">{{ collapsed ? '⤢ 展开' : '⤡ 收起' }}</el-button>
+      <el-button size="small" text class="sn-ctl" title="收起" @click="emit('close')">⤡ 收起</el-button>
     </div>
 
-    <template v-if="!collapsed">
+    <template>
       <el-button type="primary" class="sn-write" size="large" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
 
       <div class="sn-list-head">本月笔记（{{ history.length }}）</div>
@@ -276,17 +273,6 @@ onMounted(() => { if (props.active) refresh(); });
 }
 
 // 入口圆形按钮：与全局 AI 对话按钮同款样式（💬 位于 right:22px，本按钮 82px=22+52+8 间距）；
-// 点击展开时旋转 45°（同 AI 对话按钮 .active 交互），按钮常驻不消失
-.sn-fab {
-  position: fixed; right: 82px; bottom: 22px; z-index: 1000;
-  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
-  font-size: 24px; background: #2563eb; color: #fff;
-  box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
-  transition: transform .2s;
-  &:hover { transform: scale(1.08); }
-  &.active { transform: rotate(45deg); }
-}
-
 // 弹窗内
 .dn-tools { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
   .el-date-picker { width: 150px; }
