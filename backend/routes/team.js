@@ -1,7 +1,7 @@
 // 小组接口：建组/加入/详情、自定义角色（高自由度权限）、成员管理、小组 AI 备赛计划
 import { Router } from 'express';
 import db from '../db/database.js';
-import { authRequired, teamCtx, hasPerm, requirePerm, genInviteCode, PERM_KEYS } from './middleware.js';
+import { authRequired, teamCtx, hasPerm, requirePerm, genInviteCode, PERM_KEYS, logAudit } from './middleware.js';
 import { callDeepSeek } from './ai.js';
 import { findPhases } from './schedule.js';
 
@@ -151,6 +151,7 @@ r.post('/join', (req, res) => {
     .run(team.id, req.user.id);
   if (defaultRole) db.prepare('INSERT INTO team_member_role (team_id, user_id, role_id) VALUES (?,?,?)')
     .run(team.id, req.user.id, defaultRole.id);
+  logAudit(req, 'team-join', team.name);
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
 });
 
@@ -258,6 +259,7 @@ r.put('/:id', (req, res) => {
 r.get('/:id/invite', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  logAudit(req, 'team-invite', ctx.team.name);
   res.json({ invite_code: ctx.team.invite_code });
 });
 
@@ -507,10 +509,12 @@ r.post('/:id/plan', (req, res) => {
     const merged = { ...JSON.parse(p.plan_json || '{}'), ...norm };
     db.prepare('UPDATE team_plan SET title = ?, plan_json = ?, comp_id = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
       .run(t || p.title, JSON.stringify(merged), comp_id ? Number(comp_id) : p.comp_id, p.id);
+    logAudit(req, 'team-plan', ctx.team.name, { action: 'update' });
     return res.json({ id: p.id, message: '已保存' });
   }
   const rr = db.prepare('INSERT INTO team_plan (team_id, comp_id, title, plan_json) VALUES (?,?,?,?)')
     .run(ctx.team.id, comp_id ? Number(comp_id) : null, t || '小组备赛计划', JSON.stringify({ ...norm, comp_id: comp_id ? Number(comp_id) : null }));
+  logAudit(req, 'team-plan', ctx.team.name, { action: 'create' });
   res.status(201).json({ id: rr.lastInsertRowid, message: '已创建' });
 });
 

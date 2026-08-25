@@ -372,3 +372,28 @@ CREATE TABLE IF NOT EXISTS notification (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notification(user_id, is_read);
+
+-- 表33 操作审计日志（后台管理）：登录登出 / 计划制定 / 小组 / 好友 / 私聊 / 评论等
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER,                          -- 操作者（可能已被删除 → 无外键）
+  username    TEXT,
+  action      TEXT NOT NULL,                    -- login/logout/register/plan-create/plan-manual/plan-chat/team-plan/team-join/team-invite/friend-request/friend-accept/friend-reject/dm-send/comment-share/comment-team/user-status/announce-create/announce-update/announce-delete
+  target      TEXT,                             -- 目标对象：竞赛名/小组名/对方昵称/帖子标题
+  detail      TEXT,                             -- 补充说明（JSON）
+  ip          TEXT,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, create_time);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, create_time);
+
+-- 表34 公告（后台管理发布，前台全局顶部横幅展示）
+CREATE TABLE IF NOT EXISTS announcement (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  content     TEXT DEFAULT '',
+  pinned      INTEGER DEFAULT 0,                -- 置顶优先展示
+  admin_id    INTEGER,                          -- 发布管理员
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_announce ON announcement(pinned, id);

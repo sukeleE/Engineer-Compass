@@ -3,7 +3,7 @@
 // 点赞/收藏 toggle；评论（纯文本）增删；发帖/编辑/删帖限本人或管理员
 import { Router } from 'express';
 import db from '../db/database.js';
-import { authRequired, optionalAuth } from './middleware.js';
+import { authRequired, optionalAuth, logAudit, mutedGuard } from './middleware.js';
 
 const r = Router();
 
@@ -135,7 +135,7 @@ r.get('/tags', (req, res) => {
 });
 
 // POST /api/share/posts — 发帖（开楼）
-r.post('/posts', authRequired, (req, res) => {
+r.post('/posts', authRequired, mutedGuard, (req, res) => {
   const title = String(req.body?.title || '').trim();
   const content = String(req.body?.content || '').trim();
   if (!title || title.length > 60) return res.status(400).json({ error: '标题必填（≤60 字）' });
@@ -237,7 +237,7 @@ r.post('/posts/:id/fav', authRequired, (req, res) => {
 });
 
 // POST /api/share/posts/:id/comments — 评论
-r.post('/posts/:id/comments', authRequired, (req, res) => {
+r.post('/posts/:id/comments', authRequired, mutedGuard, (req, res) => {
   const content = String(req.body?.content || '').trim();
   if (!content || content.length > 1000) return res.status(400).json({ error: '评论 1-1000 字' });
   const postId = Number(req.params.id);
@@ -251,6 +251,7 @@ r.post('/posts/:id/comments', authRequired, (req, res) => {
     `SELECT c.id, c.content, c.create_time, u.id AS user_id, u.nickname, u.avatar
      FROM share_comment c JOIN user u ON u.id = c.user_id WHERE c.id = ?`
   ).get(Number(info.lastInsertRowid));
+  logAudit(req, 'comment-share', `post#${postId}`);
   res.json(c);
 });
 

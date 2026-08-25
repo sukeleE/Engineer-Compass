@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { randomBytes, randomInt } from 'node:crypto';
 import db from '../db/database.js';
-import { hashPassword, verifyPassword, authRequired } from './middleware.js';
+import { hashPassword, verifyPassword, authRequired, logAudit } from './middleware.js';
 import sendMail from './mailer.js';
 
 const r = Router();
@@ -74,6 +74,7 @@ r.post('/email-login', async (req, res) => {
 
   let user = db.prepare('SELECT * FROM user WHERE email = ?').get(mail);
   let migrated = 0;
+  if (user?.status === 1) return res.status(403).json({ error: '账号已被封禁，无法登录' });
   if (!user) {
     // 自动注册：用户名由邮箱前缀生成（冲突加数字后缀）
     const name = genUsername(mail);
@@ -92,6 +93,8 @@ r.post('/email-login', async (req, res) => {
 
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, user.id);
+  req.user = { id: user.id, username: user.username };
+  logAudit(req, 'login', mail, { via: 'email-code', auto_registered: migrated > 0 });
   res.json({ token, user: userCard(user), migrated });
 });
 
@@ -114,6 +117,8 @@ r.post('/register', (req, res) => {
     .run(name, hashPassword(password), (nickname || '').trim() || name, mail);
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, r2.lastInsertRowid);
+  req.user = { id: r2.lastInsertRowid, username: name };
+  logAudit(req, 'register', mail);
   res.status(201).json({
     token, user: { id: r2.lastInsertRowid, username: name, nickname: (nickname || '').trim() || name, is_admin: 0, email: mail, avatar: null },
   });
@@ -128,9 +133,19 @@ r.post('/login', (req, res) => {
   if (!u || !verifyPassword(password || '', u.password_hash)) {
     return res.status(401).json({ error: '邮箱或密码错误' });
   }
+  if (u.status === 1) return res.status(403).json({ error: '账号已被封禁，无法登录' });
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO session (token, user_id) VALUES (?,?)').run(token, u.id);
+  req.user = { id: u.id, username: u.username };
+  logAudit(req, 'login', u.email || u.username, { via: 'password' });
   res.json({ token, user: userCard(u) });
+});
+
+// POST /api/auth/logout — 登出（删除当前会话 + 审计）
+r.post('/logout', authRequired, (req, res) => {
+  db.prepare('DELETE FROM session WHERE token = ?').run(req.user.token);
+  logAudit(req, 'logout');
+  res.json({ message: '已退出登录' });
 });
 
 // PUT /api/auth/profile — 更新昵称 / 头像（authRequired）

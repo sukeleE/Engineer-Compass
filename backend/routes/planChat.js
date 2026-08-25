@@ -8,7 +8,7 @@ import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
 import { normalizePlan } from './schedule.js';
-import { optionalAuth, teamCtx, hasPerm } from './middleware.js';
+import { optionalAuth, teamCtx, hasPerm, logAudit } from './middleware.js';
 
 const r = Router();
 
@@ -166,7 +166,9 @@ ${schema}`;
 
   // —— 是计划 JSON → 按模式校验 + 落地 ——
   try {
-    return res.json(await finalize(mode, parsed, { uid, ctx, comp, teamPlan, schedRow, studyRow, reply }));
+    const out = await finalize(mode, parsed, { uid, ctx, comp, teamPlan, schedRow, studyRow, reply });
+    logAudit(req, 'plan-chat', comp?.name || '', { mode, topic: parsed.topic || '' });
+    return res.json(out);
   } catch (err) {
     // 计划结构不完整（AI 偶发输出残缺 JSON）：引导继续对话，而不是硬报错打断
     if (/无有效阶段|缺少 topic/.test(err.message)) {

@@ -158,4 +158,17 @@ export const api = {
   notifications: () => req('/notifications'),
   notificationsUnread: () => req('/notifications/unread-count'),
   notificationsRead: (types) => req('/notifications/read', { method: 'POST', body: JSON.stringify({ types }) }),
+  // 认证：登出（删除服务端会话 + 审计）
+  logout: () => req('/auth/logout', { method: 'POST' }),
+  // 后台管理（仅管理员，路由守卫 + 后端 adminRequired 双重校验）
+  adminUsers: (params) => req(`/admin/users${qs(params)}`),
+  adminSetStatus: (id, status) => req(`/admin/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  adminLogs: (params) => req(`/admin/logs${qs(params)}`),
+  adminAnnouncements: () => req('/admin/announcements'),
+  adminAnnouncementCreate: (card) => req('/admin/announcements', { method: 'POST', body: JSON.stringify(card) }),
+  adminAnnouncementUpdate: (id, card) => req(`/admin/announcements/${id}`, { method: 'PUT', body: JSON.stringify(card) }),
+  adminAnnouncementDelete: (id) => req(`/admin/announcements/${id}`, { method: 'DELETE' }),
+  serverStatus: () => req('/admin/server-status'),
+  // 公告（公开）：全局顶部横幅
+  announcementLatest: () => req('/announcements/latest'),
 };

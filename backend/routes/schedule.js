@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
-import { optionalAuth } from './middleware.js';
+import { optionalAuth, logAudit } from './middleware.js';
 
 const r = Router();
 
@@ -90,6 +90,7 @@ r.post('/add', optionalAuth, async (req, res) => {
   const r2 = db.prepare(
     'INSERT INTO user_schedule (comp_id, user_id, is_custom, plan_json) VALUES (?,?,0,?)'
   ).run(comp.id, uid, JSON.stringify(plan));
+  logAudit(req, 'plan-create', comp.name);
   res.status(201).json({ id: r2.lastInsertRowid, plan, note: plan.note });
 });
 
@@ -167,6 +168,7 @@ r.post('/manual', optionalAuth, (req, res) => {
   const rr = db.prepare(
     'INSERT INTO user_schedule (comp_id, user_id, is_custom, plan_json) VALUES (?,?,1,?)'
   ).run(comp?.id ?? null, uid, JSON.stringify(plan));
+  logAudit(req, 'plan-manual', planTitle);
   res.status(201).json({ id: rr.lastInsertRowid, plan, message: '自编计划已保存' });
 });
 

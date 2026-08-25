@@ -1,9 +1,17 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import ToolDock from './components/ToolDock.vue';
 import ImageViewer from './components/ImageViewer.vue';
 import auth from './auth.js';
+import { api } from './api.js';
+
+// 全局公告横幅：最新置顶公告（公开接口，无需登录；关闭仅本次会话记忆）
+const announce = ref(null);
+const announceHidden = ref(false);
+onMounted(async () => {
+  try { announce.value = await api.announcementLatest(); } catch { /* 横幅拉取失败不影响页面 */ }
+});
 
 // 移动端汉堡菜单：≤768px 收起顶部导航，☰ 展开下拉面板
 const route = useRoute();
@@ -14,6 +22,13 @@ watch(() => route.path, closeMenu);
 
 <template>
   <div class="app">
+    <!-- 全局顶部公告横幅（后台管理发布；内容过长省略，悬停 title 看全文） -->
+    <div v-if="announce && !announceHidden" class="announce-bar" :title="announce.content">
+      <span class="ann-icon">📢</span>
+      <b class="ann-title">{{ announce.title }}</b>
+      <span class="ann-content">{{ announce.content }}</span>
+      <button class="ann-close" aria-label="关闭公告" @click="announceHidden = true">✕</button>
+    </div>
     <header class="app-header">
       <div class="brand">
         <h1>🎯 工科竞赛导航 <span>Engineer-Compass</span></h1>
@@ -81,6 +96,25 @@ watch(() => route.path, closeMenu);
   }
 }
 .app-header { position: relative; }
+
+/* 公告横幅：蓝底白字，非吸顶（与 header 一起随页面滚动） */
+.announce-bar {
+  display: flex; align-items: center; gap: 8px;
+  background: linear-gradient(90deg, #1d4ed8, #2563eb);
+  color: #fff; font-size: 13px;
+  padding: 7px 16px 7px 20px;
+  .ann-icon { font-size: 15px; flex-shrink: 0; }
+  .ann-title { flex-shrink: 0; }
+  .ann-content {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    opacity: .92;
+  }
+  .ann-close {
+    border: none; background: transparent; color: #dbeafe; cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
+    &:hover { background: #ffffff22; color: #fff; }
+  }
+}
 
 .nav-me {
   display: flex; align-items: center; gap: 6px;

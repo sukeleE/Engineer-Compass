@@ -1,4 +1,4 @@
-// 路由：/ 竞赛时间轴、/schedule 我的备赛日程、/study 学习日程、/team 项目小组、/share 资源分享、/me 我的、/login 登录、/admin AI收录管理端
+// 路由：/ 竞赛时间轴、/schedule 我的备赛日程、/study 学习日程、/team 项目小组、/share 资源分享、/me 我的、/login 登录、/admin AI收录管理端、/admin-console 后台管理
 import { createRouter, createWebHistory } from 'vue-router';
 import TimelineView from './components/TimelineView.vue';
 import ScheduleView from './components/ScheduleView.vue';
@@ -9,6 +9,8 @@ import MyView from './components/MyView.vue';
 import ProfileView from './components/ProfileView.vue';
 import AuthView from './components/AuthView.vue';
 import AdminView from './components/AdminView.vue';
+import AdminConsole from './components/AdminConsole.vue';
+import auth from './auth.js';
 
 export default createRouter({
   history: createWebHistory(),
@@ -24,5 +26,14 @@ export default createRouter({
     { path: '/user/:id', name: 'user-profile', component: ProfileView },
     { path: '/login', name: 'login', component: AuthView },
     { path: '/admin', name: 'admin', component: AdminView },
+    // 后台管理：仅管理员（前端守卫 + 后端 adminRequired 双重校验）
+    {
+      path: '/admin-console', name: 'admin-console', component: AdminConsole,
+      beforeEnter: (_to, _from, next) => {
+        if (!auth.token) return next('/login');
+        if (!auth.user?.is_admin) return next('/me');
+        next();
+      },
+    },
   ],
 });

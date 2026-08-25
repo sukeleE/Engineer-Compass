@@ -1,7 +1,7 @@
 // 小组协作接口：进度任务对齐 / 进度汇报 / 讨论 / 资料共享 / 设备预约
 import { Router } from 'express';
 import db from '../db/database.js';
-import { authRequired, teamCtx, requirePerm, hasPerm } from './middleware.js';
+import { authRequired, teamCtx, requirePerm, hasPerm, logAudit, mutedGuard } from './middleware.js';
 import { normalizePlan } from './schedule.js';
 
 const r = Router();
@@ -47,7 +47,7 @@ function attachComments(teamId, type, targets) {
 }
 
 // POST /api/team/:id/comment — 评论（log 或 message，全体成员可评论）
-r.post('/:id/comment/:type/:tid', (req, res) => {
+r.post('/:id/comment/:type/:tid', mutedGuard, (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const type = req.params.type === 'log' ? 'log' : req.params.type === 'message' ? 'message' : null;
@@ -61,6 +61,7 @@ r.post('/:id/comment/:type/:tid', (req, res) => {
   if (content.length > 500) return res.status(400).json({ error: '评论最长 500 字' });
   const rr = db.prepare('INSERT INTO comment (team_id, target_type, target_id, user_id, content) VALUES (?,?,?,?,?)')
     .run(ctx.team.id, type, tid, req.user.id, content);
+  logAudit(req, 'comment-team', ctx.team.name, { type, target_id: tid });
   res.status(201).json({ id: rr.lastInsertRowid, message: '已评论' });
 });
 
@@ -131,7 +132,7 @@ r.delete('/:id/task/:tid', (req, res) => {
 });
 
 // POST /api/team/:id/log — 成员进度汇报（progress 权限；富文本 + 附件）
-r.post('/:id/log', (req, res) => {
+r.post('/:id/log', mutedGuard, (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   const deny = requirePerm(ctx, res, 'progress');
   if (deny) return deny;
@@ -258,7 +259,7 @@ r.get('/:id/messages', (req, res) => {
 });
 
 // POST /api/team/:id/message — 发消息（message 权限；可附图片）
-r.post('/:id/message', (req, res) => {
+r.post('/:id/message', mutedGuard, (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   const deny = requirePerm(ctx, res, 'message');
   if (deny) return deny;

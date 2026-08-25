@@ -2,7 +2,7 @@
 // 好友关系存双向行（friend 表 A-B 与 B-A 各一行）；申请记录保留在 friend_request（status 流转）
 import { Router } from 'express';
 import db from '../db/database.js';
-import { authRequired } from './middleware.js';
+import { authRequired, logAudit, mutedGuard } from './middleware.js';
 
 const r = Router();
 const uid = (req) => Number(req.user.id);
@@ -72,6 +72,7 @@ r.post('/request', authRequired, (req, res) => {
     db.prepare(`UPDATE friend_request SET status = 'accepted', update_time = CURRENT_TIMESTAMP WHERE id = ?`).run(reverse.id);
     db.prepare('INSERT OR IGNORE INTO friend (user_id, friend_id) VALUES (?, ?)').run(me, toId);
     db.prepare('INSERT OR IGNORE INTO friend (user_id, friend_id) VALUES (?, ?)').run(toId, me);
+    logAudit(req, 'friend-accept', `user#${toId}`, { auto: true });
     return res.json({ id: reverse.id, message: '对方已申请过你，已自动成为好友' });
   }
 
@@ -80,9 +81,11 @@ r.post('/request', authRequired, (req, res) => {
     if (exists.status === 'accepted') return res.status(400).json({ error: '已经是好友了' });
     if (exists.status === 'pending') return res.status(400).json({ error: '已发送过申请，等待对方处理' });
     db.prepare(`UPDATE friend_request SET status = 'pending', update_time = CURRENT_TIMESTAMP WHERE id = ?`).run(exists.id); // 被拒后重发
+    logAudit(req, 'friend-request', `user#${toId}`, { resent: true });
     return res.json({ id: exists.id, message: '申请已重新发送' });
   }
   const info = db.prepare('INSERT INTO friend_request (from_id, to_id, status) VALUES (?, ?, ?)').run(me, toId, 'pending');
+  logAudit(req, 'friend-request', `user#${toId}`);
   res.json({ id: Number(info.lastInsertRowid), message: '好友申请已发送' });
 });
 
@@ -96,6 +99,7 @@ r.post('/request/:id/accept', authRequired, (req, res) => {
   db.prepare(`UPDATE friend_request SET status = 'accepted', update_time = CURRENT_TIMESTAMP WHERE id = ?`).run(fr.id);
   db.prepare('INSERT OR IGNORE INTO friend (user_id, friend_id) VALUES (?, ?)').run(fr.from_id, fr.to_id);
   db.prepare('INSERT OR IGNORE INTO friend (user_id, friend_id) VALUES (?, ?)').run(fr.to_id, fr.from_id);
+  logAudit(req, 'friend-accept', `user#${fr.from_id}`);
   res.json({ message: '已添加好友' });
 });
 
@@ -105,6 +109,7 @@ r.post('/request/:id/reject', authRequired, (req, res) => {
   const fr = db.prepare('SELECT * FROM friend_request WHERE id = ? AND to_id = ?').get(Number(req.params.id), me);
   if (!fr) return res.status(404).json({ error: '申请不存在' });
   db.prepare(`UPDATE friend_request SET status = 'rejected', update_time = CURRENT_TIMESTAMP WHERE id = ?`).run(fr.id);
+  logAudit(req, 'friend-reject', `user#${fr.from_id}`);
   res.json({ message: '已拒绝' });
 });
 
@@ -133,7 +138,7 @@ r.get('/dm/:uid', authRequired, (req, res) => {
 });
 
 // POST /api/friends/dm/:uid — 发送私信（1-2000 字）
-r.post('/dm/:uid', authRequired, (req, res) => {
+r.post('/dm/:uid', authRequired, mutedGuard, (req, res) => {
   const content = String(req.body?.content || '').trim();
   if (!content || content.length > 2000) return res.status(400).json({ error: '私信 1-2000 字' });
   const me = uid(req);
@@ -142,6 +147,7 @@ r.post('/dm/:uid', authRequired, (req, res) => {
   const info = db.prepare('INSERT INTO dm_message (from_id, to_id, content) VALUES (?, ?, ?)').run(me, other, content);
   const m = db.prepare('SELECT id, from_id, to_id, content, is_read, create_time FROM dm_message WHERE id = ?')
     .get(Number(info.lastInsertRowid));
+  logAudit(req, 'dm-send', `user#${other}`);
   res.json(m);
 });
 
