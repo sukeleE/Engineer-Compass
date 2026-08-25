@@ -35,14 +35,53 @@ const mobileList = computed(() => (mobilePending.value ? noMonth.value : byMonth
 const MONTHS = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
 const TYPE_COLORS = {
   电子机器人: '#3b82f6', 机械: '#f59e0b', 综合: '#10b981', 数学基础: '#8b5cf6',
-  设计艺术: '#ec4899', 经管商科: '#14b8a6', 医学技能: '#ef4444',
+  设计艺术: '#ec4899', 经管商科: '#14b8a6', 医学技能: '#ef4444', 创新创业: '#0ea5e9', 外语: '#f472b6', 专业: '#64748b',
 };
 const colorOf = (t) => TYPE_COLORS[t] || '#64748b';
 
-const types = computed(() => ['全部', ...new Set(list.value.map((c) => c.type))]);
+// 分类归一化：DB 的 type 有 37 种（AI 收录会不断新增碎片类型），映射到 10 个显示大类
+const TYPE_GROUP = {
+  // → 电子机器人
+  '机器人电子': '电子机器人', '集成电路': '电子机器人', '嵌入式系统': '电子机器人',
+  '光电工程': '电子机器人', '通信技术': '电子机器人', '网络安全': '电子机器人',
+  '信息技术': '电子机器人', '物联网': '电子机器人', '人工智能': '电子机器人',
+  // → 机械
+  '化工设计/工程实践': '机械', '化工实验/实践': '机械',
+  // → 数学基础
+  '力学基础': '数学基础', '物理实验/创新': '数学基础', '统计/数据科学': '数学基础', '化学实验/创新': '数学基础',
+  // → 医学技能
+  '医学技能（临床医学/中医学/预防医学/护理学）': '医学技能',
+  '基础医学创新研究（7个学科赛道×创新研究/实验设计两类）': '医学技能',
+  '生命科学/科研创新': '医学技能',
+  // → 外语
+  '外语（语言文化/人文）': '外语',
+  // → 综合（跨领域/口径杂的）
+  '综合（土建）': '综合', '综合（风景园林）': '综合', '综合（水利）': '综合',
+  '测绘/地信/遥感': '综合', '地质/地学': '综合',
+  // → 专业（录入时带长描述的脏数据）
+  '按专业大类设赛项（2023-2027执行规划：中职组ZZ编号、高职组GZ编号；2025年改革为42条赛道）': '专业',
+  '六大领域60余个赛项（第48届共64项，2026年9月在上海举办，中国首次承办）': '综合',
+  '与世赛赛项一一对应（60余项，覆盖制造与工程技术、信息与通信技术等六大领域）': '综合',
+  '180余个赛项，覆盖大数据、人工智能、机器人、智能制造、数字孪生、云计算、区块链、轨道交通、虚拟仿真等；分国内赛与国际赛（技术创新赛、未来技能挑战赛）': '综合',
+};
+const groupOf = (t) => TYPE_GROUP[t] || t;
+
+// 分类 chips：按大类聚合 + 竞赛数降序（「全部」固定首位）
+const types = computed(() => {
+  const counts = {};
+  list.value.forEach((c) => { const g = groupOf(c.type); counts[g] = (counts[g] || 0) + 1; });
+  return ['全部', ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
+});
+
+// 移动端分类折叠：默认只显示前 4 个（全部+竞赛最多的 3 类），点「更多分类」展开
+const mqNarrow = window.matchMedia('(max-width: 768px)');
+const isNarrow = ref(mqNarrow.matches);
+mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
+const chipsExpanded = ref(false);
+const visibleChips = computed(() => (isNarrow.value && !chipsExpanded.value ? types.value.slice(0, 4) : types.value));
 
 const filtered = computed(() => {
-  let arr = list.value.filter((c) => filterType.value === '全部' || c.type === filterType.value);
+  let arr = list.value.filter((c) => filterType.value === '全部' || groupOf(c.type) === filterType.value);
   if (filterDiff.value) arr = arr.filter((c) => c.difficulty === filterDiff.value);
   return arr;
 });
@@ -121,7 +160,7 @@ onMounted(load);
     <div class="filters">
       <div class="chips">
         <button
-          v-for="t in types"
+          v-for="t in visibleChips"
           :key="t"
           class="chip"
           :class="{ active: filterType === t }"
@@ -129,6 +168,10 @@ onMounted(load);
           @click="filterType = t"
         >
           <span v-if="t !== '全部'" class="dot" :style="{ background: colorOf(t) }"></span>{{ t }}
+        </button>
+        <!-- 移动端：折叠多余分类，点开再展示全部 -->
+        <button v-if="isNarrow && types.length > 4" class="chip chip-more" @click="chipsExpanded = !chipsExpanded">
+          {{ chipsExpanded ? '收起 ▴' : '更多分类 ▾' }}
         </button>
       </div>
       <div class="right">
@@ -148,7 +191,7 @@ onMounted(load);
     <div v-if="searchResults?.found" class="search-results">
       <div class="sr-item" v-for="c in searchResults.results" :key="c.id" @click="openSearchResult(c)">
         <b>{{ c.short_name || c.name }}</b>
-        <span class="type-color" :class="c.type">{{ c.type }}</span>
+        <span class="type-color" :class="groupOf(c.type)">{{ groupOf(c.type) }}</span>
         <span>{{ '★'.repeat(c.difficulty || 0) }}</span>
       </div>
     </div>
@@ -218,7 +261,7 @@ onMounted(load);
           <span v-if="isTwoYear(c)" class="t-badge">隔年</span>
           <span v-if="c.source_type !== 'official'" class="t-badge ai">AI</span>
           <span class="t-stars">{{ '★'.repeat(c.difficulty || 0) }}<i>{{ '☆'.repeat(5 - (c.difficulty || 0)) }}</i></span>
-          <span class="t-type" :class="c.type">{{ c.type }}</span>
+          <span class="t-type" :class="groupOf(c.type)">{{ groupOf(c.type) }}</span>
         </div>
       </div>
     </div>
@@ -256,6 +299,7 @@ onMounted(load);
     .dot { width: 8px; height: 8px; border-radius: 50%; }
     &:hover { border-color: #94a3b8; }
     &.active { background: #eff6ff; border-width: 2px; font-weight: 600; }
+    &.chip-more { border-style: dashed; color: #2563eb; font-weight: 500; }
   }
   .right { display: flex; gap: 8px; align-items: center; }
 }
