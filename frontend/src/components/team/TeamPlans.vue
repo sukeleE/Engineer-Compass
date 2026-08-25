@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
+import PlanTiles from './PlanTiles.vue';
 
 const router = useRouter();
 // 点击成员昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -34,7 +35,10 @@ const visibleRows = computed(() =>
   }))
 );
 
-const pct = (d, t) => (t ? Math.round((d / t) * 100) : 0);
+// 转成 PlanTiles 的紧凑标签数据（只取展示所需字段）
+const schedTiles = (arr) => arr.map((s) => ({ id: s.id, name: s.comp_name, done: s.done, total: s.total, phases: s.phases || [] }));
+const studyTiles = (arr) => arr.map((s) => ({ id: s.id, name: s.topic, done: s.done, total: s.total, phases: s.phases || [], level: s.level }));
+
 onMounted(() => load());
 </script>
 
@@ -55,42 +59,18 @@ onMounted(() => load());
         </span>
       </div>
 
-      <!-- 备赛计划（已完成的不显示） -->
+      <!-- 备赛计划（已完成的不显示；紧凑标签，点击展开详细进度） -->
       <div v-if="m.schedules.length" class="mp-sec">
         <div class="mp-sec-title">🏁 竞赛备赛计划</div>
-        <div v-for="s in m.schedules" :key="s.id" class="plan-card">
-          <div class="pc-top">
-            <b>{{ s.comp_name }}</b>
-            <span class="pc-pct">{{ s.done }}/{{ s.total }}</span>
-          </div>
-          <el-progress :percentage="pct(s.done, s.total)" :stroke-width="6" :show-text="false" />
-          <div class="pc-phases">
-            <el-tag v-for="(p, i) in s.phases" :key="i" size="small" effect="plain"
-              :type="p.done === p.total && p.total ? 'success' : p.done ? 'warning' : 'info'">
-              阶段{{ i + 1 }} {{ p.phase }}（{{ p.done }}/{{ p.total }}）
-            </el-tag>
-          </div>
-        </div>
+        <PlanTiles :items="schedTiles(m.schedules)" />
       </div>
       <div v-else-if="m.schedTotal" class="mp-none mp-done">🎉 该成员备赛计划已全部完成</div>
       <div v-else class="mp-none">暂无备赛计划（成员可在「我的备赛日程」生成）</div>
 
-      <!-- 学习日程（已完成的不显示） -->
+      <!-- 学习日程（已完成的不显示；紧凑标签，点击展开详细进度） -->
       <div v-if="m.studies.length" class="mp-sec">
         <div class="mp-sec-title">📚 AI 学习日程</div>
-        <div v-for="s in m.studies" :key="s.id" class="plan-card">
-          <div class="pc-top">
-            <b>{{ s.topic }}</b>
-            <span class="pc-pct">{{ s.done }}/{{ s.total }}</span>
-          </div>
-          <el-progress :percentage="pct(s.done, s.total)" :stroke-width="6" :show-text="false" />
-          <div class="pc-phases">
-            <el-tag v-for="(p, i) in s.phases" :key="i" size="small" effect="plain"
-              :type="p.done === p.total && p.total ? 'success' : p.done ? 'warning' : 'info'">
-              阶段{{ i + 1 }} {{ p.phase }}（{{ p.done }}/{{ p.total }}）
-            </el-tag>
-          </div>
-        </div>
+        <PlanTiles :items="studyTiles(m.studies)" />
       </div>
       <div v-else-if="m.studyTotal" class="mp-none mp-done">🎉 该成员学习日程已全部完成</div>
       <div v-else class="mp-none">暂无学习日程（成员可在「学习日程」页生成）</div>
@@ -114,16 +94,5 @@ onMounted(() => load());
   }
   .mp-none { color: #cbd5e1; font-size: 12.5px; margin-top: 4px;
     &.mp-done { color: #16a34a; font-size: 12.5px; } }
-  .plan-card {
-    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
-    padding: 8px 12px; margin-bottom: 8px;
-    .pc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
-      b { font-size: 13px; }
-      .pc-pct { color: var(--text-2); font-size: 12px; }
-    }
-    .pc-phases { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap;
-      .el-tag { max-width: 100%; }
-    }
-  }
 }
 </style>

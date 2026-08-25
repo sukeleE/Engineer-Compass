@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
+import PlanTiles from './team/PlanTiles.vue';
 
 const route = useRoute();
 const data = ref(null);
@@ -15,7 +16,9 @@ const error = ref('');
 const uid = computed(() => Number(route.params.id));
 const isMe = computed(() => auth.user?.id === uid.value);
 
-const pct = (d, t) => (t ? Math.round((d / t) * 100) : 0);
+// 转成 PlanTiles 的紧凑标签数据（只取展示所需字段）
+const schedTiles = (arr) => arr.map((s) => ({ id: s.id, name: s.comp_name, done: s.done, total: s.total, phases: s.phases || [] }));
+const studyTiles = (arr) => arr.map((s) => ({ id: s.id, name: s.topic, done: s.done, total: s.total, phases: s.phases || [], level: s.level }));
 
 async function load() {
   if (!auth.token) { error.value = '登录后查看用户主页'; return; }
@@ -66,42 +69,17 @@ onMounted(load);
           </div>
         </div>
 
-        <!-- 🏆 竞赛备赛计划（全部显示，含已完成——成果展示） -->
+        <!-- 🏆 竞赛备赛计划（全部显示，含已完成——成果展示；紧凑标签点击展开详细进度） -->
         <section v-if="data.schedules.length" class="pv-sec">
           <h3>🏆 竞赛备赛计划（{{ data.schedules.length }}）</h3>
-          <div v-for="s in data.schedules" :key="s.id" class="plan-card">
-            <div class="pc-top">
-              <b>{{ s.comp_name }}</b>
-              <span class="pc-pct">{{ s.done }}/{{ s.total }}</span>
-            </div>
-            <el-progress :percentage="pct(s.done, s.total)" :stroke-width="6" :show-text="false" />
-            <div class="pc-phases">
-              <el-tag v-for="(p, i) in s.phases" :key="i" size="small" effect="plain"
-                :type="p.done === p.total && p.total ? 'success' : p.done ? 'warning' : 'info'">
-                阶段{{ i + 1 }} {{ p.phase }}（{{ p.done }}/{{ p.total }}）
-              </el-tag>
-            </div>
-          </div>
+          <PlanTiles :items="schedTiles(data.schedules)" />
         </section>
         <el-empty v-else description="暂无竞赛备赛计划" :image-size="70" class="pv-empty" />
 
-        <!-- 📚 学习日程 -->
+        <!-- 📚 学习日程（紧凑标签点击展开详细进度） -->
         <section v-if="data.studies.length" class="pv-sec">
           <h3>📚 学习日程（{{ data.studies.length }}）</h3>
-          <div v-for="s in data.studies" :key="s.id" class="plan-card">
-            <div class="pc-top">
-              <b>{{ s.topic }}</b>
-              <span v-if="s.level" class="pc-level">{{ s.level }}</span>
-              <span class="pc-pct">{{ s.done }}/{{ s.total }}</span>
-            </div>
-            <el-progress :percentage="pct(s.done, s.total)" :stroke-width="6" :show-text="false" />
-            <div class="pc-phases">
-              <el-tag v-for="(p, i) in s.phases" :key="i" size="small" effect="plain"
-                :type="p.done === p.total && p.total ? 'success' : p.done ? 'warning' : 'info'">
-                阶段{{ i + 1 }} {{ p.phase }}（{{ p.done }}/{{ p.total }}）
-              </el-tag>
-            </div>
-          </div>
+          <PlanTiles :items="studyTiles(data.studies)" />
         </section>
         <el-empty v-else description="暂无学习日程" :image-size="70" class="pv-empty" />
 
@@ -157,17 +135,6 @@ onMounted(load);
   h3 { font-size: 15px; margin: 0 0 10px; }
 }
 .pv-empty { background: var(--card-bg); border: 1px dashed var(--border); border-radius: 12px; margin-top: 18px; }
-
-.plan-card {
-  background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 14px; margin-bottom: 10px;
-  .pc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
-    b { font-size: 14px; flex: 1; min-width: 0; }
-    .pc-level { font-size: 12px; color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 1px 8px; }
-    .pc-pct { color: var(--text-2); font-size: 12px; white-space: nowrap; }
-  }
-  .pc-phases { margin-top: 8px; display: flex; gap: 4px; flex-wrap: wrap; }
-}
 
 .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .team-card {
