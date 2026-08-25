@@ -450,6 +450,7 @@ onBeforeUnmount(() => {
               <router-link to="/" class="quick-btn">🗓️ 竞赛时间轴</router-link>
               <router-link to="/share" class="quick-btn">📤 资源分享</router-link>
               <router-link v-if="auth.user?.is_admin" to="/admin" class="quick-btn">🧠 AI 收录管理</router-link>
+              <router-link v-if="auth.user?.is_admin" to="/admin-console" class="quick-btn">⚙️ 后台管理</router-link>
             </div>
           </section>
 

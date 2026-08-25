@@ -33,7 +33,7 @@ onMounted(async () => {
         <router-link to="/team"><span class="ic">🏗️</span><span class="txt">项目小组</span></router-link>
         <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
       </nav>
-      <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页；管理员附后台管理入口） -->
+      <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页） -->
       <div class="header-user">
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
           <span class="me-avatar">
@@ -41,10 +41,6 @@ onMounted(async () => {
             <template v-else>{{ auth.user?.nickname?.charAt(0) || '🔓' }}</template>
           </span>
           <span class="me-name">{{ auth.user?.nickname || '登录' }}</span>
-        </router-link>
-        <!-- 管理员专属入口；普通用户/未登录不渲染 -->
-        <router-link v-if="auth.user?.is_admin" to="/admin-console" class="nav-admin">
-          <span class="ic">⚙️</span><span class="txt">后台管理</span>
         </router-link>
       </div>
     </header>
@@ -92,21 +88,15 @@ onMounted(async () => {
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 }
 
-/* 用户区：右上角独立块（与标题同排同高），内含「我的主页」+ 管理员入口 */
+/* 用户区：右上角独立块（与标题同排同高）；窄屏用 order 留在第一行（导航排第二行，见 main.scss） */
 .header-user {
   display: flex; align-items: center; gap: 8px;
   margin-left: auto; /* 紧贴 header 最右（与 brand 两端对齐） */
 }
 
-/* 管理员专属入口：同款胶囊，浅蓝底描边区别于普通链接 */
-.nav-admin {
-  background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
-  &:hover { background: #dbeafe; color: #1d4ed8; }
-}
-
-/* 窄屏隐藏导航/用户区的 emoji 图标腾空间（scoped 特异性高于 main.scss 全局同名规则） */
+/* 窄屏隐藏导航的 emoji 图标腾空间（scoped 特异性高于 main.scss 全局同名规则） */
 @media (max-width: 1024px) {
-  .nav a .ic, .nav-admin .ic { display: none; }
+  .nav a .ic { display: none; }
   .nav-me .me-name { max-width: 56px; } /* 右上角昵称略收窄 */
 }
 </style>

@@ -134,6 +134,7 @@ html, body {
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
   .nav {
+    order: 2; /* 排到 header-user 之后 → 用户区与标题留第一行，导航换到第二行 */
     flex: 1 1 100%; min-width: 0; gap: 3px; padding: 3px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
     &::-webkit-scrollbar { display: none; }
