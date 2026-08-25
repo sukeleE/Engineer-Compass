@@ -3,6 +3,7 @@
 import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
+import auth from '../auth.js';
 
 const tab = ref('users');
 
@@ -13,7 +14,9 @@ const ACTION_LABELS = {
   'team-plan': '小组计划', 'team-join': '加入小组', 'team-invite': '获取邀请码',
   'friend-request': '好友申请', 'friend-accept': '接受好友', 'friend-reject': '拒绝好友', 'dm-send': '发送私信',
   'comment-share': '分享评论', 'comment-team': '小组评论',
-  'user-status': '封禁/禁言', 'announce-create': '发布公告', 'announce-update': '编辑公告', 'announce-delete': '删除公告',
+  'user-status': '封禁/禁言', 'user-role': '角色管理',
+  'post-delete': '删除帖子', 'comment-delete': '删除评论',
+  'announce-create': '发布公告', 'announce-update': '编辑公告', 'announce-delete': '删除公告',
 };
 const actionLabel = (a) => ACTION_LABELS[a] || a;
 const STATUS_LABELS = { 0: ['正常', 'success'], 1: ['封禁', 'danger'], 2: ['禁言', 'warning'] };
@@ -52,7 +55,81 @@ async function setStatus(u, status) {
   }
 }
 
-// ==================== Tab2 操作日志 ====================
+// 用户详情弹窗：基本信息 + 内容统计 + 最近操作日志
+const detailDlg = ref(false);
+const detail = ref(null);
+const detailLoading = ref(false);
+async function openDetail(u) {
+  detailDlg.value = true;
+  detail.value = null;
+  detailLoading.value = true;
+  try { detail.value = await api.adminUserDetail(u.id); } catch (e) { ElMessage.error(e.message); detailDlg.value = false; } finally { detailLoading.value = false; }
+}
+
+// 设为/取消管理员（带确认；后端禁止操作自己）
+async function setRole(u, is_admin) {
+  const act = is_admin ? '设为管理员' : '取消管理员';
+  const tip = is_admin
+    ? `确定将「${u.nickname || u.username}」设为管理员？其将获得后台管理全部权限。`
+    : `确定取消「${u.nickname || u.username}」的管理员身份？`;
+  try {
+    await ElMessageBox.confirm(tip, `${act}确认`, { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.adminSetRole(u.id, is_admin);
+    ElMessage.success(`已${act} ${u.nickname || u.username}`);
+    loadUsers();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// ==================== Tab2 内容管理（帖子 / 评论） ====================
+const contentTab = ref('posts');
+const posts = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
+async function loadPosts() {
+  posts.loading = true;
+  try {
+    const r = await api.adminPosts({ q: posts.q, page: posts.page, size: posts.size });
+    posts.list = r.list; posts.total = r.total;
+  } catch (e) { ElMessage.error(e.message); } finally { posts.loading = false; }
+}
+async function delPost(p) {
+  try {
+    await ElMessageBox.confirm(`删除帖子「${p.title}」？评论/点赞/收藏/通知将一并清理，不可恢复。`, '删除帖子', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.adminPostDelete(p.id);
+    ElMessage.success('帖子已删除');
+    loadPosts();
+    if (comments.postId === p.id) { comments.postId = null; comments.page = 1; loadComments(); }
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+const comments = reactive({ loading: false, q: '', postId: null, list: [], total: 0, page: 1, size: 20 });
+async function loadComments() {
+  comments.loading = true;
+  try {
+    const r = await api.adminComments({ q: comments.q, postId: comments.postId, page: comments.page, size: comments.size });
+    comments.list = r.list; comments.total = r.total;
+  } catch (e) { ElMessage.error(e.message); } finally { comments.loading = false; }
+}
+function viewPostComments(p) {
+  comments.postId = p.id;
+  comments.page = 1;
+  contentTab.value = 'comments';
+  loadComments();
+}
+async function delComment(c) {
+  try {
+    await ElMessageBox.confirm(`删除评论「${(c.content || '').slice(0, 40)}${(c.content || '').length > 40 ? '…' : ''}」？`, '删除评论', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.adminCommentDelete(c.id);
+    ElMessage.success('评论已删除');
+    loadComments();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// ==================== Tab3 操作日志 ====================
 const logs = reactive({ loading: false, q: '', action: '', list: [], total: 0, page: 1, size: 20 });
 async function loadLogs() {
   logs.loading = true;
@@ -74,7 +151,7 @@ const detailText = (d) => {
   } catch { return String(d); }
 };
 
-// ==================== Tab3 公告管理 ====================
+// ==================== Tab4 公告管理 ====================
 const anns = ref([]);
 const annLoading = ref(false);
 async function loadAnns() {
@@ -126,7 +203,7 @@ async function delAnn(a) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
-// ==================== Tab4 服务器状态 ====================
+// ==================== Tab5 服务器状态 ====================
 const stat = ref(null);
 const statLoading = ref(false);
 async function loadStatus() {
@@ -148,7 +225,7 @@ const fmtUp = (s) => {
 };
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 
-onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
+onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns(); loadStatus(); });
 </script>
 
 <template>
@@ -184,12 +261,16 @@ onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
               <el-tag v-if="row.is_admin" size="small" type="primary" style="margin-left:4px">管理员</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200">
+          <el-table-column label="操作" width="300">
             <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
               <template v-if="row.is_admin">
-                <span class="cell-sub">管理员账号</span>
+                <el-button v-if="row.id !== auth.user?.id" link type="warning" size="small" @click="setRole(row, 0)">取消管理员</el-button>
+                <span v-else class="cell-sub">当前账号</span>
+                <el-button v-if="row.id !== auth.user?.id" link type="danger" size="small" @click="setStatus(row, 1)" :disabled="row.status === 1">封禁</el-button>
               </template>
               <template v-else>
+                <el-button link type="primary" size="small" @click="setRole(row, 1)">设为管理员</el-button>
                 <el-button v-if="row.status !== 1" link type="danger" size="small" @click="setStatus(row, 1)">封禁</el-button>
                 <el-button v-if="row.status !== 2" link type="warning" size="small" @click="setStatus(row, 2)">禁言</el-button>
                 <el-button v-if="row.status !== 0" link type="success" size="small" @click="setStatus(row, 0)">解封</el-button>
@@ -201,7 +282,82 @@ onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
           :page-size="users.size" v-model:current-page="users.page" @current-change="loadUsers" />
       </el-tab-pane>
 
-      <!-- ========== Tab2 操作日志 ========== -->
+      <!-- ========== Tab2 内容管理（帖子 / 评论） ========== -->
+      <el-tab-pane label="📄 内容管理" name="content">
+        <div class="toolbar">
+          <el-radio-group v-model="contentTab">
+            <el-radio-button value="posts">📝 帖子</el-radio-button>
+            <el-radio-button value="comments">💬 评论</el-radio-button>
+          </el-radio-group>
+          <el-input v-if="contentTab === 'posts'" v-model="posts.q" placeholder="搜索标题 / 作者" clearable style="width: 240px"
+            @keyup.enter="posts.page = 1; loadPosts()" @clear="posts.page = 1; loadPosts()" />
+          <el-input v-else v-model="comments.q" placeholder="搜索评论内容 / 作者" clearable style="width: 240px"
+            @keyup.enter="comments.page = 1; loadComments()" @clear="comments.page = 1; loadComments()" />
+          <span v-if="comments.postId" class="tip">
+            筛选：帖子 #{{ comments.postId }} 的评论
+            <el-button link type="primary" size="small" @click="comments.postId = null; comments.page = 1; loadComments()">清除</el-button>
+          </span>
+          <span class="count">{{ contentTab === 'posts' ? `共 ${posts.total} 篇帖子` : `共 ${comments.total} 条评论` }}</span>
+        </div>
+
+        <!-- 帖子列表 -->
+        <template v-if="contentTab === 'posts'">
+          <el-table :data="posts.list" v-loading="posts.loading" stripe>
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column label="标题" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }"><b>{{ row.title }}</b></template>
+            </el-table-column>
+            <el-table-column label="作者" width="130">
+              <template #default="{ row }">
+                <b>{{ row.nickname || row.username }}</b>
+                <span v-if="row.user_status" class="cell-sub" style="color:#ef4444">已{{ STATUS_LABELS[row.user_status][0] }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="评论" width="70">
+              <template #default="{ row }">{{ row.comment_count }}</template>
+            </el-table-column>
+            <el-table-column label="点赞" width="70">
+              <template #default="{ row }">{{ row.like_count }}</template>
+            </el-table-column>
+            <el-table-column prop="create_time" label="发布时间" width="160" />
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="viewPostComments(row)">看评论</el-button>
+                <el-button link type="danger" size="small" @click="delPost(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination class="pg" background layout="total, prev, pager, next" :total="posts.total"
+            :page-size="posts.size" v-model:current-page="posts.page" @current-change="loadPosts" />
+        </template>
+
+        <!-- 评论列表 -->
+        <template v-else>
+          <el-table :data="comments.list" v-loading="comments.loading" stripe>
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column label="内容" min-width="240" show-overflow-tooltip />
+            <el-table-column label="所属帖子" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-button v-if="row.post_id" link type="primary" size="small" @click="viewPostComments({ id: row.post_id })">#{{ row.post_id }} {{ row.post_title }}</el-button>
+                <span v-else class="cell-sub">（帖子已删除）</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="作者" width="130">
+              <template #default="{ row }"><b>{{ row.nickname || row.username }}</b></template>
+            </el-table-column>
+            <el-table-column prop="create_time" label="时间" width="160" />
+            <el-table-column label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="danger" size="small" @click="delComment(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination class="pg" background layout="total, prev, pager, next" :total="comments.total"
+            :page-size="comments.size" v-model:current-page="comments.page" @current-change="loadComments" />
+        </template>
+      </el-tab-pane>
+
+      <!-- ========== Tab3 操作日志 ========== -->
       <el-tab-pane label="🧾 操作日志" name="logs">
         <div class="toolbar">
           <el-input v-model="logs.q" placeholder="搜索目标 / 用户名" clearable style="width: 220px"
@@ -302,6 +458,40 @@ onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
       </el-tab-pane>
     </el-tabs>
 
+    <!-- 用户详情弹窗：基本信息 + 内容统计 + 最近操作日志 -->
+    <el-dialog v-model="detailDlg" title="👤 用户详情" width="680px" :close-on-click-modal="false">
+      <div v-loading="detailLoading" style="min-height: 200px">
+        <template v-if="detail">
+          <div class="ud-head">
+            <b class="ud-nick">{{ detail.user.nickname || detail.user.username }}</b>
+            <el-tag size="small">@{{ detail.user.username }}</el-tag>
+            <el-tag size="small" :type="STATUS_LABELS[detail.user.status][1]">{{ STATUS_LABELS[detail.user.status][0] }}</el-tag>
+            <el-tag v-if="detail.user.is_admin" size="small" type="primary">管理员</el-tag>
+            <span class="cell-sub">{{ detail.user.email }} · 注册于 {{ detail.user.create_time }}</span>
+          </div>
+          <div class="ud-stats">
+            <div><b>{{ detail.stats.posts }}</b><span>发帖</span></div>
+            <div><b>{{ detail.stats.comments }}</b><span>评论</span></div>
+            <div><b>{{ detail.stats.teams }}</b><span>所在小组</span></div>
+          </div>
+          <div class="ud-logs">
+            <div class="ud-logs-title">最近操作日志（最多 20 条）</div>
+            <el-table :data="detail.logs" size="small" max-height="300" stripe>
+              <el-table-column prop="create_time" label="时间" width="155" />
+              <el-table-column label="动作" width="105">
+                <template #default="{ row }"><el-tag size="small">{{ actionLabel(row.action) }}</el-tag></template>
+              </el-table-column>
+              <el-table-column prop="target" label="目标" min-width="110" show-overflow-tooltip />
+              <el-table-column label="详情" min-width="140" show-overflow-tooltip>
+                <template #default="{ row }">{{ detailText(row.detail) }}</template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!detail.logs.length" description="该用户暂无操作记录" :image-size="50" />
+          </div>
+        </template>
+      </div>
+    </el-dialog>
+
     <!-- 公告发布 / 编辑弹窗 -->
     <el-dialog v-model="annDlg" :title="annForm.id ? '编辑公告' : '发布公告'" width="520px" :close-on-click-modal="false">
       <el-form label-width="70px">
@@ -317,7 +507,7 @@ onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
   </main>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .admin-page { padding: 12px 20px 80px; max-width: 1100px; }
 .page-head { margin-bottom: 12px; }
 .page-head h2 { margin: 0; }
@@ -348,5 +538,23 @@ onMounted(() => { loadUsers(); loadLogs(); loadAnns(); loadStatus(); });
     span { color: var(--text-2, #64748b); }
     b { font-weight: 600; }
   }
+}
+
+/* 用户详情弹窗 */
+.ud-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
+  .ud-nick { font-size: 17px; }
+}
+.ud-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px;
+  div {
+    background: #f8fafc; border: 1px solid var(--border, #e2e8f0); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 2px; text-align: center;
+    b { font-size: 20px; color: #2563eb; }
+    span { font-size: 12px; color: var(--text-2, #64748b); }
+  }
+}
+.ud-logs {
+  .ud-logs-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 }
 </style>

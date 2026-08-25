@@ -168,6 +168,14 @@ export const api = {
   adminAnnouncementCreate: (card) => req('/admin/announcements', { method: 'POST', body: JSON.stringify(card) }),
   adminAnnouncementUpdate: (id, card) => req(`/admin/announcements/${id}`, { method: 'PUT', body: JSON.stringify(card) }),
   adminAnnouncementDelete: (id) => req(`/admin/announcements/${id}`, { method: 'DELETE' }),
+  // 内容管理：帖子 / 评论
+  adminPosts: (params) => req(`/admin/posts${qs(params)}`),
+  adminPostDelete: (id) => req(`/admin/posts/${id}`, { method: 'DELETE' }),
+  adminComments: (params) => req(`/admin/comments${qs(params)}`),
+  adminCommentDelete: (id) => req(`/admin/comments/${id}`, { method: 'DELETE' }),
+  // 用户详情 + 角色管理
+  adminUserDetail: (id) => req(`/admin/users/${id}/detail`),
+  adminSetRole: (id, is_admin) => req(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ is_admin: is_admin ? 1 : 0 }) }),
   serverStatus: () => req('/admin/server-status'),
   // 公告（公开）：全局顶部横幅
   announcementLatest: () => req('/announcements/latest'),

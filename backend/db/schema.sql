@@ -378,7 +378,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER,                          -- 操作者（可能已被删除 → 无外键）
   username    TEXT,
-  action      TEXT NOT NULL,                    -- login/logout/register/plan-create/plan-manual/plan-chat/team-plan/team-join/team-invite/friend-request/friend-accept/friend-reject/dm-send/comment-share/comment-team/user-status/announce-create/announce-update/announce-delete
+  action      TEXT NOT NULL,                    -- login/logout/register/plan-create/plan-manual/plan-chat/team-plan/team-join/team-invite/friend-request/friend-accept/friend-reject/dm-send/comment-share/comment-team/user-status/user-role/post-delete/comment-delete/announce-create/announce-update/announce-delete
   target      TEXT,                             -- 目标对象：竞赛名/小组名/对方昵称/帖子标题
   detail      TEXT,                             -- 补充说明（JSON）
   ip          TEXT,

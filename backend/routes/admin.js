@@ -137,6 +137,103 @@ r.get('/server-status', (req, res) => {
   });
 });
 
+// ---- 内容管理：帖子（评论/点赞/收藏/通知随 share_post 外键 ON DELETE CASCADE 级联清理）----
+// GET /api/admin/posts?page&size&q&userId — 帖子列表（标题/作者模糊搜，附评论点赞计数）
+r.get('/posts', (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
+  const conds = [], params = [];
+  const q = String(req.query.q || '').trim();
+  if (q) { conds.push('(p.title LIKE ? OR u.nickname LIKE ? OR u.username LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  if (Number(req.query.userId)) { conds.push('p.user_id = ?'); params.push(Number(req.query.userId)); }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM share_post p LEFT JOIN user u ON u.id = p.user_id ${where}`).get(...params).n;
+  const list = db.prepare(
+    `SELECT p.id, p.title, p.user_id, p.create_time,
+            u.nickname, u.username, u.status AS user_status,
+            (SELECT COUNT(*) FROM share_comment c WHERE c.post_id = p.id) AS comment_count,
+            (SELECT COUNT(*) FROM share_like l WHERE l.post_id = p.id) AS like_count
+     FROM share_post p LEFT JOIN user u ON u.id = p.user_id
+     ${where} ORDER BY p.id DESC LIMIT ? OFFSET ?`
+  ).all(...params, size, (page - 1) * size);
+  res.json({ total, page, size, list });
+});
+
+// DELETE /api/admin/posts/:id — 删帖（评论/点赞/收藏/通知全部级联清理）
+r.delete('/posts/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const p = db.prepare('SELECT id, title FROM share_post WHERE id = ?').get(id);
+  if (!p) return res.status(404).json({ error: '帖子不存在' });
+  db.prepare('DELETE FROM share_post WHERE id = ?').run(id);
+  logAudit(req, 'post-delete', p.title, { post_id: id });
+  res.json({ message: `帖子「${p.title}」已删除（评论/点赞/收藏/通知已级联清理）` });
+});
+
+// GET /api/admin/comments?page&size&postId&q — 评论列表（可按帖子/内容搜）
+r.get('/comments', (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
+  const conds = [], params = [];
+  if (Number(req.query.postId)) { conds.push('c.post_id = ?'); params.push(Number(req.query.postId)); }
+  const q = String(req.query.q || '').trim();
+  if (q) { conds.push('(c.content LIKE ? OR u.nickname LIKE ? OR u.username LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM share_comment c ${where}`).get(...params).n;
+  const list = db.prepare(
+    `SELECT c.id, c.post_id, c.content, c.create_time, c.user_id,
+            u.nickname, u.username, p.title AS post_title
+     FROM share_comment c
+     LEFT JOIN user u ON u.id = c.user_id
+     LEFT JOIN share_post p ON p.id = c.post_id
+     ${where} ORDER BY c.id DESC LIMIT ? OFFSET ?`
+  ).all(...params, size, (page - 1) * size);
+  res.json({ total, page, size, list });
+});
+
+// DELETE /api/admin/comments/:id — 删评论（同时清 notification 表关联项）
+r.delete('/comments/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const c = db.prepare('SELECT id, content, post_id FROM share_comment WHERE id = ?').get(id);
+  if (!c) return res.status(404).json({ error: '评论不存在' });
+  db.prepare('DELETE FROM share_comment WHERE id = ?').run(id);
+  db.prepare('DELETE FROM notification WHERE comment_id = ?').run(id);
+  logAudit(req, 'comment-delete', String(c.content || '').slice(0, 30), { comment_id: id, post_id: c.post_id });
+  res.json({ message: '评论已删除' });
+});
+
+// GET /api/admin/users/:id/detail — 用户详情：基本信息 + 内容统计 + 最近 20 条操作日志
+r.get('/users/:id/detail', (req, res) => {
+  const id = Number(req.params.id);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(id);
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  const count = (sql, ...p) => db.prepare(sql).get(...p).n;
+  const stats = {
+    posts: count('SELECT COUNT(*) AS n FROM share_post WHERE user_id = ?', id),
+    comments: count('SELECT COUNT(*) AS n FROM share_comment WHERE user_id = ?', id),
+    teams: count('SELECT COUNT(*) AS n FROM team_member WHERE user_id = ?', id),
+  };
+  const logs = db.prepare(
+    `SELECT id, action, target, detail, ip, create_time FROM audit_log WHERE user_id = ? ORDER BY id DESC LIMIT 20`
+  ).all(id).map((row) => {
+    try { row.detail = row.detail ? JSON.parse(row.detail) : null; } catch { row.detail = null; }
+    return row;
+  });
+  res.json({ user: safeUser(u), stats, logs });
+});
+
+// PUT /api/admin/users/:id/role {is_admin} — 设为/取消管理员；禁止操作自己
+r.put('/users/:id/role', (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) return res.status(400).json({ error: '不能修改自己的管理员身份' });
+  const is_admin = req.body?.is_admin ? 1 : 0;
+  const u = db.prepare('SELECT id, username, nickname, is_admin, status FROM user WHERE id = ?').get(id);
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  if (is_admin === 1 && u.status !== 0) return res.status(400).json({ error: '请先解除封禁/禁言再设为管理员' });
+  db.prepare('UPDATE user SET is_admin = ? WHERE id = ?').run(is_admin, id);
+  logAudit(req, 'user-role', u.nickname || u.username, { target_id: id, is_admin: !!is_admin, from: !!u.is_admin });
+  res.json({ message: is_admin ? `已将 ${u.nickname || u.username} 设为管理员` : `已取消 ${u.nickname || u.username} 的管理员身份` });
+});
+
 export default r;
 
 // ---- 前台公告（public，挂 /api/announcements）：App.vue 全局顶部横幅用 ----

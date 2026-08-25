@@ -124,6 +124,61 @@ ok('server-status 字段完整', r.status === 200 && r.data.counts && typeof r.d
   && typeof r.data.totalmem === 'number' && typeof r.data.dbSize === 'number'
   && r.data.counts.users >= 2 && r.data.counts.todayLogins >= 2, JSON.stringify(r.data).slice(0, 120));
 
+// ---- 9) 内容管理：帖子/评论列表与删除级联 ----
+console.log('— 内容管理（帖子/评论）');
+// 直插：帖子 + 2 评论 + 1 通知
+const tPostId = Number(db.prepare(
+  "INSERT INTO share_post (user_id, title, content) VALUES (?, '冒烟测试帖', '内容')"
+).run(userId).lastInsertRowid);
+db.prepare("INSERT INTO share_comment (post_id, user_id, content) VALUES (?,?, '评论A')").run(tPostId, userId);
+db.prepare("INSERT INTO share_comment (post_id, user_id, content) VALUES (?,?, '评论B')").run(tPostId, userId);
+db.prepare("INSERT INTO notification (user_id, actor_id, type, post_id) VALUES (?,?, 'like', ?)").run(adminId, userId, tPostId);
+r = await req('/admin/posts', { token: userTok });
+ok('普通用户访问 /admin/posts → 403', r.status === 403, `got ${r.status}`);
+r = await req('/admin/posts?q=冒烟测试帖', { token: adminTok });
+ok('帖子列表搜到测试帖（含评论数）', r.status === 200 && r.data.list.some((p) => p.id === tPostId && p.comment_count === 2), JSON.stringify(r.data).slice(0, 100));
+r = await req(`/admin/comments?postId=${tPostId}`, { token: adminTok });
+ok('评论按帖子筛选 → 2 条', r.status === 200 && r.data.total === 2 && r.data.list[0].post_title, JSON.stringify(r.data).slice(0, 100));
+r = await req(`/admin/posts/${tPostId}`, { token: adminTok, method: 'DELETE' });
+ok('删除帖子 → 200', r.status === 200, `got ${r.status}`);
+const cc = db.prepare('SELECT COUNT(*) AS n FROM share_comment WHERE post_id = ?').get(tPostId).n;
+const nc = db.prepare('SELECT COUNT(*) AS n FROM notification WHERE post_id = ?').get(tPostId).n;
+ok('评论随帖子级联删除', cc === 0, `剩 ${cc}`);
+ok('通知随帖子级联删除', nc === 0, `剩 ${nc}`);
+ok('post-delete 审计埋点', auditCount('post-delete') >= 1);
+const tPostId2 = Number(db.prepare(
+  "INSERT INTO share_post (user_id, title) VALUES (?, '冒烟测试帖2')"
+).run(userId).lastInsertRowid);
+const tCommentId = Number(db.prepare(
+  "INSERT INTO share_comment (post_id, user_id, content) VALUES (?,?, '待删评论')"
+).run(tPostId2, userId).lastInsertRowid);
+db.prepare("INSERT INTO notification (user_id, actor_id, type, post_id, comment_id) VALUES (?,?, 'comment', ?, ?)").run(adminId, userId, tPostId2, tCommentId);
+r = await req(`/admin/comments/${tCommentId}`, { token: adminTok, method: 'DELETE' });
+ok('删除评论 → 200', r.status === 200, `got ${r.status}`);
+const notifLeft = db.prepare('SELECT COUNT(*) AS n FROM notification WHERE comment_id = ?').get(tCommentId).n;
+ok('评论通知同步清理', notifLeft === 0, `剩 ${notifLeft}`);
+ok('comment-delete 审计埋点', auditCount('comment-delete') >= 1);
+db.prepare('DELETE FROM share_post WHERE id = ?').run(tPostId2);
+
+// ---- 10) 用户详情 ----
+console.log('— 用户详情');
+r = await req(`/admin/users/${userId}/detail`, { token: adminTok });
+ok('用户详情字段完整', r.status === 200 && r.data.user && typeof r.data.stats === 'object'
+  && r.data.stats.teams >= 0 && Array.isArray(r.data.logs), JSON.stringify(r.data).slice(0, 100));
+ok('详情含操作日志（登录埋点）', r.data.logs.some((l) => l.action === 'login'), '无 login 日志');
+
+// ---- 11) 角色管理 ----
+console.log('— 角色管理');
+r = await req(`/admin/users/${userId}/role`, { token: adminTok, method: 'PUT', body: JSON.stringify({ is_admin: 1 }) });
+ok('设为管理员 → 200', r.status === 200, `got ${r.status}`);
+const nowAdmin = db.prepare('SELECT is_admin FROM user WHERE id = ?').get(userId).is_admin;
+ok('数据库 is_admin 已置 1', nowAdmin === 1, `got ${nowAdmin}`);
+r = await req(`/admin/users/${userId}/role`, { token: adminTok, method: 'PUT', body: JSON.stringify({ is_admin: 0 }) });
+ok('取消管理员 → 200', r.status === 200, `got ${r.status}`);
+ok('user-role 审计埋点', auditCount('user-role') >= 2);
+r = await req(`/admin/users/${adminId}/role`, { token: adminTok, method: 'PUT', body: JSON.stringify({ is_admin: 0 }) });
+ok('操作自己 → 400', r.status === 400, `got ${r.status}`);
+
 // ---- 清理 ----
 console.log('— 清理测试数据');
 db.prepare('DELETE FROM audit_log WHERE user_id IN (?,?)').run(adminId, userId);
