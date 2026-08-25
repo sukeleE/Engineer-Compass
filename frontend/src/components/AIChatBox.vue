@@ -1,10 +1,19 @@
 <script setup>
 // 全局 AI 对话悬浮框（右下角）：上下文感知当前查看的竞赛
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { store } from '../store.js';
 import { api } from '../api.js';
 
 const open = ref(false);
+
+// 与消息中心浮窗互斥：对方展开时自己收起（两个面板同位置，避免重叠）
+function onCloseOther() { open.value = false; }
+function toggle() {
+  open.value = !open.value;
+  if (open.value) window.dispatchEvent(new CustomEvent('close-fab-panel'));
+}
+onMounted(() => window.addEventListener('close-fab-panel', onCloseOther));
+onBeforeUnmount(() => window.removeEventListener('close-fab-panel', onCloseOther));
 const messages = ref(JSON.parse(localStorage.getItem('ec_chat_history') || '[]'));
 const input = ref('');
 const sending = ref(false);
@@ -49,7 +58,7 @@ function clearHistory() {
 
 <template>
   <!-- 悬浮按钮 -->
-  <button class="fab" :class="{ active: open }" @click="open = !open">💬</button>
+  <button class="fab" :class="{ active: open }" @click="toggle">💬</button>
 
   <!-- 聊天面板 -->
   <transition name="chat">

@@ -3,7 +3,7 @@
 // 四个标签：概览 / 我的帖子 / 我的收藏 / 好友私聊（好友申请、删除、私信轮询）
 // 未登录时内嵌 AuthView 完成登录
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth, { clearAuth, patchUser } from '../auth.js';
@@ -299,7 +299,32 @@ watch(dmDlg, (open) => {
   if (open) dmTimer = setInterval(loadDm, 3000);
 });
 
-onMounted(load);
+// 深链：/me?tab=friends&dm=好友id → 切到好友标签并自动打开与该好友的私聊（消息中心跳转用）
+const route = useRoute();
+function deepLink() {
+  if (!route.query.tab) return;
+  tab.value = String(route.query.tab);
+  if (String(route.query.tab) === 'friends') {
+    if (!friendsLoaded.value) { friendsLoaded.value = true; loadFriends(); }
+    const target = Number(route.query.dm);
+    if (target) {
+      const tryOpen = () => {
+        const f = friends.value.find((x) => Number(x.id) === target);
+        router.replace({ query: {} }); // 清掉 query，避免刷新重复触发
+        if (f) openDm(f);
+      };
+      if (friends.value.length) tryOpen();
+      else {
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if (friends.value.length) { clearInterval(iv); tryOpen(); }
+          else if (Date.now() - t0 > 3000) { clearInterval(iv); router.replace({ query: {} }); }
+        }, 100);
+      }
+    }
+  }
+}
+onMounted(() => { load(); deepLink(); });
 onBeforeUnmount(() => {
   if (mailTimer) clearInterval(mailTimer);
   if (dmTimer) clearInterval(dmTimer);

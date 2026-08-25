@@ -359,3 +359,16 @@ CREATE TABLE IF NOT EXISTS dm_message (
 );
 CREATE INDEX IF NOT EXISTS idx_dm_pair ON dm_message(from_id, to_id);
 CREATE INDEX IF NOT EXISTS idx_dm_unread ON dm_message(to_id, is_read);
+
+-- 表32 消息中心通知：评论 / 点赞 / 收藏（私信沿用 dm_message.is_read）
+CREATE TABLE IF NOT EXISTS notification (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,     -- 接收者（帖子作者）
+  actor_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,     -- 触发者
+  type        TEXT NOT NULL,               -- like | fav | comment
+  post_id     INTEGER NOT NULL REFERENCES share_post(id) ON DELETE CASCADE,
+  comment_id  INTEGER,                     -- comment 类型关联的评论
+  is_read     INTEGER DEFAULT 0,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notification(user_id, is_read);

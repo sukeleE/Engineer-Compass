@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AIChatBox from './components/AIChatBox.vue';
+import MessageCenter from './components/MessageCenter.vue';
 import ImageViewer from './components/ImageViewer.vue';
 import auth from './auth.js';
 
@@ -50,6 +51,7 @@ watch(() => route.path, closeMenu);
     </header>
     <router-view />
     <AIChatBox />
+    <MessageCenter />
     <ImageViewer />
   </div>
 </template>

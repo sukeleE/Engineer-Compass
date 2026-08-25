@@ -154,4 +154,8 @@ export const api = {
   dmList: (uid) => req(`/friends/dm/${uid}`),
   dmSend: (uid, content) => req(`/friends/dm/${uid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   dmRead: (uid) => req(`/friends/dm/${uid}/read`, { method: 'POST' }),
+  // 消息中心（评论/点赞/收藏通知）
+  notifications: () => req('/notifications'),
+  notificationsUnread: () => req('/notifications/unread-count'),
+  notificationsRead: (types) => req('/notifications/read', { method: 'POST', body: JSON.stringify({ types }) }),
 };

@@ -28,6 +28,15 @@ function normAttachments(raw) {
   return out;
 }
 
+// 消息中心通知：他人对自己帖子的评论/点赞/收藏（自己操作自己的帖子不通知）
+function notify(me, type, postId, commentId = null) {
+  const owner = db.prepare('SELECT user_id FROM share_post WHERE id = ?').get(postId);
+  if (owner && Number(owner.user_id) !== Number(me)) {
+    db.prepare('INSERT INTO notification (user_id, actor_id, type, post_id, comment_id) VALUES (?, ?, ?, ?, ?)')
+      .run(owner.user_id, me, type, postId, commentId);
+  }
+}
+
 // 规范化标签：去重/去空/限长；返回 [] 或 null（超限）
 function normTags(raw) {
   if (!Array.isArray(raw)) return [];
@@ -204,6 +213,7 @@ r.post('/posts/:id/like', authRequired, (req, res) => {
     return res.json({ liked: false, count: n });
   }
   db.prepare('INSERT INTO share_like (post_id, user_id) VALUES (?, ?)').run(postId, me);
+  notify(me, 'like', postId);
   const n = db.prepare('SELECT COUNT(*) AS n FROM share_like WHERE post_id = ?').get(postId).n;
   res.json({ liked: true, count: n });
 });
@@ -221,6 +231,7 @@ r.post('/posts/:id/fav', authRequired, (req, res) => {
     return res.json({ faved: false, count: n });
   }
   db.prepare('INSERT INTO share_fav (post_id, user_id) VALUES (?, ?)').run(postId, me);
+  notify(me, 'fav', postId);
   const n = db.prepare('SELECT COUNT(*) AS n FROM share_fav WHERE post_id = ?').get(postId).n;
   res.json({ faved: true, count: n });
 });
@@ -232,8 +243,10 @@ r.post('/posts/:id/comments', authRequired, (req, res) => {
   const postId = Number(req.params.id);
   const exists = db.prepare('SELECT 1 FROM share_post WHERE id = ?').get(postId);
   if (!exists) return res.status(404).json({ error: '帖子不存在' });
+  const me = uid(req);
   const info = db.prepare('INSERT INTO share_comment (post_id, user_id, content) VALUES (?, ?, ?)')
-    .run(postId, uid(req), content);
+    .run(postId, me, content);
+  notify(me, 'comment', postId, Number(info.lastInsertRowid));
   const c = db.prepare(
     `SELECT c.id, c.content, c.create_time, u.id AS user_id, u.nickname, u.avatar
      FROM share_comment c JOIN user u ON u.id = c.user_id WHERE c.id = ?`
