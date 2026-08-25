@@ -1,6 +1,6 @@
 <script setup>
 // 项目小组：我的小组列表 + 创建/加入 + 组内工作台（TeamDetail）
-import { ref, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
@@ -13,15 +13,16 @@ const route = useRoute();
 
 const teams = ref([]);
 const loading = ref(false);
-const selTeam = ref(null); // 选中的小组对象
+const selTeamId = ref(null); // 选中的小组 id（横向标签页选择）
+const selTeam = computed(() => teams.value.find((t) => t.id === selTeamId.value) || null);
 
 // ?team=<id> 深链：从「我的」小组卡片直达对应工作台；选中变化同步回 URL
 function selectByQuery(id) {
   const t = teams.value.find((x) => x.id === Number(id));
-  if (t) selTeam.value = t;
+  if (t) selTeamId.value = t.id;
 }
-watch(selTeam, (t) => {
-  if (t) router.replace({ query: { ...route.query, team: t.id } }).catch(() => {});
+watch(selTeamId, (id) => {
+  if (id) router.replace({ query: { ...route.query, team: id } }).catch(() => {});
 });
 watch(() => route.query.team, (id) => { if (id) selectByQuery(id); });
 const showCreate = ref(false);
@@ -40,12 +41,9 @@ async function load() {
   try {
     const res = await api.me();
     teams.value = res.teams;
-    // 保持选中状态
-    if (selTeam.value) {
-      const still = teams.value.find((t) => t.id === selTeam.value.id);
-      if (!still) selTeam.value = null;
-      else selTeam.value = still;
-    }
+    // 保持选中状态（标签页仍存在则保留，否则重置为第一个）
+    if (selTeamId.value && !teams.value.some((t) => t.id === selTeamId.value)) selTeamId.value = null;
+    if (!selTeamId.value && teams.value.length) selTeamId.value = teams.value[0].id;
     // ?team=<id> 深链：列表加载完成后选中对应小组
     if (route.query.team) selectByQuery(route.query.team);
   } catch (e) {
@@ -74,8 +72,7 @@ async function create(chatResult) {
     showChat.value = false;
     newTeam.value = { name: '', desc: '', comp_id: null };
     await load();
-    const t = teams.value.find((x) => x.id === res.id);
-    if (t) selTeam.value = t;
+    if (teams.value.some((x) => x.id === res.id)) selTeamId.value = res.id;
   } catch (e) {
     ElMessage.error(e.message);
   } finally {
@@ -92,8 +89,7 @@ async function join() {
     joinCode.value = '';
     showJoin.value = false;
     await load();
-    const t = teams.value.find((x) => x.id === res.id);
-    if (t) selTeam.value = t;
+    if (teams.value.some((x) => x.id === res.id)) selTeamId.value = res.id;
   } catch (e) {
     ElMessage.error(e.message);
   } finally {
@@ -168,30 +164,24 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
       </el-dialog>
 
       <div v-loading="loading" class="team-body">
-        <!-- 左：小组列表 -->
-        <aside class="team-list" v-if="teams.length">
-          <div class="tl-item" v-for="t in teams" :key="t.id"
-            :class="{ active: selTeam?.id === t.id }" @click="selTeam = t">
-            <div class="tl-top">
-              <b>{{ t.name }}</b>
-              <el-tag v-if="t.is_owner" size="small" type="warning">组长</el-tag>
-            </div>
-            <div class="tl-meta">
-              {{ t.member_count }} 名成员
-              <template v-if="(t.role_names || []).length">
-                <el-tag v-for="rn in t.role_names" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
-              </template>
-            </div>
-            <div class="tl-code">🔑 {{ t.invite_code }}</div>
-          </div>
-        </aside>
+        <!-- 横向小组标签页：小组多时自动横向滚动（移动端 el-tabs 全局压缩样式已兜底） -->
+        <el-tabs v-if="teams.length" v-model="selTeamId" class="team-tabs">
+          <el-tab-pane v-for="t in teams" :key="t.id" :name="t.id">
+            <template #label>
+              <span class="tt-label">
+                <span class="tt-name">{{ t.name }}</span>
+                <el-tag v-if="t.is_owner" size="small" type="warning" class="tt-tag">组长</el-tag>
+              </span>
+            </template>
+          </el-tab-pane>
+        </el-tabs>
         <el-empty v-else class="team-empty" description="还没有小组 — 创建或输入邀请码加入" />
 
-        <!-- 右：组内工作台（:key 强制重建——切组时子组件 onMounted 重新加载，避免显示旧组数据） -->
+        <!-- 组内工作台（:key 强制重建——切组时子组件 onMounted 重新加载，避免显示旧组数据） -->
         <TeamDetail v-if="selTeam" :key="selTeam.id" :team-id="selTeam.id" :my-role="selTeam.role_name" />
         <div v-else-if="teams.length" class="detail-placeholder">
           <div class="dp-icon">🏗️</div>
-          <p>选择左侧小组进入工作台</p>
+          <p>选择上方小组标签进入工作台</p>
         </div>
       </div>
     </template>
@@ -215,25 +205,18 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
   }
   .head-actions { display: flex; gap: 8px; }
 }
-.team-body { display: grid; grid-template-columns: 250px 1fr; gap: 16px; align-items: start;
-  @media (max-width: 900px) { grid-template-columns: 1fr; }
-}
+.team-body { display: flex; flex-direction: column; gap: 14px; }
 
-// 移动端：折叠后小组列表限高滚动（避免切组要滚很久）
-@media (max-width: 768px) {
-  .team-list { max-height: 280px; overflow-y: auto; }
-}
-.team-list {
-  background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px;
-  .tl-item {
-    border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
-    cursor: pointer; transition: all .2s;
-    &:hover { border-color: #93c5fd; background: #f8fafc; }
-    &.active { border-color: #2563eb; background: #eff6ff; }
-    .tl-top { display: flex; justify-content: space-between; align-items: center; gap: 6px;
-      b { font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
-    .tl-meta { color: var(--text-2); font-size: 12px; margin: 3px 0; }
-    .tl-code { font-size: 11.5px; color: #1d4ed8; font-family: monospace; letter-spacing: 1px; }
+// 横向小组标签页：白底圆角卡包裹，标签间留隙；多小组超宽时 el-tabs 内部横向滚动
+.team-tabs {
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 4px 10px 0;
+  :deep(.el-tabs__header) { margin-bottom: 0; }
+  :deep(.el-tabs__nav-wrap) { overflow-x: auto; overflow-y: hidden; }
+  :deep(.el-tabs__nav-wrap::-webkit-scrollbar) { display: none; }
+  :deep(.el-tabs__item) { font-size: 13.5px; padding: 0 14px; }
+  .tt-label { display: inline-flex; align-items: center; gap: 6px;
+    .tt-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tt-tag { flex-shrink: 0; }
   }
 }
 .team-empty { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 60px 0; }

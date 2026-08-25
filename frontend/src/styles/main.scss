@@ -62,7 +62,6 @@ html, body {
       white-space: nowrap; /* 链接文字永不内部换行 */
       min-width: 0; /* 允许 flex 收缩 */
       overflow: hidden;
-      text-overflow: ellipsis; /* 容器不够宽时尾部省略号截断（省略后面的字词） */
       padding: 7px 18px;
       border-radius: 999px;
       transition: all .2s;
@@ -128,11 +127,17 @@ html, body {
   // 导航保持可见，间隙压缩交给下方 ≤1024px 断点统一处理
 }
 
-// 中窄屏（≤1024px）：导航独占一行、压缩间隙+字号；链接自动尾部省略号截断（不换行不竖排、不收汉堡）
-// flex-basis:100% 强制换行占满整行；min-width:0 + overflow:hidden 保证左右端都在屏幕内
+// 中窄屏（≤1024px）：导航独占一行、压缩间隙+字号
+// 隐藏 emoji 腾空间；链接不收缩保证文字完整（min-width 保证至少前两字），
+// 仍放不下时 nav 横向滚动（左右端在视口内、无需省略号、永不换行竖排）
 @media (max-width: 1024px) {
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
-  .nav { flex: 1 1 100%; min-width: 0; gap: 3px; padding: 3px; overflow: hidden; }
-  .nav a { padding: 5px 10px; font-size: 12px; }
+  .nav {
+    flex: 1 1 100%; min-width: 0; gap: 3px; padding: 3px;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+  }
+  .nav a { padding: 5px 10px; font-size: 12px; flex-shrink: 0; min-width: calc(2em + 20px); }
+  .nav a .ic { display: none; } /* 窄屏隐藏 emoji，文字完整显示 */
 }

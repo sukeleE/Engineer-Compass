@@ -28,10 +28,10 @@ onMounted(async () => {
         <p class="sub">84 项 A 类竞赛 · 按月排布 · AI 备赛助手</p>
       </div>
       <nav class="nav">
-        <router-link to="/">🗓️ 竞赛时间轴</router-link>
-        <router-link to="/schedule">📅 日程规划</router-link>
-        <router-link to="/team">🏗️ 项目小组</router-link>
-        <router-link to="/share">📤 资源分享</router-link>
+        <router-link to="/"><span class="ic">🗓️</span><span class="txt">竞赛时间轴</span></router-link>
+        <router-link to="/schedule"><span class="ic">📅</span><span class="txt">日程规划</span></router-link>
+        <router-link to="/team"><span class="ic">🏗️</span><span class="txt">项目小组</span></router-link>
+        <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
           <span class="me-avatar">
             <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
