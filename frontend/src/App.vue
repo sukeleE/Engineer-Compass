@@ -39,6 +39,10 @@ onMounted(async () => {
           </span>
           <span class="me-name">{{ auth.user?.nickname || '登录' }}</span>
         </router-link>
+        <!-- 管理员专属入口：屏幕最右上角（与标题同行）；普通用户/未登录不渲染 -->
+        <router-link v-if="auth.user?.is_admin" to="/admin-console" class="nav-admin">
+          <span class="ic">⚙️</span><span class="txt">后台管理</span>
+        </router-link>
       </nav>
     </header>
     <router-view />
@@ -83,6 +87,12 @@ onMounted(async () => {
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+}
+
+/* 管理员专属入口：同款胶囊，浅蓝底描边区别于普通链接（与标题同排、最右上角） */
+.nav-admin {
+  background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
+  &:hover { background: #dbeafe; color: #1d4ed8; }
 }
 </style>
 
