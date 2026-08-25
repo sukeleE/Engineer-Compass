@@ -10,7 +10,8 @@ import ProfileView from './components/ProfileView.vue';
 import AuthView from './components/AuthView.vue';
 import AdminView from './components/AdminView.vue';
 import AdminConsole from './components/AdminConsole.vue';
-import auth from './auth.js';
+import auth, { patchUser } from './auth.js';
+import { api } from './api.js';
 
 export default createRouter({
   history: createWebHistory(),
@@ -29,9 +30,17 @@ export default createRouter({
     // 后台管理：仅管理员（前端守卫 + 后端 adminRequired 双重校验）
     {
       path: '/admin-console', name: 'admin-console', component: AdminConsole,
-      beforeEnter: (_to, _from, next) => {
+      beforeEnter: async (_to, _from, next) => {
         if (!auth.token) return next('/login');
-        if (!auth.user?.is_admin) return next('/me');
+        if (!auth.user?.is_admin) {
+          // 缓存可能过期（管理员权限刚被授予/撤销），拉取最新状态再判断
+          try {
+            const { user } = await api.me();
+            patchUser(user);
+            if (user.is_admin) return next();
+          } catch { /* 网络失败按原缓存判断 */ }
+          return next('/me');
+        }
         next();
       },
     },

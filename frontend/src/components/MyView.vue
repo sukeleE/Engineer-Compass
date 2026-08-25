@@ -32,6 +32,8 @@ async function load() {
     profile.value = me;
     schedules.value = sched;
     studies.value = study;
+    // 同步最新用户信息（管理员权限可能刚被授予/撤销，localStorage 缓存是登录时的快照）
+    patchUser(me.user);
   } catch (e) {
     if (e.message.includes('401') || e.message.includes('登录')) clearAuth();
     else ElMessage.error(e.message);
