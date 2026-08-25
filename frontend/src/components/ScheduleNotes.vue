@@ -1,7 +1,7 @@
 <script setup>
-// 日程笔记浮窗（日程规划页三个 tab 共享）：可拖动手柄、可收起；点「写笔记」或历史条目 → 居中大弹窗
-// 编写/回看统一走弹窗（查看/编辑/删除/切换日期）
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+// 日程笔记面板（仿 AI 对话 / 消息中心，由 ToolDock 控制开关）
+// 写笔记 / 回看统一走居中大弹窗（富文本 + 学习状态 + 关联备赛）
+import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import RichEditor from './team/RichEditor.vue';
@@ -9,7 +9,6 @@ import { NOTE_STATUS, statusOf, excerpt, fmtDate } from '../utils/noteStatus.js'
 
 const props = defineProps({
   schedules: { type: Array, default: () => [] }, // 供「关联备赛」选择
-  active: { type: Boolean, default: true },      // 视图可见 → 自动刷新
   open: { type: Boolean, default: false },       // 面板展开（由 ToolDock 控制）
 });
 const emit = defineEmits(['close']);
@@ -24,39 +23,6 @@ const deleting = ref(false);
 const loading = ref(false);
 const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
-
-// —— 浮窗：可拖动手柄（面板由 ToolDock 控制开关） ——
-const dragRef = ref(null);
-const pos = ref({ left: null, top: null }); // null → 默认右下角
-const dragging = ref(null);
-function dragStart(e) {
-  if (e.target.closest('button')) return; // 不干扰按钮点击
-  const el = dragRef.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  dragging.value = { sx: e.clientX, sy: e.clientY, ox: rect.left, oy: rect.top };
-  window.addEventListener('pointermove', dragMove);
-  window.addEventListener('pointerup', dragEnd);
-  e.preventDefault();
-}
-function dragMove(e) {
-  if (!dragging.value) return;
-  const x = dragging.value.ox + e.clientX - dragging.value.sx;
-  const y = dragging.value.oy + e.clientY - dragging.value.sy;
-  pos.value = {
-    left: Math.max(0, Math.min(x, window.innerWidth - 340)),
-    top: Math.max(0, Math.min(y, window.innerHeight - 50)),
-  };
-}
-function dragEnd() {
-  dragging.value = null;
-  window.removeEventListener('pointermove', dragMove);
-  window.removeEventListener('pointerup', dragEnd);
-}
-onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', dragMove);
-  window.removeEventListener('pointerup', dragEnd);
-});
 
 // 当前日期对应的笔记（本月列表内查找；跨月时重拉列表）
 const activeNote = computed(() => monthNotes.value.find((n) => n.note_date === date.value) || null);
@@ -146,145 +112,150 @@ async function deleteNote(n) {
   }
 }
 
-// 可见（视图切回 / 首次挂载）时刷新，保证与月历新增的笔记同步
-function refresh() {
-  loadMonth().then(applyDate);
-}
-watch(() => props.active, (v) => { if (v) refresh(); });
 watch(date, applyDate);
-onMounted(() => { if (props.active) refresh(); });
+onMounted(() => { loadMonth().then(applyDate); });
 </script>
 
 <template>
-  <!-- 日程笔记面板（由 ToolDock 控制开关），可拖动手柄 -->
-  <div ref="dragRef" v-if="props.open" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
-    <!-- 拖拽手柄 + 收起 -->
-    <div class="sn-head" @pointerdown.prevent="dragStart">
-      <b>📝 日程笔记</b>
-      <span class="sn-sub">拖动此栏可移动</span>
-      <el-button size="small" text class="sn-ctl" title="收起" @click="emit('close')">⤡ 收起</el-button>
-    </div>
-
-    <template>
-      <el-button type="primary" class="sn-write" size="large" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
-
-      <div class="sn-list-head">本月笔记（{{ history.length }}）</div>
-      <div class="sn-list" v-loading="loading">
-        <div v-for="n in history" :key="n.id" class="sn-item" :class="{ cur: n.note_date === date }"
-          :title="'回看 ' + n.note_date" @click="openDlg(n.note_date, 'view')">
-          <span class="sn-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
-          <div class="sn-item-main">
-            <div class="sn-item-top">
-              {{ n.note_date.slice(5) }}
-              <template v-if="statusOf(n.status)">· {{ statusOf(n.status).emoji }} {{ statusOf(n.status).label }}</template>
-            </div>
-            <div class="sn-item-ex">{{ excerpt(n.content) }}</div>
-          </div>
-          <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
+  <!-- 日程笔记面板（由 ToolDock 控制开关），布局仿 AI 对话 / 消息中心 -->
+  <transition name="chat">
+    <div v-if="props.open" class="note-panel">
+      <div class="note-head">
+        <b>📝 日程笔记</b>
+        <div class="note-sub">{{ date }} · 每天记录一点，备赛更清晰</div>
+        <div class="note-actions">
+          <el-button link size="small" @click="emit('close')">收起</el-button>
         </div>
-        <span v-if="!history.length" class="sn-empty">这个月还没有笔记 — 点上方「写笔记」开始记录吧</span>
       </div>
-    </template>
 
-    <!-- 编写 / 回看弹窗（居中大尺寸） -->
-    <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
-      width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false" destroy-on-close append-to-body>
-      <!-- 回看模式 -->
-      <template v-if="dlgMode === 'view' && activeNote">
-        <div v-if="statusOf(activeNote.status)" class="dn-status"
-          :style="{ color: statusOf(activeNote.status).color, background: statusOf(activeNote.status).color + '1a' }">
-          {{ statusOf(activeNote.status).emoji }} 今日状态：{{ statusOf(activeNote.status).label }}
+      <div class="note-body">
+        <!-- 写笔记入口（防御样式：不依赖主题变量层，线上偶发缺失时仍显示蓝色） -->
+        <el-button type="primary" size="large" class="note-write" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
+
+        <div class="note-list-head">本月笔记（{{ history.length }}）</div>
+        <div class="note-list" v-loading="loading">
+          <div
+            v-for="n in history" :key="n.id" class="note-item"
+            :class="{ cur: n.note_date === date }" :title="'回看 ' + n.note_date"
+            @click="openDlg(n.note_date, 'view')"
+          >
+            <span class="note-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
+            <div class="note-item-main">
+              <div class="note-item-top">
+                {{ n.note_date.slice(5) }}
+                <template v-if="statusOf(n.status)">· {{ statusOf(n.status).emoji }} {{ statusOf(n.status).label }}</template>
+              </div>
+              <div class="note-item-ex">{{ excerpt(n.content) }}</div>
+            </div>
+            <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
+          </div>
+          <el-empty v-if="!history.length" description="这个月还没有笔记，点上方「写笔记」开始记录" :image-size="50" />
         </div>
-        <div v-if="activeNote.content" class="dn-body" v-html="activeNote.content"></div>
-        <div v-else class="dn-empty">这天只记录了状态，没有文字内容</div>
-      </template>
-      <!-- 编写 / 编辑模式 -->
-      <template v-else>
-        <div class="dn-tools">
-          <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" size="small"
-            :clearable="false" @change="onDateChange" />
-          <el-select v-model="status" size="small" placeholder="今日学习状态" clearable>
-            <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key"
-              :label="`${st.emoji} ${st.label}`" />
-          </el-select>
-          <el-select v-if="schedules.length" v-model="scheduleId" size="small" clearable filterable
-            placeholder="关联备赛（选填）" class="dn-schedule">
-            <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
-          </el-select>
-        </div>
-        <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…（支持插图 / 粘贴视频链接）" />
-      </template>
-      <template #footer>
+      </div>
+
+      <!-- 编写 / 回看弹窗（居中大尺寸） -->
+      <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
+        width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false" destroy-on-close append-to-body>
+        <!-- 回看模式 -->
         <template v-if="dlgMode === 'view' && activeNote">
-          <el-button size="small" type="danger" plain :loading="deleting" @click="deleteNote(activeNote)">🗑 删除</el-button>
-          <el-button size="small" type="primary" plain @click="dlgMode = 'edit'">✏️ 编辑</el-button>
+          <div v-if="statusOf(activeNote.status)" class="dn-status"
+            :style="{ color: statusOf(activeNote.status).color, background: statusOf(activeNote.status).color + '1a' }">
+            {{ statusOf(activeNote.status).emoji }} 今日状态：{{ statusOf(activeNote.status).label }}
+          </div>
+          <div v-if="activeNote.content" class="dn-body" v-html="activeNote.content"></div>
+          <div v-else class="dn-empty">这天只记录了状态，没有文字内容</div>
         </template>
+        <!-- 编写 / 编辑模式 -->
         <template v-else>
-          <el-button size="small" @click="dlg = false">取消</el-button>
-          <el-button v-if="activeNote" size="small" type="danger" plain :loading="deleting"
-            @click="deleteNote(activeNote)">🗑 删除</el-button>
-          <el-button size="small" type="primary" :loading="saving" @click="saveNote">💾 保存</el-button>
+          <div class="dn-tools">
+            <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" size="small"
+              :clearable="false" @change="onDateChange" />
+            <el-select v-model="status" size="small" placeholder="今日学习状态" clearable>
+              <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key"
+                :label="`${st.emoji} ${st.label}`" />
+            </el-select>
+            <el-select v-if="schedules.length" v-model="scheduleId" size="small" clearable filterable
+              placeholder="关联备赛（选填）" class="dn-schedule">
+              <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
+            </el-select>
+          </div>
+          <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…（支持插图 / 粘贴视频链接）" />
         </template>
-      </template>
-    </el-dialog>
-  </div>
+        <template #footer>
+          <template v-if="dlgMode === 'view' && activeNote">
+            <el-button size="small" type="danger" plain :loading="deleting" @click="deleteNote(activeNote)">🗑 删除</el-button>
+            <el-button size="small" type="primary" plain @click="dlgMode = 'edit'">✏️ 编辑</el-button>
+          </template>
+          <template v-else>
+            <el-button size="small" @click="dlg = false">取消</el-button>
+            <el-button v-if="activeNote" size="small" type="danger" plain :loading="deleting"
+              @click="deleteNote(activeNote)">🗑 删除</el-button>
+            <el-button size="small" type="primary" :loading="saving" @click="saveNote">💾 保存</el-button>
+          </template>
+        </template>
+      </el-dialog>
+    </div>
+  </transition>
 </template>
 
 <style lang="scss" scoped>
-// 浮窗：fixed 在入口按钮上方展开（bottom 86px = 按钮 22+52+12 间距，同 AI 对话面板）；
-// 可拖动（拖动后 left/top 覆盖 right/bottom），三 tab 共享
-.sn-float {
-  position: fixed; right: 18px; bottom: 86px; z-index: 1000;
-  width: 330px; max-width: calc(100vw - 24px); max-height: calc(100vh - 100px); overflow-y: auto;
-  background: var(--card-bg, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px;
-  padding: 10px 12px; box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
-  scrollbar-width: thin;
-
-  .sn-head {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-    cursor: move; user-select: none; padding: 2px 0;
-    b { font-size: 15px; }
-    .sn-sub { font-size: 11px; color: var(--text-2); flex: 1; }
-    .sn-ctl { margin-left: auto; flex-shrink: 0; }
+// 面板：与 AI 对话 / 消息中心完全同款（420×640 白底圆角阴影 + 蓝色头部 + 滚动内容区；移动端全屏）
+.note-panel {
+  position: fixed; right: 22px; bottom: 86px; z-index: 1000;
+  width: 420px; height: 640px; max-height: calc(100vh - 120px);
+  background: #fff; border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .2); border: 1px solid var(--border, #e2e8f0);
+  display: flex; flex-direction: column; overflow: hidden;
+  @media (max-width: 768px) {
+    right: 0; bottom: 0; width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0;
   }
-
-  .sn-write {
-    width: 100%; margin-bottom: 10px;
-    // 防御：不依赖 Element Plus 主题变量——线上偶发变量层加载缺失时按钮会变成白字透明不可见
-    --el-button-bg-color: #2563eb;
-    --el-button-border-color: #2563eb;
-    --el-button-text-color: #fff;
-    --el-button-hover-bg-color: #1d4ed8;
-    --el-button-hover-border-color: #1d4ed8;
-    --el-button-active-bg-color: #1e40af;
-    background: #2563eb; border-color: #2563eb; color: #fff;
-  }
-
-  .sn-list-head { margin: 0 0 6px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
-
-  .sn-list { display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
-
-  .sn-item {
-    display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px;
-    border: 1px solid var(--border); cursor: pointer; background: #fff;
-    transition: all .15s;
-    &:hover { border-color: #93c5fd; background: #eff6ff; }
-    &.cur { border-color: #2563eb; background: #eff6ff; }
-
-    .sn-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; flex-shrink: 0; }
-    .sn-item-main { flex: 1; min-width: 0; }
-    .sn-item-top { font-size: 12px; font-weight: 600; }
-    .sn-item-ex {
-      font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
-
-  .sn-empty { color: #94a3b8; font-size: 12px; padding: 8px 0; text-align: center; }
 }
 
-// 入口圆形按钮：与全局 AI 对话按钮同款样式（💬 位于 right:22px，本按钮 82px=22+52+8 间距）；
-// 弹窗内
+.note-head {
+  padding: 12px 16px; background: #2563eb; color: #fff; position: relative; flex-shrink: 0;
+  b { font-size: 15px; }
+  .note-sub { font-size: 12.5px; opacity: .85; margin-top: 3px; }
+  .note-actions { position: absolute; top: 8px; right: 8px; :deep(.el-button) { color: #dbeafe; } }
+}
+
+.note-body { flex: 1; overflow-y: auto; padding: 12px 14px; background: #f8fafc; }
+
+// 写笔记主按钮：颜色写死，不依赖 Element Plus 主题变量层（线上偶发缺失 → 白字透明不可见）
+.note-write {
+  width: 100%; margin-bottom: 12px;
+  --el-button-bg-color: #2563eb;
+  --el-button-border-color: #2563eb;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #1d4ed8;
+  --el-button-hover-border-color: #1d4ed8;
+  --el-button-active-bg-color: #1e40af;
+  background: #2563eb; border-color: #2563eb; color: #fff;
+}
+
+.note-list-head { margin: 0 0 8px; font-size: 12.5px; color: var(--text-2, #64748b); font-weight: 600; }
+
+.note-list { display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+
+.note-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border, #e2e8f0); cursor: pointer; background: #fff;
+  transition: all .15s;
+  &:hover { border-color: #93c5fd; background: #eff6ff; }
+  &.cur { border-color: #2563eb; background: #eff6ff; }
+
+  .note-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; flex-shrink: 0; }
+  .note-item-main { flex: 1; min-width: 0; }
+  .note-item-top { font-size: 12.5px; font-weight: 600; }
+  .note-item-ex {
+    font-size: 11.5px; color: var(--text-2, #64748b); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.chat-enter-active, .chat-leave-active { transition: all .25s ease; }
+.chat-enter-from, .chat-leave-to { opacity: 0; transform: translateY(16px) scale(.96); }
+
+// —— 弹窗内 ——
 .dn-tools { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
   .el-date-picker { width: 150px; }
   .dn-schedule { width: 200px; }
