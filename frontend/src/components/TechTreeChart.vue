@@ -106,14 +106,24 @@ function onResize() { chart?.resize(); }
 
 watch(() => props.process, async () => { await nextTick(); render(); });
 
+let ro = null;
+
 onMounted(async () => {
   chart = echarts.init(chartRef.value);
-  window.addEventListener('resize', onResize);
   await nextTick();
   render();
+  // 容器可能在隐藏 tab（display:none）里初始化 → 量到 0 宽、树挤在角落；
+  // ResizeObserver 在容器变为可见/尺寸变化时自动重算尺寸并重新 fit 全树
+  ro = new ResizeObserver(() => {
+    if (!chart) return;
+    chart.resize();
+    fitTree();
+  });
+  ro.observe(chartRef.value);
 });
 
 onBeforeUnmount(() => {
+  ro?.disconnect();
   window.removeEventListener('resize', onResize);
   chart?.dispose();
   chart = null;

@@ -186,8 +186,8 @@ function lab(full, short) { return isNarrow.value ? short : full; }
             <el-empty v-else description="暂无备赛流程数据" />
           </el-tab-pane>
 
-          <!-- Tab3 树状技术栈 -->
-          <el-tab-pane :label="lab('树状技术栈', '技术栈')" name="stack">
+          <!-- Tab3 树状技术栈（lazy：切到该 tab 才挂载，避免树图在隐藏容器里以 0 宽初始化） -->
+          <el-tab-pane :label="lab('树状技术栈', '技术栈')" name="stack" lazy>
             <div class="stack-toolbar">
               <span class="stack-label">选择子赛项：</span>
               <el-select v-model="selProcess" style="width: 380px" placeholder="选择子赛项查看技术栈">
