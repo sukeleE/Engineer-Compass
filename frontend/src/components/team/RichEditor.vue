@@ -10,6 +10,8 @@ const emit = defineEmits(['update:modelValue']);
 
 const editorRef = shallowRef(null);
 const html = ref(props.modelValue || '');
+// 工具栏默认收起（避免占用编辑区 / 遮挡输入框），点击「展开工具栏」再显示
+const toolbarOpen = ref(false);
 
 watch(() => props.modelValue, (v) => { if (v !== html.value) html.value = v || ''; });
 watch(html, (v) => emit('update:modelValue', v));
@@ -51,7 +53,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="rich-editor">
-    <Toolbar :editor="editorRef" :default-config="toolbarConfig" mode="simple" class="re-toolbar" />
+    <!-- 工具栏开关：默认收起，点击展开 -->
+    <button type="button" class="re-toggle" :class="{ open: toolbarOpen }" @click="toolbarOpen = !toolbarOpen">
+      <span class="re-arrow">▾</span>
+      {{ toolbarOpen ? '收起工具栏' : '展开工具栏' }}
+    </button>
+    <Toolbar v-show="toolbarOpen" :editor="editorRef" :default-config="toolbarConfig" mode="simple" class="re-toolbar" />
     <Editor
       v-model="html" :default-config="editorConfig" mode="simple" class="re-body"
       @on-created="handleCreated"
@@ -62,6 +69,15 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .rich-editor { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff;
   display: flex; flex-direction: column;
+  // 工具栏开关条：细链接样式，默认收起
+  .re-toggle {
+    display: flex; align-items: center; gap: 4px; align-self: flex-start;
+    border: none; background: none; cursor: pointer;
+    padding: 6px 10px 0; font-size: 12px; color: #2563eb; user-select: none;
+    .re-arrow { display: inline-block; transition: transform .2s; }
+    &.open .re-arrow { transform: rotate(180deg); }
+    &:hover { color: #1d4ed8; }
+  }
   :deep(.re-toolbar) {
     border-bottom: 1px solid var(--border); flex-shrink: 0;
     // 工具栏紧凑化：压小内边距/按钮，腾出空间给正文；窄屏允许换行（不换行时右侧按钮被 overflow:hidden 裁掉）

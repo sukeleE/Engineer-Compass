@@ -292,19 +292,23 @@ onMounted(() => { load(); loadComps(); });
       .dept-tag { font-weight: 500; }
     }
   }
-  .ph-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
-    .ph-name { font-weight: 600; font-size: 13.5px; }
-    .ph-extra { color: #94a3b8; font-size: 12px; }
+  .ph-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow-wrap: anywhere;
+    .ph-name { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+    .ph-extra { color: #94a3b8; font-size: 12px; flex-shrink: 0; }
   }
   .ph-check { background: #f8fafc; border: 1px dashed var(--border); border-radius: 8px;
     padding: 6px 10px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
   .dept-group { margin-bottom: 8px;
     .dg-head { margin-bottom: 4px; }
-    .task-line { display: flex; align-items: flex-start; width: 100%; margin: 0;
-      .task-text { font-size: 13px; line-height: 1.6;
+    .task-line {
+      display: flex; align-items: flex-start; width: 100%; margin: 0;
+      // 长任务文本窄屏换行，不允许向右溢出屏幕
+      :deep(.el-checkbox) { flex: 1; min-width: 0; }
+      :deep(.el-checkbox__label) { white-space: normal; overflow-wrap: anywhere; }
+      .task-text { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere;
         &.done { color: #94a3b8; text-decoration: line-through; }
       }
-      .done-by { font-size: 11.5px; color: #94a3b8; margin-left: 6px; }
+      .done-by { font-size: 11.5px; color: #94a3b8; margin-left: 6px; flex-shrink: 0; }
     }
   }
   .ph-none { color: #cbd5e1; font-size: 12.5px; }

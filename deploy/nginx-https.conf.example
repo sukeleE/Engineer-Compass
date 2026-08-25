@@ -1,0 +1,43 @@
+# Engineer-Compass Nginx HTTPS 配置示例
+# 用法：备案通过 + 证书就位后，替换 /etc/nginx/sites-enabled/compass
+#   1. 把「你的域名」全部换成实际域名（server_name 与证书路径共 4 处）
+#   2. 证书文件放在 /etc/nginx/ssl/你的域名.crt 与 你的域名.key
+#   3. 保存后执行：sudo nginx -t && sudo systemctl reload nginx
+
+# HTTP → HTTPS 强制跳转
+server {
+    listen 80;
+    server_name 你的域名;   # ← 换成你的域名
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS 主站
+server {
+    listen 443 ssl;
+    server_name 你的域名;   # ← 换成你的域名
+    ssl_certificate     /etc/nginx/ssl/你的域名.crt;   # ← 证书文件（腾讯云下载的 Nginx 格式）
+    ssl_certificate_key /etc/nginx/ssl/你的域名.key;   # ← 私钥文件
+    ssl_protocols TLSv1.2 TLSv1.3;   # 覆盖全局的 TLSv1/TLSv1.1 旧协议
+
+    client_max_body_size 30m;        # 资料上传对齐后端 30mb 限制
+
+    root /var/www/compass;
+    index index.html;
+
+    # 首页防缓存（Vite 文件名带 hash，只有 index.html 会变）
+    location = /index.html {
+      add_header Cache-Control "no-cache";
+    }
+
+    # SPA 路由回退
+    location / {
+      try_files $uri $uri/ /index.html;
+    }
+
+    # API 反代
+    location /api/ {
+      proxy_pass http://127.0.0.1:3000;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+    }
+}

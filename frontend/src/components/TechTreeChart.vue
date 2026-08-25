@@ -8,7 +8,7 @@ const props = defineProps({
 });
 
 const chartRef = ref(null);
-const collapseState = ref('default'); // 'default' 默认3层 | 'all' 全部展开 | 'none' 全部收起
+const collapseState = ref('all'); // 默认全部展开（需求）；节点级点击展开/收起仍可用
 let chart = null;
 
 // tech_stack（多根分支）→ ECharts 单根树；collapseState 控制整体展开/收起
@@ -103,11 +103,6 @@ function fitTree() {
 
 function onResize() { chart?.resize(); }
 
-function setState(s) {
-  collapseState.value = s;
-  render();
-}
-
 watch(() => props.process, async () => { await nextTick(); render(); });
 
 onMounted(async () => {
@@ -127,12 +122,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="tree-wrap">
     <div class="tree-toolbar">
-      <span class="hint">🖱️ 拖拽平移 · 滚轮缩放 · 点击节点展开/收起</span>
-      <div class="tree-btns">
-        <el-button size="small" @click="setState('default')">默认视图</el-button>
-        <el-button size="small" type="primary" plain @click="setState('all')">全部展开</el-button>
-        <el-button size="small" plain @click="setState('none')">全部收起</el-button>
-      </div>
+      <span class="hint">🖱️ 拖拽平移 · 滚轮缩放 · 点击节点可折叠分支</span>
     </div>
     <div ref="chartRef" class="tech-tree"></div>
   </div>
@@ -141,10 +131,9 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .tree-wrap { display: flex; flex-direction: column; }
 .tree-toolbar {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-bottom: 6px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
   .hint { color: var(--text-2); font-size: 12px; }
-  .tree-btns { display: flex; gap: 6px; }
 }
 .tech-tree { width: 100%; height: 400px; }
 </style>

@@ -17,6 +17,7 @@ const loadingDetail = ref(false);
 const manualDlg = ref(false);
 const chatCreate = ref(false); // AI 对话生成学习日程
 const chatEdit = ref(false); // AI 对话修改学习日程
+const genOpen = ref(false); // AI 生成区默认收起（移动端占屏），点击标题展开
 
 // 平台元数据（与 CompDialog 学习资源一致）
 const PLATFORM_META = {
@@ -191,34 +192,36 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 
 <template>
   <div class="study-page">
-    <!-- AI 生成区 -->
+    <!-- AI 生成区（默认收起，点击标题展开——移动端不占屏） -->
     <div class="gen-card">
-      <div class="gen-head">
+      <div class="gen-head" :class="{ open: genOpen }" @click="genOpen = !genOpen">
         <div>
-          <h2>🤖 AI 学习日程</h2>
+          <h2>🤖 AI 学习日程 <span class="gen-fold-arrow">▾</span></h2>
           <p class="gen-tip">告诉 AI 你想学的技能或知识点（不限于竞赛）——自动生成分阶段学习计划，并推荐 B站 / 知乎 / CSDN / 微信 / GitHub 等各平台的学习资料。</p>
         </div>
-        <el-button type="primary" plain @click="manualDlg = true">✍️ 自编计划</el-button>
+        <el-button type="primary" plain @click.stop="manualDlg = true">✍️ 自编计划</el-button>
       </div>
-      <div class="gen-form">
-        <el-input
-          v-model="form.topic" size="large" placeholder="学习主题，如：STM32 单片机 / 强化学习 / 数据结构与算法"
-          @keyup.enter="generate"
-        />
-        <el-select v-model="form.level" size="large" style="width: 160px">
-          <el-option v-for="o in LEVEL_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
-        </el-select>
-        <el-input v-model="form.goal" size="large" placeholder="学习目标（选填），如：做出平衡小车" />
-        <el-input-number v-model="form.hours" :min="2" :max="80" size="large" style="width: 130px">
-          <template #prefix>周</template>
-        </el-input-number>
-        <el-button type="primary" size="large" @click="chatCreate = true">💬 AI 对话生成</el-button>
-        <el-button size="large" :loading="generating" @click="generate">⚡ 快速生成</el-button>
-      </div>
-      <div v-if="generating" class="gen-loading">
-        <span class="spinner"></span> AI 正在规划学习路径与资料检索关键词…
-      </div>
-      <div class="gen-chat-tip">💬 AI 对话生成：AI 会先确认你的学习主题、水平、目标与时间投入，再产出计划</div>
+      <template v-if="genOpen">
+        <div class="gen-form">
+          <el-input
+            v-model="form.topic" size="large" placeholder="学习主题，如：STM32 单片机 / 强化学习 / 数据结构与算法"
+            @keyup.enter="generate"
+          />
+          <el-select v-model="form.level" size="large" style="width: 160px">
+            <el-option v-for="o in LEVEL_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+          <el-input v-model="form.goal" size="large" placeholder="学习目标（选填），如：做出平衡小车" />
+          <el-input-number v-model="form.hours" :min="2" :max="80" size="large" style="width: 130px">
+            <template #prefix>周</template>
+          </el-input-number>
+          <el-button type="primary" size="large" @click="chatCreate = true">💬 AI 对话生成</el-button>
+          <el-button size="large" :loading="generating" @click="generate">⚡ 快速生成</el-button>
+        </div>
+        <div v-if="generating" class="gen-loading">
+          <span class="spinner"></span> AI 正在规划学习路径与资料检索关键词…
+        </div>
+        <div class="gen-chat-tip">💬 AI 对话生成：AI 会先确认你的学习主题、水平、目标与时间投入，再产出计划</div>
+      </template>
     </div>
 
     <!-- 自编计划弹窗（手动编写，不经 AI） -->
@@ -380,9 +383,18 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 .gen-card {
   background: linear-gradient(135deg, #eff6ff, #f8fafc);
   border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px;
-  .gen-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  h2 { margin: 0 0 6px; font-size: 18px; }
+  .gen-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    cursor: pointer; user-select: none;
+    h2 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 6px; }
+    .gen-fold-arrow {
+      display: inline-block; font-size: 14px; color: #2563eb; transition: transform .2s;
+    }
+    &.open .gen-fold-arrow { transform: rotate(180deg); }
+    &:hover h2 { color: #2563eb; }
+  }
   .gen-tip { margin: 0 0 14px; color: var(--text-2); font-size: 13px; }
+  .gen-head:not(.open) .gen-tip { margin-bottom: 0; } // 收起态去掉底部空隙
   .gen-form { display: flex; gap: 10px; flex-wrap: wrap;
     .el-input { flex: 1; min-width: 220px; }
   }
