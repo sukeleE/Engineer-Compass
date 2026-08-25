@@ -40,8 +40,9 @@ function countLeaves(node) {
 function render() {
   if (!chart) return;
   const tree = buildTree(props.process, collapseState.value);
-  // 容器高度随叶子数自适应（纵向不裁切），上限 720
-  chartRef.value.style.height = `${Math.min(Math.max(countLeaves(tree) * 22 + 130, 400), 720)}px`;
+  // 容器高度随叶子数自适应（纵向不裁切）。
+  // 上限 1200：默认全展开后大树也要有足够空间自然渲染，避免被压缩进小窗口
+  chartRef.value.style.height = `${Math.min(Math.max(countLeaves(tree) * 22 + 130, 420), 1200)}px`;
   chart.setOption({
     tooltip: {
       trigger: 'item',
@@ -96,8 +97,8 @@ function fitTree() {
       rect: { x: minX, y: minY - 24, width: maxX - minX + 210, height: maxY - minY + 48 },
       animationDuration: 0,
     });
-  } catch {
-    // 内部 API 变化时降级：保持左上角，用户仍可拖拽/缩放
+  } catch (e) {
+    console.warn('[TechTreeChart] fitTree 降级（保持左上角，仍可拖拽/缩放）:', e);
   }
 }
 

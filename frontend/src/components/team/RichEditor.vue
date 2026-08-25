@@ -80,6 +80,10 @@ onBeforeUnmount(() => {
   }
   :deep(.re-toolbar) {
     border-bottom: 1px solid var(--border); flex-shrink: 0;
+    // 图层关系：wangEditor 自带 .w-e-toolbar 是 position:sticky + z-index:1，
+    // 而 .w-e-text-container 也是 z-index:1 且 DOM 中 Editor 在 Toolbar 之后（代码先后）
+    // → 同层级时编辑区会盖住工具栏。这里把工具栏提到 z-index:10，确保始终在上层。
+    position: relative; z-index: 10;
     // 工具栏紧凑化：压小内边距/按钮，腾出空间给正文；窄屏允许换行（不换行时右侧按钮被 overflow:hidden 裁掉）
     .w-e-toolbar { padding: 3px 8px; flex-wrap: wrap; }
     .w-e-bar-item { padding: 2px 3px; }
