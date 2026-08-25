@@ -25,12 +25,35 @@ const searching = ref(false);
 const dialogOpen = ref(false);
 const currentId = ref(null);
 
-// 移动端月份切换视图（≤768px 替代横向大网格）
+// 移动端切换视图（≤768px 替代横向大网格）：默认全年分组展示，选月份则只看该月
+const mobileAll = ref(true); // 默认全年：全部竞赛按月分组；选月份后只看该月
 const mobileMonth = ref(new Date().getMonth() + 1);
-const mobilePending = ref(false); // true → 显示「时间待定」列表
-const shiftMonth = (d) => { mobileMonth.value = ((mobileMonth.value + d - 1 + 12) % 12) + 1; };
-const goToday = () => { mobileMonth.value = new Date().getMonth() + 1; mobilePending.value = false; };
-const mobileList = computed(() => (mobilePending.value ? noMonth.value : byMonth(mobileMonth.value)));
+const mobilePending = ref(false); // true → 只看「时间待定」
+const shiftMonth = (d) => { mobileAll.value = false; mobileMonth.value = ((mobileMonth.value + d - 1 + 12) % 12) + 1; };
+const goToday = () => { mobileAll.value = false; mobileMonth.value = new Date().getMonth() + 1; mobilePending.value = false; };
+// 分组视图：全年 = 按月分组 + 末尾待定组；单月 = 该月一组；待定 = 单独一组
+const mobileGroups = computed(() => {
+  const f = filtered.value;
+  const withM = f.filter((c) => c.start_month);
+  const pend = f.filter((c) => !c.start_month);
+  if (mobilePending.value) return [{ label: '⏳ 时间待定', items: pend }];
+  if (mobileAll.value) {
+    const gs = MONTHS.map((m) => {
+      const items = withM.filter((c) => c.start_month === m);
+      return { label: `${m} · ${items.length} 项`, items };
+    }).filter((g) => g.items.length);
+    if (pend.length) gs.push({ label: `⏳ 时间待定 · ${pend.length} 项`, items: pend });
+    return gs;
+  }
+  const items = withM.filter((c) => c.start_month === mobileMonth.value);
+  return [{ label: `${new Date().getFullYear()}年${mobileMonth.value}月 · ${items.length} 项`, items }];
+});
+const mobileTotal = computed(() => mobileGroups.value.reduce((n, g) => n + g.items.length, 0));
+// 月份选择面板：点标题弹出（全年 / 12 个月 / 待定），不必 ‹ › 逐月翻
+const monthPicker = ref(false);
+const pickAll = () => { mobileAll.value = true; mobilePending.value = false; monthPicker.value = false; };
+const pickMonth = (m) => { mobileAll.value = false; mobileMonth.value = m; mobilePending.value = false; monthPicker.value = false; };
+const pickPending = () => { mobileAll.value = false; mobilePending.value = true; monthPicker.value = false; };
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
 const TYPE_COLORS = {
@@ -234,13 +257,14 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- 移动端月份视图（≤768px 显示，桌面隐藏）：‹ 月份 › 切换 + 时间待定 -->
+    <!-- 移动端视图（≤768px 显示，桌面隐藏）：默认全年按月分组；点标题选月份；可看待定 -->
     <div v-loading="loading" class="timeline-mobile">
       <div class="tm-ctrl">
         <button class="tm-arrow" aria-label="上一月" @click="shiftMonth(-1)">‹</button>
-        <div class="tm-title" @click="goToday">
-          {{ mobilePending ? '⏳ 时间待定' : `${new Date().getFullYear()}年${mobileMonth}月` }}
-          <span class="tm-count">{{ mobileList.length }} 项</span>
+        <div class="tm-title" @click="monthPicker = !monthPicker">
+          {{ mobilePending ? '⏳ 时间待定' : mobileAll ? '🗓️ 全年竞赛' : `${new Date().getFullYear()}年${mobileMonth}月` }}
+          <span class="tm-count">{{ mobileTotal }} 项</span>
+          <span class="tm-caret">{{ monthPicker ? '▴' : '▾' }}</span>
         </div>
         <button class="tm-arrow" aria-label="下一月" @click="shiftMonth(1)">›</button>
         <button class="tm-pending" :class="{ active: mobilePending }" @click="mobilePending = !mobilePending">
@@ -248,22 +272,32 @@ onMounted(load);
         </button>
         <button class="tm-today" @click="goToday">今天</button>
       </div>
-      <div v-if="!mobileList.length" class="tm-empty">
-        {{ mobilePending ? '暂无时间待定的竞赛' : `本月暂无竞赛，试试「今天」或筛选其他类别` }}
+      <!-- 选择面板：点标题弹出，全年 / 12 个月直达 / 待定 -->
+      <div v-if="monthPicker" class="tm-picker">
+        <button class="tm-pm" :class="{ active: mobileAll && !mobilePending }" @click="pickAll">🗓️ 全年</button>
+        <button v-for="m in 12" :key="m" class="tm-pm"
+          :class="{ active: !mobileAll && !mobilePending && mobileMonth === m }" @click="pickMonth(m)">{{ m }}月</button>
+        <button class="tm-pm" :class="{ active: mobilePending }" @click="pickPending">⏳ 待定</button>
       </div>
-      <div
-        v-for="c in mobileList" :key="c.id" class="t-card"
-        :style="{ borderLeftColor: colorOf(c.type) }"
-        @click="openComp(c)"
-      >
-        <div class="t-name">{{ c.short_name || c.name }}</div>
-        <div class="t-meta">
-          <span v-if="isTwoYear(c)" class="t-badge">隔年</span>
-          <span v-if="c.source_type !== 'official'" class="t-badge ai">AI</span>
-          <span class="t-stars">{{ '★'.repeat(c.difficulty || 0) }}<i>{{ '☆'.repeat(5 - (c.difficulty || 0)) }}</i></span>
-          <span class="t-type" :class="groupOf(c.type)">{{ groupOf(c.type) }}</span>
+      <div v-if="!mobileGroups.length" class="tm-empty">
+        {{ mobilePending ? '暂无时间待定的竞赛' : `当前条件下暂无竞赛，试试「今天」或筛选其他类别` }}
+      </div>
+      <template v-for="g in mobileGroups" :key="g.label">
+        <div class="tm-group">{{ g.label }}</div>
+        <div
+          v-for="c in g.items" :key="c.id" class="t-card"
+          :style="{ borderLeftColor: colorOf(c.type) }"
+          @click="openComp(c)"
+        >
+          <div class="t-name">{{ c.short_name || c.name }}</div>
+          <div class="t-meta">
+            <span v-if="isTwoYear(c)" class="t-badge">隔年</span>
+            <span v-if="c.source_type !== 'official'" class="t-badge ai">AI</span>
+            <span class="t-stars">{{ '★'.repeat(c.difficulty || 0) }}<i>{{ '☆'.repeat(5 - (c.difficulty || 0)) }}</i></span>
+            <span class="t-type" :class="groupOf(c.type)">{{ groupOf(c.type) }}</span>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <CompDialog :open="dialogOpen" :comp-id="currentId" @close="dialogOpen = false" />
@@ -375,10 +409,26 @@ onMounted(load);
         border: none; background: #eff6ff; color: #2563eb; border-radius: 999px;
         font-size: 13px; padding: 7px 14px; cursor: pointer;
       }
+      .tm-caret { font-size: 10px; color: var(--text-2); margin-left: 3px; }
+    }
+    .tm-picker {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 8px;
+      .tm-pm {
+        border: 1px solid var(--border); background: #fff; border-radius: 8px;
+        padding: 8px 0; font-size: 13px; cursor: pointer; color: var(--text-2);
+        &.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+      }
     }
     .tm-empty {
       text-align: center; color: var(--text-2); font-size: 13px;
       padding: 30px 0; border: 1px dashed var(--border); border-radius: 10px;
+    }
+    // 全年视图的月份分组标题：如「3月 · 8 项」+ 右侧分隔线
+    .tm-group {
+      display: flex; align-items: center; gap: 10px;
+      margin: 6px 2px 0; font-size: 14px; font-weight: 700; color: var(--text);
+      &::after { content: ''; flex: 1; height: 1px; background: var(--border); }
     }
     .t-card { padding: 12px 14px; }
     .t-type { margin-left: auto; color: var(--text-2); font-size: 12px; }
