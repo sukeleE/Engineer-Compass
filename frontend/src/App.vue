@@ -83,6 +83,12 @@ watch(() => route.path, closeMenu);
   .brand h1 { font-size: 19px; letter-spacing: 0; white-space: nowrap; span { display: none; } }
 }
 
+/* 汉堡按钮显示：必须写在 scoped 样式内（同特异性后声明必胜）——
+   main.scss 全局 .menu-btn{display:block} 特异性 (0,1,0) 压不过本组件 scoped (0,2,0)，之前按钮永不显示 */
+@media (max-width: 1024px) {
+  .menu-btn { display: block; }
+}
+
 /* 移动端下拉菜单：绝对定位在 header 下方；宽度自适应内容，极窄视口截断不竖排 */
 .menu-panel {
   position: absolute; top: calc(100% + 6px); right: 12px; z-index: 1200;

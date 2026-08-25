@@ -120,17 +120,16 @@ html, body {
   // 固定宽度输入控件不溢出（内联 width 仍生效，max-width 压回视口）
   .el-input, .el-select, .el-input-number { max-width: 100% !important; }
 
-  // 顶部导航 → 汉堡按钮
+  // 顶部导航 → 汉堡按钮（.menu-btn 的 display 规则在 App.vue scoped 内，此处不写）
   .nav { display: none; }
-  .menu-btn { display: block; }
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
 }
 
 // 窄屏（≤1024px）：顶部导航链接收进汉堡菜单（防链接挤压/字间断行；小屏体验统一）
+// 注意：.menu-btn 的显示规则在 App.vue scoped 内（全局声明特异性不足，压不过组件 scoped）
 @media (max-width: 1024px) {
   .nav { display: none; }
-  .menu-btn { display: block; }
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
 }
