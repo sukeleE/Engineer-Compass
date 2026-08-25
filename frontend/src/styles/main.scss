@@ -58,6 +58,9 @@ html, body {
       color: var(--text-2);
       font-size: 13px;
       white-space: nowrap; /* 链接文字永不内部换行 */
+      min-width: 0; /* 允许 flex 收缩 */
+      overflow: hidden;
+      text-overflow: ellipsis; /* 容器不够宽时尾部省略号截断（省略后面的字词） */
       padding: 7px 18px;
       border-radius: 999px;
       transition: all .2s;
@@ -120,16 +123,13 @@ html, body {
   // 固定宽度输入控件不溢出（内联 width 仍生效，max-width 压回视口）
   .el-input, .el-select, .el-input-number { max-width: 100% !important; }
 
-  // 顶部导航 → 汉堡按钮（.menu-btn 的 display 规则在 App.vue scoped 内，此处不写）
-  .nav { display: none; }
-  .app-header { padding: 12px 14px 8px; }
-  .brand .sub { display: none; }
+  // 导航保持可见，间隙压缩交给下方 ≤1024px 断点统一处理
 }
 
-// 窄屏（≤1024px）：顶部导航链接收进汉堡菜单（防链接挤压/字间断行；小屏体验统一）
-// 注意：.menu-btn 的显示规则在 App.vue scoped 内（全局声明特异性不足，压不过组件 scoped）
+// 中窄屏（≤1024px）：导航压缩间隙+字号；链接自动尾部省略号截断（不换行不竖排、不收汉堡）
 @media (max-width: 1024px) {
-  .nav { display: none; }
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
+  .nav { gap: 3px; padding: 3px; }
+  .nav a { padding: 5px 10px; font-size: 12px; }
 }
