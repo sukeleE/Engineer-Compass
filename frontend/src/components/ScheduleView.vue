@@ -1,5 +1,5 @@
 <script setup>
-// 我的备赛日程页：月历 / 竞赛日程 / 学习日程 / 小组任务 四 tab（月历默认，月历组件独立自加载）
+// 我的备赛日程页：小组任务 / 竞赛日程 / 学习日程 / 月历 四 tab（小组任务默认，月历组件独立自加载）
 // 任务勾选完成时记录完成日期 done_at，月历按完成日聚合
 import { ref, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -14,10 +14,10 @@ import auth from '../auth.js';
 import { fmtDate } from '../utils/noteStatus.js';
 import PlanChat from './PlanChat.vue';
 
-// 页面 tab：calendar 月历（默认）| comp 竞赛日程 | study 学习日程 | team 小组任务（支持 ?tab=xx 深链）
+// 页面 tab：team 小组任务（默认）| comp 竞赛日程 | study 学习日程 | calendar 月历（支持 ?tab=xx 深链）
 const route = useRoute();
 const router = useRouter();
-const viewTab = ref(['calendar', 'comp', 'study', 'team'].includes(route.query.tab) ? route.query.tab : 'calendar');
+const viewTab = ref(['team', 'comp', 'study', 'calendar'].includes(route.query.tab) ? route.query.tab : 'team');
 watch(viewTab, (v) => {
   router.replace({ query: { ...route.query, tab: v } }).catch(() => {});
 });
@@ -175,10 +175,13 @@ onMounted(load);
 
 <template>
   <main class="schedule-page">
-    <!-- 四 tab：月历默认；笔记浮窗四 tab 共用，挂在 tabs 外层 -->
+    <!-- 四 tab：小组任务默认；笔记浮窗四 tab 共用，挂在 tabs 外层 -->
     <el-tabs v-model="viewTab" class="page-tabs">
-    <el-tab-pane :label="lab('🗓️ 月历', '月历')" name="calendar">
-      <CalendarView />
+    <el-tab-pane :label="lab('🏗️ 小组任务', '小组')" name="team">
+      <template v-if="auth.token">
+        <MyTeamTasks />
+      </template>
+      <el-empty v-else description="登录后查看所在小组的备赛任务" :image-size="80" />
     </el-tab-pane>
 
     <el-tab-pane :label="lab('🏆 竞赛日程', '竞赛')" name="comp">
@@ -326,11 +329,8 @@ onMounted(load);
       </div>
     </el-tab-pane>
 
-    <el-tab-pane :label="lab('🏗️ 小组任务', '小组')" name="team">
-      <template v-if="auth.token">
-        <MyTeamTasks />
-      </template>
-      <el-empty v-else description="登录后查看所在小组的备赛任务" :image-size="80" />
+    <el-tab-pane :label="lab('🗓️ 月历', '月历')" name="calendar">
+      <CalendarView />
     </el-tab-pane>
     </el-tabs>
 
@@ -345,7 +345,7 @@ onMounted(load);
 <style lang="scss" scoped>
 .schedule-page { padding: 12px 20px 80px; }
 
-// 合并页签：月历 / 竞赛日程 / 学习日程 / 小组任务
+// 合并页签：小组任务 / 竞赛日程 / 学习日程 / 月历
 .page-tabs {
   :deep(.el-tabs__header) { margin-bottom: 12px; }
   :deep(.el-tabs__item) { font-size: 14.5px; }

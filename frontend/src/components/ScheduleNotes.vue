@@ -23,7 +23,7 @@ const loading = ref(false);
 const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
 
-// —— 浮窗：收起 / 拖动 ——
+// —— 浮窗：收起（变圆形 📝 按钮，位于 AI 对话按钮左侧）/ 拖动 ——
 const collapsed = ref(false);
 const dragRef = ref(null);
 const pos = ref({ left: null, top: null }); // null → 默认右下角
@@ -154,7 +154,10 @@ onMounted(() => { if (props.active) refresh(); });
 </script>
 
 <template>
-  <div ref="dragRef" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
+  <!-- 收起态：圆形 📝 按钮（与全局 AI 对话 💬 按钮同款，位于其左侧），点击展开浮窗 -->
+  <button v-if="collapsed" class="sn-fab" title="展开日程笔记" @click="collapsed = false">📝</button>
+
+  <div ref="dragRef" v-show="!collapsed" class="sn-float" :style="pos.left !== null ? { left: pos.left + 'px', top: pos.top + 'px' } : {}">
     <!-- 拖拽手柄 + 收起/展开 -->
     <div class="sn-head" @pointerdown.prevent="dragStart">
       <b>📝 日程笔记</b>
@@ -268,6 +271,16 @@ onMounted(() => { if (props.active) refresh(); });
   }
 
   .sn-empty { color: #94a3b8; font-size: 12px; padding: 8px 0; text-align: center; }
+}
+
+// 收起态圆形按钮：与全局 AI 对话按钮同款样式；💬 位于 right:22px，本按钮 82px（22+52+8 间距）
+.sn-fab {
+  position: fixed; right: 82px; bottom: 22px; z-index: 1000;
+  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+  font-size: 24px; background: #2563eb; color: #fff;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
+  transition: transform .2s;
+  &:hover { transform: scale(1.08); }
 }
 
 // 弹窗内
