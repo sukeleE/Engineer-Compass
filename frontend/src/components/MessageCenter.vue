@@ -48,6 +48,13 @@ function goDm(f) {
   router.push(`/me?tab=friends&dm=${f.id}`);
 }
 
+// 头像点击：跳转对方公开主页（停止冒泡，不触发整行点击）
+function goProfile(id) {
+  if (!id) return;
+  emit('close'); // 跳转前关闭面板
+  router.push(`/user/${id}`);
+}
+
 async function readAll() {
   await api.notificationsRead(['comment', 'like', 'fav']).catch(() => {});
   for (const k of ['comments', 'likes', 'favs']) notif.value[k].forEach((n) => (n.is_read = 1));
@@ -113,7 +120,7 @@ watch(() => props.open, (v) => {
                 v-for="f in friends" :key="f.id" class="n-item"
                 :class="{ unread: f.unread > 0 }" @click="goDm(f)"
               >
-                <div class="av">
+                <div class="av av-link" title="查看主页" @click.stop="goProfile(f.id)">
                   <img v-if="f.avatar" :src="f.avatar" alt="" />
                   <span v-else>{{ f.nickname?.charAt(0) || '?' }}</span>
                 </div>
@@ -136,7 +143,7 @@ watch(() => props.open, (v) => {
                 v-for="n in notif.comments" :key="n.id" class="n-item"
                 :class="{ unread: !n.is_read }" @click="goNotif(n)"
               >
-                <div class="av">
+                <div class="av av-link" title="查看主页" @click.stop="goProfile(n.actor?.id)">
                   <img v-if="n.actor?.avatar" :src="n.actor.avatar" alt="" />
                   <span v-else>{{ n.actor?.nickname?.charAt(0) || '?' }}</span>
                 </div>
@@ -166,7 +173,7 @@ watch(() => props.open, (v) => {
               v-for="n in notif.likes" :key="n.id" class="n-item"
               :class="{ unread: !n.is_read }" @click="goNotif(n)"
             >
-              <div class="av">
+              <div class="av av-link" title="查看主页" @click.stop="goProfile(n.actor?.id)">
                 <img v-if="n.actor?.avatar" :src="n.actor.avatar" alt="" />
                 <span v-else>{{ n.actor?.nickname?.charAt(0) || '?' }}</span>
               </div>
@@ -193,7 +200,7 @@ watch(() => props.open, (v) => {
               v-for="n in notif.favs" :key="n.id" class="n-item"
               :class="{ unread: !n.is_read }" @click="goNotif(n)"
             >
-              <div class="av">
+              <div class="av av-link" title="查看主页" @click.stop="goProfile(n.actor?.id)">
                 <img v-if="n.actor?.avatar" :src="n.actor.avatar" alt="" />
                 <span v-else>{{ n.actor?.nickname?.charAt(0) || '?' }}</span>
               </div>
@@ -259,6 +266,9 @@ watch(() => props.open, (v) => {
     display: flex; align-items: center; justify-content: center;
     background: #e2e8f0; color: #475569; font-size: 15px; overflow: hidden;
     img { width: 100%; height: 100%; object-fit: cover; }
+  }
+  .av-link { cursor: pointer; transition: box-shadow .15s;
+    &:hover { box-shadow: 0 0 0 2px #2563eb66; }
   }
   .n-body { flex: 1; min-width: 0; }
   .n-line1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;

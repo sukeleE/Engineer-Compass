@@ -189,6 +189,8 @@ async function loadPosts(scope) {
 }
 // 点卡片 → 资源分享页并自动打开详情弹窗
 const goPost = (p) => router.push(`/share?post=${p.id}`);
+// 好友头像 → 公开主页
+const goUserPage = (id) => router.push(`/user/${id}`);
 
 // ================= 好友与私聊 =================
 const friends = ref([]); // [{id, nickname, username, avatar, unread, last_msg, last_time}]
@@ -582,8 +584,8 @@ onBeforeUnmount(() => {
           </h4>
           <div v-if="friends.length" class="fr-friends">
             <div v-for="f in friends" :key="f.id" class="fr-friend">
-              <img v-if="f.avatar" :src="f.avatar" class="fr-ava big" alt="" />
-              <span v-else class="fr-ava big no-ava">{{ f.nickname?.charAt(0) || '👤' }}</span>
+              <img v-if="f.avatar" :src="f.avatar" class="fr-ava big" alt="" title="查看主页" @click="goUserPage(f.id)" />
+              <span v-else class="fr-ava big no-ava" title="查看主页" @click="goUserPage(f.id)">{{ f.nickname?.charAt(0) || '👤' }}</span>
               <div class="fr-uinfo">
                 <b>{{ f.nickname }}</b>
                 <span class="fr-last">{{ f.last_msg ? excerpt(f.last_msg, 28) : '还没有聊过天，发条消息打个招呼吧' }}</span>
@@ -764,6 +766,10 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: center;
   background: #2563eb22; color: #2563eb; font-size: 15px; font-weight: 600;
   &.big { width: 40px; height: 40px; }
+}
+/* 好友列表头像可点击进主页（搜索/申请列表不受影响） */
+.fr-friend .fr-ava { cursor: pointer; transition: box-shadow .15s;
+  &:hover { box-shadow: 0 0 0 2px #2563eb66; }
 }
 .fr-uinfo { flex: 1; min-width: 0;
   b { display: block; font-size: 14px; }

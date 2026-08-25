@@ -78,6 +78,11 @@ watch(() => route.path, closeMenu);
   &.open { background: #2563eb; border-color: #2563eb; color: #fff; }
 }
 
+/* 移动端：标题缩小 + 隐藏英文副标（「🎯 工科竞赛导航 Engineer-Compass」一行放不下会换行） */
+@media (max-width: 768px) {
+  .brand h1 { font-size: 19px; letter-spacing: 0; span { display: none; } }
+}
+
 /* 移动端下拉菜单：绝对定位在 header 下方 */
 .menu-panel {
   position: absolute; top: calc(100% + 6px); right: 12px; z-index: 1200;

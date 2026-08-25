@@ -124,3 +124,11 @@ html, body {
   .app-header { padding: 12px 14px 8px; }
   .brand .sub { display: none; }
 }
+
+// 平板竖屏 / 手机横屏（768-900px）：导航链接挤在一行会换行难看，同样收进汉堡菜单
+@media (max-width: 900px) {
+  .nav { display: none; }
+  .menu-btn { display: block; }
+  .app-header { padding: 12px 14px 8px; }
+  .brand .sub { display: none; }
+}

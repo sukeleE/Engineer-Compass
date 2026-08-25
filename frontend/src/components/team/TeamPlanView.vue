@@ -28,7 +28,6 @@ const tagType = (dept) => (dept === '通用' ? 'info' : TAGS[Math.abs([...(dept 
 
 const tasksOf = (p) => p.tasks || [];
 const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
-const phaseStats = (ph) => { const t = tasksOf(ph); return { done: t.filter((x) => x.done).length, total: t.length }; };
 // 整份计划汇总
 const planStats = (p) => {
   let done = 0, total = 0;
@@ -186,19 +185,15 @@ onMounted(() => { load(); loadComps(); });
         <el-collapse>
           <el-collapse-item v-for="(ph, pi) in p.plan.phases || []" :key="pi" :name="pi">
             <template #title>
-              <div class="ph-title">
-                <span class="ph-name">阶段{{ pi + 1 }} {{ ph.phase }}</span>
-                <span class="ph-extra">
-                  <template v-if="ph.date">📅 {{ ph.date }}</template>
-                  <template v-if="ph.week_hours"> · ⏱ {{ ph.week_hours }}h/周</template>
-                </span>
-                <el-tag size="small" :type="phaseStats(ph).done === phaseStats(ph).total && phaseStats(ph).total ? 'success' : 'info'" effect="plain">
-                  {{ phaseStats(ph).done }}/{{ phaseStats(ph).total }}
-                </el-tag>
-              </div>
+              <!-- 阶段标题与个人日程页「我的小组任务」同款：阶段名 + 日期小字（总进度条/部门看板已覆盖阶段进度） -->
+              <span class="ph-name">阶段{{ pi + 1 }} {{ ph.phase }}</span>
+              <span v-if="ph.date" class="ph-date">📅 {{ ph.date }}</span>
             </template>
 
-            <div v-if="ph.check_standard" class="ph-check">✅ 达标要求：{{ ph.check_standard }}</div>
+            <div v-if="ph.check_standard || ph.week_hours" class="ph-check">
+              <template v-if="ph.check_standard">✅ 达标要求：{{ ph.check_standard }}</template>
+              <template v-if="ph.week_hours"> · ⏱ {{ ph.week_hours }}h/周</template>
+            </div>
             <div v-for="[dept, items] in deptGroups(ph)" :key="dept" class="dept-group">
               <div class="dg-head"><el-tag size="small" :type="tagType(dept)" effect="dark">{{ dept }}</el-tag></div>
               <el-checkbox v-for="task in items" :key="task.idx" :model-value="task.t.done"
@@ -292,10 +287,9 @@ onMounted(() => { load(); loadComps(); });
       .dept-tag { font-weight: 500; }
     }
   }
-  .ph-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow-wrap: anywhere;
-    .ph-name { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
-    .ph-extra { color: #94a3b8; font-size: 12px; flex-shrink: 0; }
-  }
+  // 阶段标题（与个人日程页「我的小组任务」同款样式：阶段名 + 灰色小字日期）
+  .ph-name { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+  .ph-date { color: #94a3b8; font-size: 12px; margin-left: 8px; }
   .ph-check { background: #f8fafc; border: 1px dashed var(--border); border-radius: 8px;
     padding: 6px 10px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
   .dept-group { margin-bottom: 8px;
