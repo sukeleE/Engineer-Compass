@@ -139,5 +139,5 @@ html, body {
     &::-webkit-scrollbar { display: none; }
   }
   .nav a { padding: 5px 10px; font-size: 12px; flex-shrink: 0; min-width: calc(2em + 20px); }
-  .nav a .ic { display: none; } /* 窄屏隐藏 emoji，文字完整显示 */
+  /* 窄屏隐藏 emoji 的规则在 App.vue scoped（.nav a .ic/.nav-admin .ic），此处不写避免特异性混淆 */
 }
