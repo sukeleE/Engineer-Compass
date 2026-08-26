@@ -17,6 +17,7 @@ const ACTION_LABELS = {
   'user-status': '封禁/禁言', 'user-role': '角色管理',
   'post-delete': '删除帖子', 'comment-delete': '删除评论',
   'announce-create': '发布公告', 'announce-update': '编辑公告', 'announce-delete': '删除公告',
+  'resource-upload': '上传资源', 'resource-delete': '删除资源', 'resource-admin-delete': '管理员删资源',
 };
 const actionLabel = (a) => ACTION_LABELS[a] || a;
 const STATUS_LABELS = { 0: ['正常', 'success'], 1: ['封禁', 'danger'], 2: ['禁言', 'warning'] };
@@ -203,7 +204,30 @@ async function delAnn(a) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
-// ==================== Tab5 服务器状态 ====================
+// ==================== Tab5 资源管理（全部用户上传） ====================
+const resources = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
+async function loadResources() {
+  resources.loading = true;
+  try {
+    const r = await api.adminResources({ q: resources.q, page: resources.page, size: resources.size });
+    resources.list = r.list; resources.total = r.total;
+  } catch (e) { ElMessage.error(e.message); } finally { resources.loading = false; }
+}
+async function delResource(row) {
+  const who = row.nickname || row.username;
+  try {
+    await ElMessageBox.confirm(
+      `删除「${row.file_name}」（${fmtBytes(row.file_size)}，上传者 ${who}）？磁盘文件将一并删除，不可恢复。`,
+      '删除资源', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.adminResourceDelete(row.id);
+    ElMessage.success('资源已删除');
+    loadResources();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// ==================== Tab6 服务器状态 ====================
 const stat = ref(null);
 const statLoading = ref(false);
 async function loadStatus() {
@@ -225,7 +249,7 @@ const fmtUp = (s) => {
 };
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 
-onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns(); loadStatus(); });
+onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns(); loadResources(); loadStatus(); });
 </script>
 
 <template>
@@ -419,7 +443,40 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
         <el-empty v-if="!annLoading && !anns.length" description="暂无公告，点「发布公告」让全站用户看到通知" :image-size="60" />
       </el-tab-pane>
 
-      <!-- ========== Tab4 服务器状态 ========== -->
+      <!-- ========== Tab4 资源管理 ========== -->
+      <el-tab-pane label="📁 资源管理" name="resources">
+        <div class="toolbar">
+          <el-input v-model="resources.q" placeholder="搜索文件名 / 昵称 / 用户名" clearable style="width: 260px"
+            @keyup.enter="resources.page = 1; loadResources()" @clear="resources.page = 1; loadResources()">
+            <template #append><el-button @click="resources.page = 1; loadResources()">搜索</el-button></template>
+          </el-input>
+          <span class="count">共 {{ resources.total }} 个文件</span>
+        </div>
+        <el-table :data="resources.list" v-loading="resources.loading" stripe>
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
+          <el-table-column label="上传者" min-width="140">
+            <template #default="{ row }">
+              <b>{{ row.nickname || row.username }}</b>
+              <span class="cell-sub">@{{ row.username }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="大小" width="100">
+            <template #default="{ row }">{{ fmtBytes(row.file_size) }}</template>
+          </el-table-column>
+          <el-table-column prop="file_type" label="类型" width="150" show-overflow-tooltip />
+          <el-table-column prop="create_time" label="上传时间" width="165" />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="danger" size="small" @click="delResource(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination class="pg" background layout="total, prev, pager, next" :total="resources.total"
+          :page-size="resources.size" v-model:current-page="resources.page" @current-change="loadResources" />
+      </el-tab-pane>
+
+      <!-- ========== Tab5 服务器状态 ========== -->
       <el-tab-pane label="🖥️ 服务器状态" name="status">
         <div class="toolbar">
           <el-button :loading="statLoading" @click="loadStatus">刷新</el-button>

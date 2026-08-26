@@ -162,6 +162,17 @@ export const api = {
   dmList: (uid) => req(`/friends/dm/${uid}`),
   dmSend: (uid, content) => req(`/friends/dm/${uid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   dmRead: (uid) => req(`/friends/dm/${uid}/read`, { method: 'POST' }),
+  // 个人资源库（≤128MB multipart；下载走 ?token= 直连）
+  resourceList: (params) => req(`/resource${qs(params)}`),
+  // ⚠️ req() 的 opts spread 会整体覆盖 headers（连 Authorization 一起丢），必须显式带 token；不设 Content-Type 由浏览器补 boundary
+  resourceUpload: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const token = localStorage.getItem('ec_token');
+    return req('/resource/upload', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
+  },
+  resourceDownload: (id) => `/api/resource/${id}/download`,
+  resourceDelete: (id) => req(`/resource/${id}`, { method: 'DELETE' }),
   // 消息中心（评论/点赞/收藏通知）
   notifications: () => req('/notifications'),
   notificationsUnread: () => req('/notifications/unread-count'),
@@ -184,6 +195,9 @@ export const api = {
   // 用户详情 + 角色管理
   adminUserDetail: (id) => req(`/admin/users/${id}/detail`),
   adminSetRole: (id, is_admin) => req(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ is_admin: is_admin ? 1 : 0 }) }),
+  // 后台：资源管理（全部用户上传）
+  adminResources: (params) => req(`/admin/resources${qs(params)}`),
+  adminResourceDelete: (id) => req(`/admin/resources/${id}`, { method: 'DELETE' }),
   serverStatus: () => req('/admin/server-status'),
   // 公告（公开）：全局顶部横幅
   announcementLatest: () => req('/announcements/latest'),

@@ -5,6 +5,7 @@ import os from 'node:os';
 import { statfsSync, statSync } from 'node:fs';
 import db, { DB_PATH } from '../db/database.js';
 import { authRequired, adminRequired, logAudit } from './middleware.js';
+import { deleteResource } from './resource.js';
 
 const r = Router();
 r.use(authRequired);
@@ -132,7 +133,7 @@ r.get('/server-status', (req, res) => {
       users: count('SELECT COUNT(*) AS n FROM user'),
       posts: count('SELECT COUNT(*) AS n FROM share_post'),
       teams: count('SELECT COUNT(*) AS n FROM team'),
-      todayLogins: count(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'login' AND date(create_time) = date('now','localtime')`),
+      todayLogins: count(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'login' AND date(create_time, 'localtime') = date('now','localtime')`),
     },
   });
 });
@@ -233,6 +234,26 @@ r.put('/users/:id/role', (req, res) => {
   logAudit(req, 'user-role', u.nickname || u.username, { target_id: id, is_admin: !!is_admin, from: !!u.is_admin });
   res.json({ message: is_admin ? `已将 ${u.nickname || u.username} 设为管理员` : `已取消 ${u.nickname || u.username} 的管理员身份` });
 });
+
+// GET /api/admin/resources?page&size&q — 资源管理：全部用户上传的资源（q 模糊搜文件名/昵称/用户名）
+r.get('/resources', (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
+  const q = String(req.query.q || '').trim();
+  const where = q ? 'WHERE f.file_name LIKE ? OR u.nickname LIKE ? OR u.username LIKE ?' : '';
+  const like = `%${q}%`;
+  const params = q ? [like, like, like] : [];
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM user_resource f JOIN user u ON u.id = f.user_id ${where}`).get(...params).n;
+  const list = db.prepare(
+    `SELECT f.id, f.file_name, f.file_size, f.file_type, f.create_time, f.user_id, u.nickname, u.username
+     FROM user_resource f JOIN user u ON u.id = f.user_id ${where}
+     ORDER BY f.id DESC LIMIT ? OFFSET ?`
+  ).all(...params, size, (page - 1) * size);
+  res.json({ total, page, size, list });
+});
+
+// DELETE /api/admin/resources/:id — 删除任意用户资源（复用 resource.js 的 deleteResource，审计记 admin 变体）
+r.delete('/resources/:id', (req, res) => deleteResource(req, res, Number(req.params.id)));
 
 export default r;
 

@@ -291,11 +291,69 @@ async function sendDm() {
 }
 function openDm(f) { dmFriend.value = f; dmDlg.value = true; loadDm(); }
 
-// 切标签懒加载：帖子 / 收藏 / 好友
+// ================= 我的资源（≤128MB 个人文件库，配额 1GB） =================
+const MAX_SIZE = 128 * 1024 * 1024;
+const resInput = ref(null);
+const resList = ref([]);
+const resTotal = ref(0);
+const resPage = ref(1);
+const resSize = ref(20);
+const resUsed = ref(0);
+const resQuota = ref(1024 * 1024 * 1024);
+const resLoading = ref(false);
+const resUploading = ref(false);
+const resLoaded = ref(false);
+const fmtBytes = (n) => {
+  n = Number(n) || 0;
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+};
+async function loadResources() {
+  resLoading.value = true;
+  try {
+    const r = await api.resourceList({ page: resPage.value, size: resSize.value });
+    resList.value = r.list;
+    resTotal.value = r.total;
+    resUsed.value = r.used;
+    resQuota.value = r.quota;
+  } catch (e) { ElMessage.error(e.message); }
+  finally { resLoading.value = false; }
+}
+// 隐藏 input → 直接 FormData 上传（不经 FileReader，128MB 内存安全）；上传成功回第一页刷新
+async function onResFile(e) {
+  const file = e.target.files?.[0];
+  e.target.value = ''; // 置空以支持重复选择同一文件
+  if (!file) return;
+  if (file.size > MAX_SIZE) return ElMessage.warning('单个文件不能超过 128MB');
+  if (file.size === 0) return ElMessage.warning('文件为空');
+  resUploading.value = true;
+  try {
+    const r = await api.resourceUpload(file);
+    ElMessage.success(`「${r.file_name}」上传成功（${fmtBytes(r.file_size)}）`);
+    resPage.value = 1;
+    await loadResources();
+  } catch (err) { ElMessage.error(err.message); }
+  finally { resUploading.value = false; }
+}
+async function delResource(row) {
+  try {
+    await ElMessageBox.confirm(`删除资源「${row.file_name}」？磁盘文件将一并移除，不可恢复。`, '删除资源', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.resourceDelete(row.id);
+    ElMessage.success('已删除');
+    loadResources();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// 切标签懒加载：帖子 / 收藏 / 好友 / 资源
 watch(tab, (t) => {
   if (t === 'mine' && !mineLoaded.value) { mineLoaded.value = true; loadPosts('mine'); }
   else if (t === 'favs' && !favLoaded.value) { favLoaded.value = true; loadPosts('favs'); }
   else if (t === 'friends' && !friendsLoaded.value) { friendsLoaded.value = true; loadFriends(); }
+  else if (t === 'resources' && !resLoaded.value) { resLoaded.value = true; loadResources(); }
 });
 // 私聊弹窗开关 → 轮询启停
 watch(dmDlg, (open) => {
@@ -517,6 +575,45 @@ onBeforeUnmount(() => {
         </div>
       </el-tab-pane>
 
+      <!-- 我的资源 -->
+      <el-tab-pane label="📁 我的资源" name="resources">
+        <div class="tab-pad">
+          <section class="me-block">
+            <div class="res-bar">
+              <el-button type="primary" :loading="resUploading" @click="resInput?.click()">⬆ 上传资源</el-button>
+              <input ref="resInput" type="file" class="hide-file" @change="onResFile" />
+              <span class="res-tip">单文件 ≤128MB · 个人配额 {{ fmtBytes(resQuota) }}</span>
+            </div>
+            <div class="res-quota">
+              <span class="res-used">已用 {{ fmtBytes(resUsed) }} / {{ fmtBytes(resQuota) }}</span>
+              <el-progress :percentage="resQuota ? Math.min(100, Math.round(resUsed / resQuota * 100)) : 0"
+                :stroke-width="6" :show-text="false"
+                :color="resQuota && resUsed / resQuota > 0.85 ? '#ef4444' : '#2563eb'" />
+            </div>
+          </section>
+          <div v-loading="resLoading">
+            <el-table :data="resList" stripe>
+              <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
+              <el-table-column label="大小" width="100">
+                <template #default="{ row }">{{ fmtBytes(row.file_size) }}</template>
+              </el-table-column>
+              <el-table-column prop="file_type" label="类型" width="150" show-overflow-tooltip />
+              <el-table-column prop="create_time" label="上传时间" width="165" />
+              <el-table-column label="操作" width="130" fixed="right">
+                <template #default="{ row }">
+                  <a :href="`${api.resourceDownload(row.id)}?token=${auth.token}`" class="res-dl">⬇ 下载</a>
+                  <el-button link type="danger" size="small" @click="delResource(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-pagination v-if="resTotal > resSize" class="pg" background layout="total, prev, pager, next"
+              :total="resTotal" :page-size="resSize" v-model:current-page="resPage" @current-change="loadResources" />
+            <el-empty v-if="!resLoading && !resList.length"
+              description="还没有资源，点「上传资源」添加（单文件 ≤128MB，总配额 1GB）" :image-size="80" />
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 好友私聊 -->
       <el-tab-pane label="👥 好友私聊" name="friends">
         <div class="tab-pad">
@@ -680,6 +777,16 @@ onBeforeUnmount(() => {
 .me-block {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
   h3 { margin: 0 0 12px; font-size: 15px; }
+}
+
+// —— 我的资源 ——
+.res-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.res-tip { font-size: 12.5px; color: var(--text-2); }
+.res-quota { margin-top: 12px;
+  .res-used { font-size: 12.5px; color: var(--text-2); display: block; margin-bottom: 6px; }
+}
+.res-dl { font-size: 13px; color: #2563eb; text-decoration: none; margin-right: 10px;
+  &:hover { text-decoration: underline; }
 }
 .team-list { display: flex; flex-direction: column; gap: 8px; }
 .team-item {

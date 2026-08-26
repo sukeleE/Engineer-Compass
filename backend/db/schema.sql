@@ -397,3 +397,16 @@ CREATE TABLE IF NOT EXISTS announcement (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_announce ON announcement(pinned, id);
+
+-- 表35 user_resource 个人资源库（文件落盘 backend/uploads/resource/{userId}/，DB 只存元数据）
+-- 单文件 ≤128MB（multer 限制），每用户配额 1GB（RESOURCE_QUOTA 环境变量可覆盖，便于测试）
+CREATE TABLE IF NOT EXISTS user_resource (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  file_name   TEXT NOT NULL,             -- 原始文件名（下载 Content-Disposition 用）
+  file_size   INTEGER NOT NULL,          -- 字节
+  file_type   TEXT,                      -- mime
+  store_path  TEXT NOT NULL,             -- 磁盘文件名（仅 basename，防路径穿越）
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_user_resource_user ON user_resource(user_id);

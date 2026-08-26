@@ -152,3 +152,6 @@ backend/.env
 # 运行时数据（数据库）
 backend/data/
 backups/
+
+# 用户上传的资源文件（元数据在 DB，文件落盘不入库）
+backend/uploads/

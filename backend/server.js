@@ -2,6 +2,7 @@
 // 启动：npm start（默认 http://localhost:3000）
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { existsSync } from 'node:fs';
 import competitions from './routes/competitions.js';
 import ai from './routes/ai.js';
@@ -19,6 +20,7 @@ import share from './routes/share.js';
 import friends from './routes/friends.js';
 import notifications from './routes/notifications.js';
 import admin, { publicAnnounce } from './routes/admin.js';
+import resource from './routes/resource.js';
 import { hasSMTP } from './routes/mailer.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
@@ -45,6 +47,7 @@ app.use('/api/friends', friends);
 app.use('/api/notifications', notifications);
 app.use('/api/admin', admin);
 app.use('/api/announcements', publicAnnounce);
+app.use('/api/resource', resource);
 
 // 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；mail=true 表示邮箱登录发真邮件）
 app.get('/api/health', (req, res) => {
@@ -57,6 +60,12 @@ app.get('/api/health', (req, res) => {
 
 app.use((req, res) => res.status(404).json({ error: '接口不存在', path: req.path }));
 app.use((err, req, res, next) => {
+  // multer 上传错误（LIMIT_FILE_SIZE 等）与 express.json 超限（entity.too.large）给中文 413
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（单文件 ≤128MB）' });
+    return res.status(400).json({ error: `上传失败：${err.message}` });
+  }
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: '请求体过大' });
   console.error(err);
   res.status(500).json({ error: err.message });
 });
