@@ -4,6 +4,7 @@ import db from '../db/database.js';
 import { authRequired, teamCtx, hasPerm, requirePerm, genInviteCode, PERM_KEYS, logAudit } from './middleware.js';
 import { callDeepSeek } from './ai.js';
 import { findPhases } from './schedule.js';
+import { sanitizeStars, sanitizeLinks, sanitizeTarget, sanitizeCompletions, deriveMultiDone } from './taskMeta.js';
 
 const r = Router();
 r.use(authRequired); // 以下接口全部需要登录
@@ -176,10 +177,16 @@ r.get('/my-tasks', (req, res) => {
         phase: ph.phase || '备赛阶段',
         date: ph.date || '',
         phase_idx: pi,
-        tasks: (ph.tasks || []).map((t, ti) => ({
-          text: t.text, done: !!t.done, dept: t.dept || '通用',
-          done_by: t.done_by || null, done_at: t.done_at || null, task_idx: ti,
-        })),
+        tasks: (ph.tasks || []).map((t, ti) => {
+          const completions = sanitizeCompletions(t.completions);
+          return {
+            text: t.text, done: !!t.done, dept: t.dept || '通用',
+            done_by: t.done_by || null, done_at: t.done_at || null, task_idx: ti,
+            stars: sanitizeStars(t.stars), links: sanitizeLinks(t.links),
+            mode: t.mode === 'multi' ? 'multi' : 'once',
+            target: sanitizeTarget(t.target), completions, count: completions.length,
+          };
+        }),
       }));
       if (phases.length) plans.push({ id: row.id, title: row.title, comp_name: plan.comp_name || null, update_time: row.update_time, phases });
     }
@@ -417,7 +424,16 @@ function normTeamPlan(plan, roles) {
       const dept = String(raw.dept || raw.部门 || '').trim();
       const role = roles.find((x) => x.name === dept);
       // done_by/done_at 必须保留（老任务无该字段 → null），否则组长编辑保存会抹掉完成人与完成日期（月历按完成日聚合）
-      return { text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null, done_by: raw.done_by || null, done_at: raw.done_at || null };
+      const task = {
+        text, done: !!raw.done, dept: role ? role.name : (dept || '通用'), role_id: role?.id ?? null,
+        done_by: raw.done_by || null, done_at: raw.done_at || null,
+        stars: sanitizeStars(raw.stars), links: sanitizeLinks(raw.links),
+        mode: raw.mode === 'multi' ? 'multi' : 'once',
+        target: sanitizeTarget(raw.target),
+        completions: sanitizeCompletions(raw.completions),
+      };
+      deriveMultiDone(task); // 多次任务完成度校正（count>=target → done，任何读入口一致）
+      return task;
     }).filter(Boolean),
   })).filter((p) => p.tasks.length);
   return { phases };
@@ -518,29 +534,160 @@ r.post('/:id/plan', (req, res) => {
   res.status(201).json({ id: rr.lastInsertRowid, message: '已创建' });
 });
 
-// POST /api/team/:id/plan/:pid/task — 勾选任务（本部门成员勾本部门任务；通用任务全员；组长/小组设置权限可勾一切）
+// POST /api/team/:id/plan/:pid/task — 勾选任务 / 更新评星与暂存链接（本部门成员操作本部门任务；通用任务全员；组长/小组设置权限可操作一切）
 // 勾选记录完成人 done_by（取消勾选清空）——与个人日程页共用此接口，天然双向同步
+// 面板只改评星/链接时不传 done（undefined 守卫：不得改动完成状态/完成人）
 r.post('/:id/plan/:pid/task', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
-  const { phase_idx, task_idx, done } = req.body || {};
+  const { phase_idx, task_idx, done, stars, links } = req.body || {};
   const p = db.prepare('SELECT * FROM team_plan WHERE id = ? AND team_id = ?').get(Number(req.params.pid), ctx.team.id);
   if (!p) return res.status(404).json({ error: '计划不存在' });
   const plan = JSON.parse(p.plan_json || '{}');
   const task = plan.phases?.[Number(phase_idx)]?.tasks?.[Number(task_idx)];
   if (!task) return res.status(400).json({ error: '任务不存在' });
-  // 部门限权：dept 为空按通用；组长（is_owner）或「小组设置」权限可勾任何任务
+  // 部门限权：dept 为空按通用；组长（is_owner）或「小组设置」权限可操作任何任务
   const dept = task.dept || '通用';
   const allowed = canEditPlan(ctx) || dept === '通用' || ctx.roles.some((rr) => rr.name === dept);
   if (!allowed) return res.status(403).json({ error: `仅「${dept}」成员可勾选该任务` });
-  task.done = !!done;
-  task.done_by = task.done ? (req.user.nickname || req.user.username) : null;
-  // 完成日期（本地时区 YYYY-MM-DD）：月历视图按完成日聚合；取消勾选清空
-  const d = new Date();
-  task.done_at = task.done ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
+  // 多次任务禁止直接勾选（完成/撤销走 /task/complete 端点，done 为达标派生）
+  if (task.mode === 'multi' && done !== undefined) {
+    return res.status(400).json({ error: '多次任务请使用「完成一次 / 撤销」操作' });
+  }
+  if (done !== undefined) {
+    task.done = !!done;
+    task.done_by = task.done ? (req.user.nickname || req.user.username) : null;
+    // 完成日期（本地时区 YYYY-MM-DD）：月历视图按完成日聚合；取消勾选清空
+    const d = new Date();
+    task.done_at = task.done ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null;
+  }
+  if (stars !== undefined) {
+    const s = sanitizeStars(stars);
+    if (s === null && stars !== null) return res.status(400).json({ error: 'stars 必须为 0-5 整数或 null' });
+    task.stars = s;
+  }
+  if (links !== undefined) {
+    if (!Array.isArray(links)) return res.status(400).json({ error: 'links 必须为数组' });
+    task.links = sanitizeLinks(links);
+  }
   db.prepare('UPDATE team_plan SET plan_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
     .run(JSON.stringify(plan), p.id);
-  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, done_by: task.done_by, done_at: task.done_at, message: '已更新' });
+  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), done: task.done, done_by: task.done_by, done_at: task.done_at, stars: task.stars ?? null, links: task.links ?? [], message: '已更新' });
+});
+
+// POST /api/team/:id/plan/:pid/task/split — 原子拆分任务（仅组长/小组设置权限）
+// 原位替换 tasks[task_idx] 为多个子任务，继承原任务部门；不走全量保存（聚合视图缺 check_standard/week_hours，全量保存会抹掉阶段达标）
+r.post('/:id/plan/:pid/task/split', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  if (!canEditPlan(ctx)) return res.status(403).json({ error: '仅组长可拆分任务' });
+  const { phase_idx, task_idx, subtasks } = req.body || {};
+  const p = db.prepare('SELECT * FROM team_plan WHERE id = ? AND team_id = ?').get(Number(req.params.pid), ctx.team.id);
+  if (!p) return res.status(404).json({ error: '计划不存在' });
+  const plan = JSON.parse(p.plan_json || '{}');
+  const tasks = plan.phases?.[Number(phase_idx)]?.tasks;
+  const task = tasks?.[Number(task_idx)];
+  if (!task) return res.status(400).json({ error: '任务不存在' });
+  const subs = (Array.isArray(subtasks) ? subtasks : [])
+    .map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 12);
+  if (!subs.length) return res.status(400).json({ error: 'subtasks 至少一项' });
+  tasks.splice(Number(task_idx), 1, ...subs.map((text) => ({
+    text, done: false, dept: task.dept || '通用', role_id: task.role_id ?? null,
+  })));
+  db.prepare('UPDATE team_plan SET plan_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(JSON.stringify(plan), p.id);
+  logAudit(req, 'team-plan', ctx.team.name, { action: 'task-split' });
+  res.json({ phase_idx: Number(phase_idx), task_idx: Number(task_idx), count: subs.length, message: '已拆分子任务' });
+});
+
+// POST /api/team/:id/plan/:pid/task/complete — 多次任务：设定模式/目标次数、完成一次、撤销完成记录
+// mode/target 设定仅组长（canEditPlan）；complete=true 完成一次（权限同勾选：组长/通用/本部门）；
+// undo=index 撤销第 index 条记录（仅本人记录或组长）。任何操作后重算派生 done/done_at/done_by 落库：
+// done = 完成记录数 >= 目标次数，达标时间/完成人为第 target 条记录（月历/统计/导出消费派生值，逻辑不变）
+r.post('/:id/plan/:pid/task/complete', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const { phase_idx, task_idx, mode, target, complete, undo } = req.body || {};
+  const p = db.prepare('SELECT * FROM team_plan WHERE id = ? AND team_id = ?').get(Number(req.params.pid), ctx.team.id);
+  if (!p) return res.status(404).json({ error: '计划不存在' });
+  const plan = JSON.parse(p.plan_json || '{}');
+  const task = plan.phases?.[Number(phase_idx)]?.tasks?.[Number(task_idx)];
+  if (!task) return res.status(400).json({ error: '任务不存在' });
+  const dept = task.dept || '通用';
+  const allowed = canEditPlan(ctx) || dept === '通用' || ctx.roles.some((rr) => rr.name === dept);
+  if (!allowed) return res.status(403).json({ error: `仅「${dept}」成员可操作该任务` });
+
+  // 1) 设定模式/目标次数（仅组长/小组设置权限）
+  if (mode !== undefined || target !== undefined) {
+    if (!canEditPlan(ctx)) return res.status(403).json({ error: '仅组长可设定任务类型' });
+    const newMode = mode === undefined ? task.mode : (mode === 'multi' ? 'multi' : 'once');
+    if (newMode === 'multi') {
+      const t = target !== undefined ? sanitizeTarget(target) : task.target;
+      if (target !== undefined && t === null) return res.status(400).json({ error: '目标次数必须为 1-100 整数' });
+      task.target = t || 3;
+      if (task.mode !== 'multi') {
+        task.mode = 'multi';
+        // once→multi 迁移历史完成：原任务已完成且有完成信息 → 生成一条记录（保留旧完成记录）
+        if (task.done && (task.done_by || task.done_at)) {
+          const d = new Date();
+          task.completions = [{
+            by: task.done_by || '已完成',
+            at: task.done_at || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+            uid: null,
+          }];
+        } else {
+          task.completions = [];
+        }
+      }
+    } else {
+      // multi→once：清空完成记录与目标，done/done_at/done_by 保持现状
+      task.mode = 'once';
+      task.target = null;
+      task.completions = [];
+    }
+  }
+
+  // 2) 完成一次（权限同勾选）
+  if (complete) {
+    if (task.mode !== 'multi') return res.status(400).json({ error: '该任务为一次任务，请直接勾选完成' });
+    const d = new Date();
+    task.completions = (task.completions || []).concat([{
+      by: req.user.nickname || req.user.username,
+      at: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+      uid: req.user.id,
+    }]);
+  }
+
+  // 3) 撤销完成记录（本人或组长）
+  if (undo !== undefined) {
+    const i = Number(undo);
+    const list = task.completions || [];
+    if (!Number.isInteger(i) || i < 0 || i >= list.length) return res.status(400).json({ error: '完成记录不存在' });
+    const rec = list[i];
+    if (!canEditPlan(ctx) && rec.uid !== req.user.id) return res.status(403).json({ error: '仅本人或组长可撤销该记录' });
+    task.completions.splice(i, 1);
+  }
+
+  // 4) 派生重算：done = count >= target；达标时间/完成人为第 target 条记录
+  task.completions = sanitizeCompletions(task.completions || []);
+  if (task.mode === 'multi') {
+    const count = task.completions.length;
+    task.done = count >= (task.target || 3);
+    const reach = task.completions[(task.target || 3) - 1];
+    task.done_at = reach ? reach.at : null;
+    task.done_by = reach ? reach.by : null;
+  }
+
+  db.prepare('UPDATE team_plan SET plan_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(JSON.stringify(plan), p.id);
+  logAudit(req, 'team-plan', ctx.team.name, { action: 'task-complete' });
+  res.json({
+    phase_idx: Number(phase_idx), task_idx: Number(task_idx),
+    mode: task.mode, target: task.target, done: task.done,
+    done_by: task.done_by, done_at: task.done_at,
+    stars: task.stars ?? null, links: task.links ?? [],
+    completions: task.completions, count: task.completions.length,
+  });
 });
 
 // DELETE /api/team/:id/plan/:pid — 删除小组计划（组长/小组设置权限）

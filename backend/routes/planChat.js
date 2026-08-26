@@ -27,7 +27,7 @@ function briefPlan(plan) {
   }).join('\n') || '（无阶段数据）';
 }
 
-// 保留已完成勾选：按「阶段名|任务文本」匹配旧计划，复制 done/done_by/done_at
+// 保留已完成勾选与元数据：按「阶段名|任务文本」匹配旧计划，复制 done/done_by/done_at + stars/links + 多次任务设置
 export function mergeDone(norm, oldPlan) {
   const oldMap = new Map();
   for (const ph of oldPlan.phases || []) for (const t of ph.tasks || []) {
@@ -35,7 +35,13 @@ export function mergeDone(norm, oldPlan) {
   }
   for (const ph of norm.phases) for (const t of ph.tasks || []) {
     const o = oldMap.get(`${ph.phase}|${t.text}`);
-    if (o) { t.done = !!o.done; t.done_by = o.done_by || null; t.done_at = o.done_at || null; }
+    if (o) {
+      t.done = !!o.done; t.done_by = o.done_by || null; t.done_at = o.done_at || null;
+      t.stars = o.stars ?? null; t.links = Array.isArray(o.links) ? o.links : [];
+      t.mode = o.mode === 'multi' ? 'multi' : 'once';
+      t.target = o.target ?? null;
+      t.completions = Array.isArray(o.completions) ? o.completions : [];
+    }
   }
 }
 

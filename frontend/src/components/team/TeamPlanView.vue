@@ -8,6 +8,7 @@ import auth from '../../auth.js';
 import { fmtDate } from '../../utils/noteStatus.js';
 import TeamPlans from './TeamPlans.vue';
 import PlanChat from '../PlanChat.vue';
+import TaskPanel from '../task/TaskPanel.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
@@ -21,6 +22,8 @@ const comps = ref([]);
 const genCompId = ref(null);
 const loading = ref(false);
 const genLoading = ref(false);
+// 任务面板展开映射：`${计划id}|${阶段pi}|${任务idx}`（拆分后索引位移，全量收起）
+const open = ref({});
 
 const deptOptions = computed(() => [...(props.roles || []).map((r) => r.name), '通用']);
 const TAGS = ['success', 'warning', 'danger', 'primary'];
@@ -85,8 +88,100 @@ async function toggle(prow, phIdx, task) {
   task.t.done = !task.t.done;
   task.t.done_by = task.t.done ? (auth.user?.nickname || auth.user?.username || '') : null;
   task.t.done_at = task.t.done ? fmtDate(new Date()) : null; // 完成日期（月历按完成日聚合；取消清空）
-  try { await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, task.t.done); }
+  try { await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, { done: task.t.done }); }
   catch (e) { task.t.done = old.done; task.t.done_by = old.done_by; task.t.done_at = old.done_at; ElMessage.error(e.message); }
+}
+
+// —— 任务面板：行点击展开/收起 ——
+function toggleOpen(key) { open.value[key] = !open.value[key]; }
+// —— 评星/链接：乐观更新 → 单项接口（只带 stars/links，后端 undefined 守卫不碰 done/done_by），失败回滚 ——
+async function updateTaskMeta(prow, phIdx, task, patch) {
+  const old = { stars: task.t.stars, links: task.t.links };
+  Object.assign(task.t, patch);
+  try {
+    await api.teamPlanTaskToggle(props.teamId, prow.id, phIdx, task.idx, patch);
+  } catch (e) {
+    task.t.stars = old.stars;
+    task.t.links = old.links;
+    ElMessage.error(e.message);
+  }
+}
+// —— AI 拆分（仅组长）：原子 split 端点原位替换 → 收起面板 → 重拉列表 ——
+async function applyTeamSplit(prow, phIdx, task, subtasks) {
+  try {
+    await api.teamPlanTaskSplit(props.teamId, prow.id, phIdx, task.idx, subtasks);
+    open.value = {};
+    await load();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// —— 多次任务：本地乐观派生（与后端同规则）——
+function deriveTeamDone(t) {
+  const recs = t.completions || [];
+  const target = t.target || 3;
+  t.done = recs.length >= target;
+  t.done_at = recs[target - 1]?.at || null;
+  t.done_by = recs[target - 1]?.by || null;
+}
+// complete 端点响应（服务端重算派生）覆盖任务字段
+function applyCompleteResp(t, r) {
+  t.mode = r.mode; t.target = r.target ?? null;
+  t.done = !!r.done; t.done_by = r.done_by || null; t.done_at = r.done_at || null;
+  t.completions = r.completions || [];
+  t.stars = r.stars ?? null; t.links = r.links || [];
+}
+// —— 完成一次：乐观追加记录 → complete 端点 → 响应覆盖 / 失败回滚 ——
+async function completeTask(prow, phIdx, task) {
+  const t = task.t;
+  const snap = JSON.parse(JSON.stringify({ completions: t.completions || [], done: t.done, done_by: t.done_by, done_at: t.done_at }));
+  t.completions = snap.completions;
+  t.completions.push({ by: auth.user?.nickname || auth.user?.username || '', at: fmtDate(new Date()), uid: auth.user?.id ?? null });
+  deriveTeamDone(t);
+  try {
+    applyCompleteResp(t, await api.teamPlanTaskComplete(props.teamId, prow.id, phIdx, task.idx, { complete: true }));
+  } catch (e) {
+    Object.assign(t, snap);
+    ElMessage.error(e.message);
+  }
+}
+// —— 撤销第 i 条完成记录（面板已按本人/组长过滤按钮）——
+async function undoComplete(prow, phIdx, task, i) {
+  const t = task.t;
+  if (!Number.isInteger(i) || i < 0 || i >= (t.completions || []).length) return;
+  const snap = JSON.parse(JSON.stringify({ completions: t.completions || [], done: t.done, done_by: t.done_by, done_at: t.done_at }));
+  t.completions = snap.completions;
+  t.completions.splice(i, 1);
+  deriveTeamDone(t);
+  try {
+    applyCompleteResp(t, await api.teamPlanTaskComplete(props.teamId, prow.id, phIdx, task.idx, { undo: i }));
+  } catch (e) {
+    Object.assign(t, snap);
+    ElMessage.error(e.message);
+  }
+}
+// —— 切换任务类型（仅组长，服务端为准：once→multi 迁移历史完成 / multi→once 清空）——
+async function setTaskMode(prow, phIdx, task, mode) {
+  const t = task.t;
+  const snap = JSON.parse(JSON.stringify({ mode: t.mode, target: t.target, completions: t.completions || [], done: t.done, done_by: t.done_by, done_at: t.done_at }));
+  try {
+    applyCompleteResp(t, await api.teamPlanTaskComplete(props.teamId, prow.id, phIdx, task.idx, { mode }));
+  } catch (e) {
+    Object.assign(t, snap);
+    ElMessage.error(e.message);
+  }
+}
+// —— 改目标次数（仅组长，面板已限 1-100；非法输入不请求）——
+async function setTarget(prow, phIdx, task, n) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 1 || v > 100) return;
+  const t = task.t;
+  const snap = { target: t.target, done: t.done, done_by: t.done_by, done_at: t.done_at };
+  try {
+    applyCompleteResp(t, await api.teamPlanTaskComplete(props.teamId, prow.id, phIdx, task.idx, { target: v }));
+  } catch (e) {
+    t.target = snap.target; t.done = snap.done; t.done_by = snap.done_by; t.done_at = snap.done_at;
+    ElMessage.error(e.message);
+  }
 }
 
 // —— 编辑（组长）——
@@ -196,12 +291,31 @@ onMounted(() => { load(); loadComps(); });
             </div>
             <div v-for="[dept, items] in deptGroups(ph)" :key="dept" class="dept-group">
               <div class="dg-head"><el-tag size="small" :type="tagType(dept)" effect="dark">{{ dept }}</el-tag></div>
-              <el-checkbox v-for="task in items" :key="task.idx" :model-value="task.t.done"
-                :disabled="!canCheck(task.t)" :title="canCheck(task.t) ? '' : `仅「${task.t.dept}」成员可勾选`"
-                @change="toggle(p, pi, task)" class="task-line">
-                <span class="task-text" :class="{ done: task.t.done }">{{ task.t.text }}</span>
+              <div v-for="task in items" :key="task.idx" class="task-row" @click="toggleOpen(`${p.id}|${pi}|${task.idx}`)">
+                <!-- 待选框只管勾选（@click.stop 防误触展开）；文本/badge 区域冒泡到行根展开面板 -->
+                <el-checkbox :model-value="task.t.done"
+                  :disabled="!canCheck(task.t)" :title="canCheck(task.t) ? '' : `仅「${task.t.dept}」成员可勾选`"
+                  @click.stop @change="toggle(p, pi, task)" class="task-cb" />
+                <span class="task-text" :class="{ done: task.t.done }"
+                  :title="canCheck(task.t) ? '' : `仅「${task.t.dept}」成员可勾选`">{{ task.t.text }}</span>
+                <span v-if="task.t.mode === 'multi'" class="multi-badge" :class="{ ok: task.t.done }"
+                  title="多次任务完成进度">×{{ (task.t.completions || []).length }}/{{ task.t.target || 3 }}</span>
+                <span v-if="task.t.stars" class="star-badge" title="完成评星">★{{ task.t.stars }}</span>
                 <span v-if="task.t.done_by" class="done-by">👤 {{ task.t.done_by }}</span>
-              </el-checkbox>
+                <!-- 任务详情面板：完成评星 / 暂存链接 / AI 拆解（点击任务行展开；勾选限权同 checkbox，拆分/类型设定仅组长） -->
+                <TaskPanel
+                  v-if="open[`${p.id}|${pi}|${task.idx}`]"
+                  :task="task.t" :can-check="canCheck(task.t)" :can-split="canEdit" :can-edit-mode="canEdit" class="task-panel"
+                  @toggle-done="toggle(p, pi, task)"
+                  @update:stars="updateTaskMeta(p, pi, task, { stars: $event })"
+                  @update:links="updateTaskMeta(p, pi, task, { links: $event })"
+                  @split="applyTeamSplit(p, pi, task, $event)"
+                  @complete="completeTask(p, pi, task)"
+                  @undo="undoComplete(p, pi, task, $event)"
+                  @update:mode="setTaskMode(p, pi, task, $event)"
+                  @update:target="setTarget(p, pi, task, $event)"
+                />
+              </div>
             </div>
             <div v-if="!ph.tasks?.length" class="ph-none">（本阶段暂无任务）</div>
           </el-collapse-item>
@@ -294,16 +408,21 @@ onMounted(() => { load(); loadComps(); });
     padding: 6px 10px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
   .dept-group { margin-bottom: 8px;
     .dg-head { margin-bottom: 4px; }
-    .task-line {
-      display: flex; align-items: flex-start; width: 100%; margin: 0;
-      // 长任务文本窄屏换行，不允许向右溢出屏幕
-      :deep(.el-checkbox) { flex: 1; min-width: 0; }
-      :deep(.el-checkbox__label) { white-space: normal; overflow-wrap: anywhere; }
-      .task-text { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere;
-        &.done { color: #94a3b8; text-decoration: line-through; }
-      }
-      .done-by { font-size: 11.5px; color: #94a3b8; margin-left: 6px; flex-shrink: 0; }
+    // 行：方框勾选 + 文本区域点击展开面板；面板占满整行换行显示
+    .task-row { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px;
+      border-radius: 8px; padding: 2px 6px; cursor: pointer; margin-bottom: 2px;
+      &:hover { background: #f1f5f9; }
     }
+    .task-cb { margin: 0; margin-top: 2px; flex-shrink: 0; }
+    .task-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere;
+      &.done { color: #94a3b8; text-decoration: line-through; }
+    }
+    .star-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+    .multi-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0;
+      &.ok { color: #16a34a; }
+    }
+    .done-by { font-size: 11.5px; color: #94a3b8; flex-shrink: 0; }
+    .task-panel { flex: 0 0 100%; }
   }
   .ph-none { color: #cbd5e1; font-size: 12.5px; }
 }

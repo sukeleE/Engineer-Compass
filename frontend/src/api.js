@@ -103,10 +103,18 @@ export const api = {
   teamPlanGenerate: (id, compId) => req(`/team/${id}/plan/generate`, { method: 'POST', body: JSON.stringify({ comp_id: compId }) }, AI_TIMEOUT),
   teamPlanSave: (id, card) => req(`/team/${id}/plan`, { method: 'POST', body: JSON.stringify(card) }),
   teamPlanDelete: (id, pid) => req(`/team/${id}/plan/${pid}`, { method: 'DELETE' }),
-  teamPlanTaskToggle: (id, pid, phaseIdx, taskIdx, done) =>
-    req(`/team/${id}/plan/${pid}/task`, { method: 'POST', body: JSON.stringify({ phase_idx: phaseIdx, task_idx: taskIdx, done }) }),
+  // body: { done } 勾选 / { stars } 评星 / { links } 暂存链接（只传一项，后端按 undefined 守卫区分）
+  teamPlanTaskToggle: (id, pid, phaseIdx, taskIdx, body) =>
+    req(`/team/${id}/plan/${pid}/task`, { method: 'POST', body: JSON.stringify({ phase_idx: phaseIdx, task_idx: taskIdx, ...body }) }),
+  teamPlanTaskSplit: (id, pid, phaseIdx, taskIdx, subtasks) =>
+    req(`/team/${id}/plan/${pid}/task/split`, { method: 'POST', body: JSON.stringify({ phase_idx: phaseIdx, task_idx: taskIdx, subtasks }) }),
+  // 多次任务：body { mode, target } 设定 / { complete: true } 完成一次 / { undo: index } 撤销记录
+  teamPlanTaskComplete: (id, pid, phaseIdx, taskIdx, body) =>
+    req(`/team/${id}/plan/${pid}/task/complete`, { method: 'POST', body: JSON.stringify({ phase_idx: phaseIdx, task_idx: taskIdx, ...body }) }),
   // 我的小组任务（个人日程页聚合：所有小组中「我的部门 + 通用」任务，服务端已过滤并带原始下标）
   teamMyTasks: () => req('/team/my-tasks'),
+  // 任务 AI 拆解：subtasks（拆分子任务）+ keywords → resources（平台搜索链接，无幻觉）
+  taskAssist: (taskText) => req('/ai/task-assist', { method: 'POST', body: JSON.stringify({ task_text: taskText }) }, AI_TIMEOUT),
   // AI 智能分组：按成员信息+部门+竞赛建议分组（仅建议，应用复用 teamMemberRole）
   teamAiGrouping: (id) => req(`/team/${id}/ai-grouping`, { method: 'POST' }),
   teamLog: (id, card) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify(card) }),

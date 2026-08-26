@@ -11,7 +11,8 @@ function getKey() {
 }
 
 // 调用 DeepSeek（json=true 时启用 JSON 输出模式——DeepSeek 要求提示词中必须出现 "json" 字样）
-export async function callDeepSeek(messages, { json = true } = {}) {
+// timeoutMs > 0 时启用 AbortSignal.timeout（Node 24 内置）
+export async function callDeepSeek(messages, { json = true, timeoutMs = 0 } = {}) {
   const key = getKey();
   if (!key) throw new Error('DEEPSEEK_API_KEY 未配置（.env 文件）');
   const body = {
@@ -24,6 +25,7 @@ export async function callDeepSeek(messages, { json = true } = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify(body),
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   if (!resp.ok) {
     const text = await resp.text();

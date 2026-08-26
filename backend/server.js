@@ -5,6 +5,7 @@ import cors from 'cors';
 import { existsSync } from 'node:fs';
 import competitions from './routes/competitions.js';
 import ai from './routes/ai.js';
+import taskAssist from './routes/taskAssist.js';
 import schedule from './routes/schedule.js';
 import study from './routes/study.js';
 import auth from './routes/auth.js';
@@ -29,6 +30,7 @@ app.use(express.json({ limit: '30mb' })); // 资料上传走 base64 JSON（20MB 
 
 app.use('/api/competition', competitions);
 app.use('/api/ai', ai);
+app.use('/api/ai', taskAssist);
 app.use('/api/schedule', schedule);
 app.use('/api/study', study);
 app.use('/api/auth', auth);

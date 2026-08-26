@@ -5,8 +5,10 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import { fmtDate } from '../utils/noteStatus.js';
+import auth from '../auth.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
 import PlanChat from './PlanChat.vue';
+import TaskPanel from './task/TaskPanel.vue';
 
 const form = ref({ topic: '', level: '零基础', goal: '', hours: 10 });
 const generating = ref(false);
@@ -18,6 +20,8 @@ const manualDlg = ref(false);
 const chatCreate = ref(false); // AI 对话生成学习日程
 const chatEdit = ref(false); // AI 对话修改学习日程
 const genOpen = ref(false); // AI 生成区默认收起（移动端占屏），点击标题展开
+// 任务面板展开映射：`st${日程id}|${阶段i}|${任务j}`（拆分后索引位移，全量收起）
+const open = ref({});
 
 // 平台元数据（与 CompDialog 学习资源一致）
 const PLATFORM_META = {
@@ -86,16 +90,38 @@ async function generate() {
   }
 }
 
-// 保存计划（勾选/编辑文本/阶段变更都走这里）
+// 保存计划（勾选/编辑文本/阶段变更都走这里）；返回是否成功（面板评星/链接乐观更新据此回滚）
 async function savePlan() {
   saving.value = true;
   try {
     await api.studyUpdate(detail.value.id, detail.value.plan);
+    return true;
   } catch (e) {
     ElMessage.error(`保存失败：${e.message}`);
+    return false;
   } finally {
     saving.value = false;
   }
+}
+
+// 任务面板：行点击展开/收起（编辑态不展开）
+function toggleOpen(key, t) {
+  if (t._editing) return;
+  open.value[key] = !open.value[key];
+}
+// 评星/链接：乐观更新 → 全量保存，失败回滚
+async function setMeta(t, patch) {
+  const old = { stars: t.stars, links: t.links };
+  Object.assign(t, patch);
+  const ok = await savePlan();
+  if (!ok) { t.stars = old.stars; t.links = old.links; }
+}
+// AI 拆分：原位替换子任务 → 收起全部面板（索引位移）→ 保存，失败重拉详情还原
+async function applySplit(ph, j, subtasks) {
+  ph.tasks.splice(j, 1, ...subtasks.map((text) => ({ text, done: false })));
+  open.value = {};
+  const ok = await savePlan();
+  if (!ok) await select(detail.value);
 }
 
 // 勾选任务 → 即时保存（写完成日期 done_at，月历按完成日聚合；失败回滚 done/done_at）
@@ -109,6 +135,73 @@ async function toggleTask(t) {
     t.done = old.done;
     t.done_at = old.done_at;
     ElMessage.error(`保存失败：${e.message}`);
+  }
+}
+// ---- 多次任务（本人设定、本人重复完成）：派生完成状态与后端同规则 ----
+function deriveDone(t) {
+  if (t.mode !== 'multi') return;
+  const recs = t.completions || [];
+  const target = t.target || 3;
+  t.done = recs.length >= target;
+  t.done_at = recs[target - 1]?.at || null;
+  t.done_by = recs[target - 1]?.by || null;
+}
+// 完成一次：本地追加完成记录 → 派生 → 全量保存，失败回滚
+async function completeOnce(t) {
+  const recs = t.completions || [];
+  recs.push({ by: auth.user?.nickname || auth.user?.username || '我', at: fmtDate(new Date()), uid: auth.user?.id ?? null });
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  deriveDone(t);
+  if (!(await savePlan())) {
+    recs.pop();
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 撤销第 i 条完成记录（面板已按本人过滤按钮）
+async function undoComplete(t, i) {
+  const recs = t.completions || [];
+  if (!Number.isInteger(i) || i < 0 || i >= recs.length) return;
+  const [removed] = recs.splice(i, 1);
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  deriveDone(t);
+  if (!(await savePlan())) {
+    recs.splice(i, 0, removed);
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 切换任务类型：once→multi 保留历史完成（迁移一条记录）；multi→once 清空记录
+async function setTaskMode(t, mode) {
+  const toMulti = mode === 'multi';
+  const prev = { mode: t.mode, target: t.target, completions: t.completions, done: t.done, done_at: t.done_at, done_by: t.done_by };
+  if (toMulti) {
+    t.mode = 'multi';
+    t.target = t.target || 3;
+    t.completions = t.completions || [];
+    if (prev.mode !== 'multi' && prev.done && (prev.done_at || prev.done_by)) {
+      t.completions = [{ by: prev.done_by || '已完成', at: prev.done_at || fmtDate(new Date()), uid: null }];
+    }
+  } else {
+    t.mode = 'once';
+    t.target = null;
+    t.completions = [];
+  }
+  deriveDone(t);
+  if (!(await savePlan())) {
+    t.mode = prev.mode; t.target = prev.target; t.completions = prev.completions;
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 改目标次数（面板已限 1-100；非法输入不保存）
+async function setTarget(t, n) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 1 || v > 100) return;
+  const prevTarget = t.target;
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  t.target = v;
+  deriveDone(t);
+  if (!(await savePlan())) {
+    t.target = prevTarget;
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
   }
 }
 
@@ -306,19 +399,38 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
             </div>
             <div v-if="ph.date" class="phase-date">🗓️ {{ ph.date }}</div>
             <ul class="task-list">
-              <li v-for="(t, j) in (ph.tasks || [])" :key="j">
+              <template v-for="(t, j) in (ph.tasks || [])" :key="j">
+              <li @click="toggleOpen(`st${detail.id}|${i}|${j}`, t)">
                 <div class="task-row" :class="{ done: t.done }">
                   <el-checkbox
                     :model-value="!!t.done" :disabled="saving"
+                    @click.stop
                     @change="toggleTask(t)"
                   />
                   <el-input v-if="t._editing" v-model="t.text" size="small" class="t-edit" autofocus
                     @mousedown.stop
                     @blur="commitTaskEdit(ph, t)" @keyup.enter="commitTaskEdit(ph, t)" />
                   <span v-else class="t-text" title="点击编辑任务" @click="t._editing = true">{{ t.text }}</span>
+                  <span v-if="t.mode === 'multi'" class="multi-badge" :class="{ ok: t.done }"
+                    title="多次任务完成进度">×{{ (t.completions || []).length }}/{{ t.target || 3 }}</span>
+                  <span v-if="t.stars" class="star-badge" title="完成评星">★{{ t.stars }}</span>
                   <span class="t-del" title="删除任务" @click.stop="removeTaskItem(ph, j)">✕</span>
                 </div>
+                <!-- 任务详情面板：完成评星 / 暂存链接 / AI 拆解（点击任务行展开） -->
+                <TaskPanel
+                  v-if="open[`st${detail.id}|${i}|${j}`]"
+                  :task="t" class="tp-in-li"
+                  @toggle-done="toggleTask(t)"
+                  @update:stars="setMeta(t, { stars: $event })"
+                  @update:links="setMeta(t, { links: $event })"
+                  @split="applySplit(ph, j, $event)"
+                  @complete="completeOnce(t)"
+                  @undo="undoComplete(t, $event)"
+                  @update:mode="setTaskMode(t, $event)"
+                  @update:target="setTarget(t, $event)"
+                />
               </li>
+              </template>
             </ul>
             <div class="phase-check" v-if="ph.check_standard || ph._editCheck">✅ 达标要求：
               <template v-if="ph._editCheck">
@@ -467,18 +579,25 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   .phase-ops { display: flex; align-items: center; gap: 2px; }
   .phase-date { margin-top: 2px; color: var(--text-2); font-size: 13px; }
   .task-list { list-style: none; margin: 8px 0; padding: 0;
-    li { line-height: 1.9;
-      .task-row { display: flex; align-items: center; gap: 6px;
+    li { line-height: 1.9; cursor: pointer; border-radius: 6px;
+      &:hover .task-row { background: #f1f5f9; }
+      .task-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px;
         &.done .t-text { color: #94a3b8; text-decoration: line-through; }
         .t-text { font-size: 13.5px; cursor: text;
           &:hover { color: #2563eb; }
         }
         .t-edit { flex: 1; }
+        .star-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+        .multi-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0;
+          &.ok { color: #16a34a; }
+        }
         .t-del {
           color: #cbd5e1; font-size: 12px; padding: 0 4px; border-radius: 4px; cursor: pointer;
           &:hover { color: #ef4444; background: #fee2e2; }
         }
       }
+      // 面板内行距不受 li 的 1.9 行高影响
+      .tp-in-li { line-height: 1.5; cursor: default; }
     }
   }
   .phase-check { margin-top: 6px; color: #047857; font-size: 13px; display: flex; align-items: center; gap: 4px;

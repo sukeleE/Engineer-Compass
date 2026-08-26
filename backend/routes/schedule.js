@@ -3,6 +3,7 @@ import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
 import { optionalAuth, logAudit } from './middleware.js';
+import { sanitizeStars, sanitizeLinks, sanitizeTarget, sanitizeCompletions, deriveMultiDone } from './taskMeta.js';
 
 const r = Router();
 
@@ -61,9 +62,18 @@ export function normalizePlan(plan) {
       date: ph.date || ph.起止日期 || (ph.start_date ? (ph.end_date ? `${ph.start_date} ~ ${ph.end_date}` : ph.start_date) : ''),
       tasks: (ph.tasks || ph.任务清单 || []).map((t) => {
         // 对象任务保留 dept/done_by（小组计划任务带部门分工，AI 生成的 dept 不能丢；undefined 字段序列化时自动省略）
-        if (typeof t === 'string') return { text: t, done: false };
+        if (typeof t === 'string') return { text: t, done: false, stars: null, links: [], mode: 'once', target: null, completions: [] };
         const o = t || {};
-        return { text: o.text ?? o.任务名称 ?? String(o), done: !!o.done, done_at: o.done_at || null, dept: o.dept ?? o.部门, done_by: o.done_by };
+        const task = {
+          text: o.text ?? o.任务名称 ?? String(o), done: !!o.done, done_at: o.done_at || null,
+          dept: o.dept ?? o.部门, done_by: o.done_by,
+          stars: sanitizeStars(o.stars), links: sanitizeLinks(o.links),
+          mode: o.mode === 'multi' ? 'multi' : 'once',
+          target: sanitizeTarget(o.target),
+          completions: sanitizeCompletions(o.completions),
+        };
+        deriveMultiDone(task); // 多次任务完成度校正（count>=target → done，任何读入口一致）
+        return task;
       }),
       check_standard: ph.check_standard || ph.达标要求 || '',
       week_hours: ph.week_hours || ph.每周学习时长 || ph.每周最低学习时长 || 0,
@@ -124,9 +134,18 @@ ${progress.join('\n') || '（全部未开始）'}
     ]);
     const fresh = normalizePlan(JSON.parse(raw.replace(/^```json\s*|```$/g, '').trim()));
     if (!fresh.phases.length) throw new Error('AI 返回结构异常（无阶段数据）');
-    // 保留已勾选任务：按任务文本匹配
-    const doneSet = new Set(cur.phases.flatMap((ph) => ph.tasks.filter((t) => t.done).map((t) => t.text)));
-    fresh.phases.forEach((ph) => ph.tasks.forEach((t) => { if (doneSet.has(t.text)) t.done = true; }));
+    // 保留已勾选任务：按任务文本匹配；评星/暂存链接/多次任务设置同样按文本拷回（AI 优化不丢元数据）
+    const oldMap = new Map(cur.phases.flatMap((ph) => ph.tasks.map((t) => [t.text, t])));
+    fresh.phases.forEach((ph) => ph.tasks.forEach((t) => {
+      const o = oldMap.get(t.text);
+      if (!o) return;
+      if (o.done) { t.done = true; t.done_at = o.done_at; t.done_by = o.done_by; }
+      t.stars = sanitizeStars(o.stars);
+      t.links = sanitizeLinks(o.links);
+      t.mode = o.mode === 'multi' ? 'multi' : 'once';
+      t.target = sanitizeTarget(o.target);
+      t.completions = sanitizeCompletions(o.completions);
+    }));
     db.prepare('UPDATE user_schedule SET plan_json = ?, is_custom = 0 WHERE id = ?')
       .run(JSON.stringify(fresh), id);
     res.json({ id, plan: fresh, message: 'AI 已生成优化版计划' });
@@ -204,7 +223,14 @@ r.get('/calendar', optionalAuth, (req, res) => {
     const out = [];
     for (const ph of (plan.phases || [])) {
       for (const t of (ph.tasks || [])) {
-        if (t.done && typeof t.done_at === 'string' && t.done_at.startsWith(month)) {
+        // 多次任务：每次完成记录都是一次完成日（by 为完成人）；一次任务沿用 done_at
+        if (t.mode === 'multi') {
+          for (const c of (t.completions || [])) {
+            if (c && typeof c.at === 'string' && c.at.startsWith(month)) {
+              out.push({ date: c.at, plan_name: planName, task: t.text, by: c.by || null });
+            }
+          }
+        } else if (t.done && typeof t.done_at === 'string' && t.done_at.startsWith(month)) {
           out.push({ date: t.done_at, plan_name: planName, task: t.text });
         }
       }
@@ -259,9 +285,13 @@ r.get('/:id/export', (req, res) => {
     for (const ph of plan.phases) {
       const tasks = ph.tasks.length ? ph.tasks : [{ text: '', done: false }];
       for (const t of tasks) {
+        // 多次任务：已完成列显示完成次数/目标（×N/目标），一次任务保持 是/否
+        const doneLabel = t.mode === 'multi'
+          ? `×${(t.completions || []).length}/${t.target || 3}`
+          : (t.done ? '是' : '否');
         rows.push([
           comp?.name || '', ph.phase, ph.date, t.text,
-          t.done ? '是' : '否', ph.check_standard, ph.week_hours,
+          doneLabel, ph.check_standard, ph.week_hours,
         ]);
       }
     }
@@ -279,7 +309,12 @@ r.get('/:id/export', (req, res) => {
   for (const [i, ph] of plan.phases.entries()) {
     lines.push('', `## 阶段${i + 1}：${ph.phase}`);
     if (ph.date) lines.push(`> 起止日期：${ph.date}`);
-    for (const t of ph.tasks) lines.push(`- ${t.done ? '[x]' : '[ ]'} ${t.text}`);
+    for (const t of ph.tasks) {
+      const mark = t.mode === 'multi'
+        ? `[✓] ×${(t.completions || []).length}/${t.target || 3}`
+        : (t.done ? '[x]' : '[ ]');
+      lines.push(`- ${mark} ${t.text}`);
+    }
     if (ph.check_standard) lines.push(`- 达标要求：${ph.check_standard}`);
     if (ph.week_hours) lines.push(`- 每周最低学习时长：${ph.week_hours} 小时`);
   }

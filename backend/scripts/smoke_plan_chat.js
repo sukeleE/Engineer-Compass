@@ -44,6 +44,25 @@ ok('新任务不受影响', norm.phases[0].tasks[1].done === false);
 // normalizePlan 必须保留 dept/done_by（曾丢弃导致小组计划任务全变「通用」）
 const np = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', dept: '视觉组', done: true, done_by: '小明' }] }] });
 ok('normalizePlan 保留 dept/done_by', np.phases[0].tasks[0].dept === '视觉组' && np.phases[0].tasks[0].done_by === '小明', JSON.stringify(np.phases[0].tasks[0]));
+// stars/links 元数据保留：mergeDone 拷回 + normalizePlan 清洗非法值
+const mdOld = { phases: [{ phase: '基础', tasks: [{ text: '任务A', done: true, stars: 4, links: [{ title: '教程', url: 'https://a.com' }] }] }] };
+const mdNorm = { phases: [{ phase: '基础', tasks: [{ text: '任务A', done: false, stars: null, links: [] }] }] };
+mergeDone(mdNorm, mdOld);
+ok('mergeDone 保留 stars/links', mdNorm.phases[0].tasks[0].stars === 4 && mdNorm.phases[0].tasks[0].links[0]?.url === 'https://a.com', JSON.stringify(mdNorm.phases[0].tasks[0]));
+const np2 = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', stars: 9, links: [{ url: 'javascript:alert(1)' }, { url: 'https://ok.com', title: '好' }] }] }] });
+ok('normalizePlan 清洗非法 stars/links', np2.phases[0].tasks[0].stars === null && np2.phases[0].tasks[0].links.length === 1 && np2.phases[0].tasks[0].links[0].url === 'https://ok.com', JSON.stringify(np2.phases[0].tasks[0]));
+// 多次任务元数据：mergeDone 拷回 mode/target/completions + normalizePlan 派生校正/清洗
+const mdMulti = { phases: [{ phase: '基础', tasks: [{ text: '任务A', done: true, mode: 'multi', target: 3, completions: [{ by: '小明', at: '2026-08-01', uid: 1 }] }] }] };
+const mdNorm2 = { phases: [{ phase: '基础', tasks: [{ text: '任务A', done: false, mode: 'once', target: null, completions: [] }] }] };
+mergeDone(mdNorm2, mdMulti);
+ok('mergeDone 保留 mode/target/completions', mdNorm2.phases[0].tasks[0].mode === 'multi' && mdNorm2.phases[0].tasks[0].target === 3 && mdNorm2.phases[0].tasks[0].completions[0]?.at === '2026-08-01', JSON.stringify(mdNorm2.phases[0].tasks[0]));
+const np3 = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', mode: 'multi', target: 2, completions: [{ by: '甲', at: '2026-08-01', uid: 1 }, { by: '乙', at: '2026-08-02' }, { by: '', at: '2026-08-03' }, { by: '丙', at: '08-03' }] }] }] });
+const np3t = np3.phases[0].tasks[0];
+ok('normalizePlan 清洗 completions（空 by/坏日期过滤）+ 达标派生 done', np3t.mode === 'multi' && np3t.target === 2 && np3t.completions.length === 2 && np3t.done === true, JSON.stringify(np3t));
+const np3b = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', mode: 'multi', target: 99, completions: [{ by: '甲', at: '2026-08-01', uid: 1 }] }] }] });
+ok('normalizePlan 未达标 → done false', np3b.phases[0].tasks[0].done === false, '');
+const np3c = normalizePlan({ phases: [{ phase: 'p', tasks: [{ text: 't', mode: 'multi', target: 500 }] }] });
+ok('normalizePlan 非法 target 清洗为 null（读入口兜底 3）', np3c.phases[0].tasks[0].target === null && np3c.phases[0].tasks[0].mode === 'multi', JSON.stringify(np3c.phases[0].tasks[0]));
 
 // 1) mode 校验 + 首轮必提问
 console.log('— 协议校验');

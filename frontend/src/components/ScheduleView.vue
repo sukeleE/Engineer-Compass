@@ -10,6 +10,7 @@ import ManualPlanDialog from './ManualPlanDialog.vue';
 import CalendarView from './CalendarView.vue';
 import StudyView from './StudyView.vue';
 import MyTeamTasks from './team/MyTeamTasks.vue';
+import TaskPanel from './task/TaskPanel.vue';
 import auth from '../auth.js';
 import { fmtDate } from '../utils/noteStatus.js';
 import PlanChat from './PlanChat.vue';
@@ -33,6 +34,8 @@ const loading = ref(false);
 const savingId = ref(null);
 const manualDlg = ref(false);
 const competitions = ref([]);
+// 任务面板展开映射：`s${日程id}|${阶段i}|${任务j}` → true（行点击切换；拆分后索引位移，全量收起）
+const open = ref({});
 
 // 后端 list 返回 { ...row, plan: {phases:[...]} }，这里拍平为顶层 phases 供模板/保存使用
 async function load() {
@@ -50,17 +53,38 @@ async function load() {
   }
 }
 
-// 即时保存（勾选/新增/删除/改日期/改文本都触发）
+// 即时保存（勾选/新增/删除/改日期/改文本都触发）；返回是否成功（面板评星/链接乐观更新据此回滚）
 async function save(s) {
   savingId.value = s.id;
   try {
     await api.scheduleEdit(s.id, { phases: s.phases });
     s.is_custom = 1;
+    return true;
   } catch (e) {
     ElMessage.error(`保存失败：${e.message}`);
+    return false;
   } finally {
     savingId.value = null;
   }
+}
+
+// 任务面板：行点击展开/收起（编辑态不展开——文本点击进编辑时避免误开面板）
+function toggleOpen(key, t) {
+  if (t._editing) return;
+  open.value[key] = !open.value[key];
+}
+// 评星/链接：乐观更新 → 全量保存，失败回滚
+async function setMeta(s, t, patch) {
+  const old = { stars: t.stars, links: t.links };
+  Object.assign(t, patch);
+  const ok = await save(s);
+  if (!ok) { t.stars = old.stars; t.links = old.links; }
+}
+// AI 拆分：原位替换子任务 → 收起全部面板（索引位移）→ 保存，失败重拉还原
+async function applySplit(s, ph, j, subtasks) {
+  ph.tasks.splice(j, 1, ...subtasks.map((text) => ({ text, done: false })));
+  open.value = {};
+  if (!(await save(s))) await load();
 }
 
 function toggleTask(s, t) {
@@ -68,6 +92,73 @@ function toggleTask(s, t) {
   // 完成日期（本地时区 YYYY-MM-DD）：月历按完成日聚合；取消勾选清空
   t.done_at = t.done ? fmtDate(new Date()) : null;
   save(s);
+}
+// ---- 多次任务（本人设定、本人重复完成）：派生完成状态与后端同规则 ----
+function deriveDone(t) {
+  if (t.mode !== 'multi') return;
+  const recs = t.completions || [];
+  const target = t.target || 3;
+  t.done = recs.length >= target;
+  t.done_at = recs[target - 1]?.at || null;
+  t.done_by = recs[target - 1]?.by || null;
+}
+// 完成一次：本地追加完成记录 → 派生 → 全量保存，失败回滚
+async function completeOnce(s, t) {
+  const recs = t.completions || [];
+  recs.push({ by: auth.user?.nickname || auth.user?.username || '我', at: fmtDate(new Date()), uid: auth.user?.id ?? null });
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  deriveDone(t);
+  if (!(await save(s))) {
+    recs.pop();
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 撤销第 i 条完成记录（面板已按本人/可设定权过滤按钮）
+async function undoComplete(s, t, i) {
+  const recs = t.completions || [];
+  if (!Number.isInteger(i) || i < 0 || i >= recs.length) return;
+  const [removed] = recs.splice(i, 1);
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  deriveDone(t);
+  if (!(await save(s))) {
+    recs.splice(i, 0, removed);
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 切换任务类型：once→multi 保留历史完成（迁移一条记录）；multi→once 清空记录
+async function setTaskMode(s, t, mode) {
+  const toMulti = mode === 'multi';
+  const prev = { mode: t.mode, target: t.target, completions: t.completions, done: t.done, done_at: t.done_at, done_by: t.done_by };
+  if (toMulti) {
+    t.mode = 'multi';
+    t.target = t.target || 3;
+    t.completions = t.completions || [];
+    if (prev.mode !== 'multi' && prev.done && (prev.done_at || prev.done_by)) {
+      t.completions = [{ by: prev.done_by || '已完成', at: prev.done_at || fmtDate(new Date()), uid: null }];
+    }
+  } else {
+    t.mode = 'once';
+    t.target = null;
+    t.completions = [];
+  }
+  deriveDone(t);
+  if (!(await save(s))) {
+    t.mode = prev.mode; t.target = prev.target; t.completions = prev.completions;
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
+}
+// 改目标次数（面板已限 1-100；非法输入不保存）
+async function setTarget(s, t, n) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 1 || v > 100) return;
+  const prevTarget = t.target;
+  const prev = { done: t.done, done_at: t.done_at, done_by: t.done_by };
+  t.target = v;
+  deriveDone(t);
+  if (!(await save(s))) {
+    t.target = prevTarget;
+    t.done = prev.done; t.done_at = prev.done_at; t.done_by = prev.done_by;
+  }
 }
 function addTask(s, ph) {
   const txt = (ph.newTask || '').trim();
@@ -277,18 +368,36 @@ onMounted(load);
             </div>
 
             <div class="task-list">
+              <template v-for="(t, j) in ph.tasks" :key="j">
               <div
-                v-for="(t, j) in ph.tasks" :key="j"
                 class="task" :class="{ done: t.done }"
+                @click="toggleOpen(`s${s.id}|${i}|${j}`, t)"
               >
                 <span class="cb" :class="{ on: t.done }" title="勾选完成"
-                  @click="toggleTask(s, t)">{{ t.done ? '✓' : '' }}</span>
+                  @click.stop="toggleTask(s, t)">{{ t.done ? '✓' : '' }}</span>
                 <el-input v-if="t._editing" v-model="t.text" size="small" class="t-edit" autofocus
                   @mousedown.stop
                   @blur="commitTaskEdit(s, ph, t)" @keyup.enter="commitTaskEdit(s, ph, t)" />
                 <span v-else class="t-text" title="点击编辑任务" @click="t._editing = true">{{ t.text }}</span>
+                <span v-if="t.mode === 'multi'" class="multi-badge" :class="{ ok: t.done }"
+                  title="多次任务完成进度">×{{ (t.completions || []).length }}/{{ t.target || 3 }}</span>
+                <span v-if="t.stars" class="star-badge" title="完成评星">★{{ t.stars }}</span>
                 <span class="t-del" title="删除任务" @click.stop="removeTask(s, ph, j)">✕</span>
               </div>
+              <!-- 任务详情面板：完成评星 / 暂存链接 / AI 拆解（点击任务行展开） -->
+              <TaskPanel
+                v-if="open[`s${s.id}|${i}|${j}`]"
+                :task="t"
+                @toggle-done="toggleTask(s, t)"
+                @update:stars="setMeta(s, t, { stars: $event })"
+                @update:links="setMeta(s, t, { links: $event })"
+                @split="applySplit(s, ph, j, $event)"
+                @complete="completeOnce(s, t)"
+                @undo="undoComplete(s, t, $event)"
+                @update:mode="setTaskMode(s, t, $event)"
+                @update:target="setTarget(s, t, $event)"
+              />
+              </template>
 
               <!-- 新增自定义任务 -->
               <div class="add-task">
@@ -409,6 +518,10 @@ onMounted(load);
         &:hover { color: #2563eb; }
       }
       .t-edit { flex: 1; }
+      .star-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+      .multi-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0;
+        &.ok { color: #16a34a; }
+      }
       .t-del {
         color: #cbd5e1; font-size: 12px; padding: 0 4px; border-radius: 4px;
         &:hover { color: #ef4444; background: #fee2e2; }
