@@ -24,7 +24,7 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
     <template v-for="(a, i) in attachments" :key="i">
       <video v-if="is(a, 'video/')" class="att-media" :src="src(a)" controls preload="metadata" />
       <audio v-else-if="is(a, 'audio/')" class="att-audio" :src="src(a)" controls preload="metadata" />
-      <a v-else-if="!is(a, 'image/')" class="att-file" :href="src(a)" :download="a.name">
+      <a v-else-if="!is(a, 'image/')" class="att-file" :href="src(a)" :download="a.name" :title="a.name">
         📄 {{ a.name }} <span class="att-size">{{ fmtSize(a.size) }}</span> ⬇
       </a>
     </template>
@@ -50,9 +50,10 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
   .att-media { max-width: 100%; max-height: 320px; border-radius: 8px; }
   .att-audio { width: 100%; max-width: 320px; }
   .att-file {
+    display: inline-block; max-width: 100%; vertical-align: middle;
     font-size: 13px; color: #2563eb; text-decoration: none; background: #eff6ff;
     border: 1px solid #bfdbfe; border-radius: 8px; padding: 5px 10px;
-    overflow-wrap: anywhere; /* 长文件名强制断行，防撑破 */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* 文件名不换行：过长省略 + title 全名 */
     &:hover { background: #dbeafe; }
     .att-size { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
   }

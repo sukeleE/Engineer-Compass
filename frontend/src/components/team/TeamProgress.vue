@@ -176,7 +176,8 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
         <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
         <span v-if="reportAtts.length" class="att-chips">
-          <el-tag v-for="(a, i) in reportAtts" :key="i" closable size="small" @close="reportAtts.splice(i, 1)">
+          <el-tag v-for="(a, i) in reportAtts" :key="i" closable size="small" class="att-tag" :title="a.name"
+            @close="reportAtts.splice(i, 1)">
             {{ a.name }}
           </el-tag>
         </span>
@@ -268,6 +269,14 @@ reload().catch((e) => ElMessage.error(e.message));
 }
 .rp-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
   .att-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  // 附件名不换行：过长省略号 + title 悬浮全名（断行会竖排挤压排版）
+  .att-tag {
+    max-width: 240px; vertical-align: middle;
+    :deep(.el-tag__content) {
+      display: inline-block; max-width: 200px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+    }
+  }
   .rp-tip { margin-left: auto; color: #94a3b8; font-size: 12px; }
 }
 .log-rich { line-height: 1.8; font-size: 13.5px;

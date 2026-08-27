@@ -264,7 +264,8 @@ async function delPost(p) {
         <el-button size="small" @click="fileInput.click()">📎 附件（图片/视频/音频/文件）</el-button>
         <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
         <span v-if="form.atts.length" class="att-chips">
-          <el-tag v-for="(a, i) in form.atts" :key="i" closable size="small" @close="form.atts.splice(i, 1)">
+          <el-tag v-for="(a, i) in form.atts" :key="i" closable size="small" class="att-tag" :title="a.name"
+            @close="form.atts.splice(i, 1)">
             {{ a.name }}
           </el-tag>
         </span>
@@ -403,6 +404,14 @@ async function delPost(p) {
 .sh-title { margin-bottom: 10px; }
 .sh-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;
   .att-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  // 附件名不换行：过长省略号 + title 悬浮全名（断行会竖排挤压排版）
+  .att-tag {
+    max-width: 240px; vertical-align: middle;
+    :deep(.el-tag__content) {
+      display: inline-block; max-width: 200px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+    }
+  }
 }
 .sh-tags { width: 100%; margin-top: 10px; }
 

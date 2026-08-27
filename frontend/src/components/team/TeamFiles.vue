@@ -116,7 +116,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <img v-if="isImg(f) && dlUrl(f)" class="f-preview" :src="dlUrl(f)" :alt="f.file_name" loading="lazy" @click="preview(f)" />
       <span v-else class="f-icon">{{ fmtType(f.file_type) }}</span>
       <div class="f-info">
-        <b>{{ f.file_name }}</b>
+        <b :title="f.file_name">{{ f.file_name }}</b>
         <span class="f-meta">
           {{ fmtSize(f.file_size) }} · <span class="u-link" @click="toProfile(f)">{{ f.uploader }}</span>
           <el-tag v-for="rn in roleNamesOf(f.user_id)" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
@@ -148,7 +148,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     transition: transform .2s;
     &:hover { transform: scale(1.03); }
   }
-  .f-info { flex: 1; min-width: 0; b { display: block; font-size: 13.5px; word-break: break-all; }
+  .f-info { flex: 1; min-width: 0; b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 文件名不换行：过长省略 + title 全名 */
     .f-meta { color: var(--text-2); font-size: 12px;
       .u-link { cursor: pointer; &:hover { color: #2563eb; } }
     }
