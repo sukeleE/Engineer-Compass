@@ -411,6 +411,17 @@ r.delete('/:id', (req, res) => {
 const canEditPlan = (ctx) => ctx.isOwner || hasPerm(ctx, 'team');
 
 // 归一化：任意 AI 结构 → 统一 phases（任务带 dept/role_id；dept 匹配不到角色 → '通用'）
+// 计划说明（desc）：编辑弹窗手输或飞书文档导入（mdToHtml 渲染的 HTML 片段）。
+// 展示端 v-html —— 手输原始 HTML 可能带 script/事件属性，存库前白名单消毒（mdToHtml 产物本身安全）
+function sanitizeHtmlFragment(s) {
+  return String(s || '').slice(0, 20000)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(javascript|vbscript):/gi, '');
+}
+
 function normTeamPlan(plan, roles) {
   const phases = findPhases(plan).map((ph) => ({
     phase: ph.phase || ph.阶段名称 || '备赛阶段',
@@ -436,7 +447,7 @@ function normTeamPlan(plan, roles) {
       return task;
     }).filter(Boolean),
   })).filter((p) => p.tasks.length);
-  return { phases };
+  return { phases, desc: sanitizeHtmlFragment(plan.desc) };
 }
 
 // 兜底模板：无 DeepSeek key / AI 结构异常 → 子赛项生成基础计划（任务标记通用）

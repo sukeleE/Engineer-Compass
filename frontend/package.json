@@ -9,8 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@wangeditor/editor": "^5.1.23",
-    "@wangeditor/editor-for-vue": "^5.1.12",
     "echarts": "^5.6.0",
     "element-plus": "^2.9.7",
     "gsap": "^3.13.0",

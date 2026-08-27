@@ -337,13 +337,16 @@ async function onResFile(e) {
   } catch (err) { ElMessage.error(err.message); }
   finally { resUploading.value = false; }
 }
-// 分享管理（引用功能）：生成/复用公开下载链接（幂等）；撤销后所有引用处立即失效
+// 分享管理：绑定飞书且 ≤20MB → 上传云盘换飞书链接（mode=feishu）；否则降级站内 token 链接（mode=local，可引用）
 async function shareResource(row) {
   try {
     const s = await api.resourceShare(row.id);
-    try { await navigator.clipboard.writeText(`${location.origin}${s.url}`); }
+    const link = s.mode === 'feishu' ? s.url : `${location.origin}${s.url}`;
+    try { await navigator.clipboard.writeText(link); }
     catch { /* 非安全上下文剪贴板不可用，链接已在提示中展示 */ }
-    ElMessage.success(`已开启分享：${location.origin}${s.url}\n（复制成功，可在小组资料/帖子/编辑器等「我的资源」入口引用）`);
+    ElMessage.success(s.mode === 'feishu'
+      ? `已上传到飞书云盘，链接已复制：${link}\n（对方需有飞书访问权限才能打开）`
+      : `已开启分享：${link}\n（复制成功，可在小组资料/帖子/编辑器等「我的资源」入口引用）`);
     loadResources();
   } catch (e) { ElMessage.error(e.message); }
 }
@@ -406,8 +409,52 @@ function deepLink() {
     }
   }
 }
-onMounted(() => { load(); deepLink(); });
+// ---- 飞书绑定（P0：每用户绑定；一个飞书账号可绑定多个网页账号） ----
+// 授权在飞书页面完成，回调页 window.opener.postMessage 通知 → 此处监听并刷新状态
+const feishu = ref({ bound: false, loading: false });
+const feishuListener = (e) => {
+  if (e.data?.type === 'feishu-bound') {
+    ElMessage.success('✅ 飞书绑定成功');
+    loadFeishu();
+  }
+};
+async function loadFeishu() {
+  if (!auth.token) return;
+  try {
+    feishu.value = { ...(await api.feishuStatus()), loading: false };
+  } catch { feishu.value = { bound: false, loading: false }; }
+}
+async function bindFeishu() {
+  feishu.value.loading = true;
+  try {
+    const { url } = await api.feishuAuth();
+    if (!url) throw new Error('飞书未配置，请联系管理员');
+    window.open(url, '_blank'); // 不用 noopener：回调页需 postMessage 通知绑定结果
+  } catch (e) {
+    ElMessage.error(e.message);
+    feishu.value.loading = false;
+  }
+}
+async function unbindFeishu() {
+  await ElMessageBox.confirm('解绑后本账号将无法使用飞书文档编辑与分享功能，确定解绑？', '解绑飞书', { type: 'warning' });
+  feishu.value.loading = true;
+  try {
+    await api.feishuUnbind();
+    ElMessage.success('已解绑飞书账号');
+  } finally {
+    feishu.value.loading = false;
+    loadFeishu();
+  }
+}
+
+onMounted(() => {
+  load();
+  deepLink();
+  window.addEventListener('message', feishuListener);
+  loadFeishu();
+});
 onBeforeUnmount(() => {
+  window.removeEventListener('message', feishuListener);
   if (mailTimer) clearInterval(mailTimer);
   if (dmTimer) clearInterval(dmTimer);
 });
@@ -531,6 +578,31 @@ onBeforeUnmount(() => {
               <router-link to="/share" class="quick-btn">📤 资源分享</router-link>
               <router-link v-if="auth.user?.is_admin" to="/admin" class="quick-btn">🧠 AI 收录管理</router-link>
               <router-link v-if="auth.user?.is_admin" to="/admin-console" class="quick-btn">⚙️ 后台管理</router-link>
+            </div>
+          </section>
+
+          <!-- 飞书绑定（P0：每用户绑定，文档编辑 / 资源分享走飞书） -->
+          <section class="me-block">
+            <h3>
+              🪶 飞书账号
+              <el-tag size="small" :type="feishu.bound ? 'success' : 'info'" style="margin-left:6px">
+                {{ feishu.bound ? '已绑定' : '未绑定' }}
+              </el-tag>
+            </h3>
+            <p class="fb-tip">绑定飞书后，日程笔记 / 进度汇报 / 分享帖可直接在飞书文档里编辑，资源分享可从飞书引出链接</p>
+            <div v-if="feishu.bound" class="feishu-bound">
+              <el-avatar :src="feishu.avatar_url" :size="40" style="flex-shrink:0">{{ feishu.user_name?.[0] }}</el-avatar>
+              <div class="feishu-info">
+                <b>{{ feishu.user_name || '飞书用户' }}</b>
+                <span class="feishu-sub">授权有效约 {{ Math.max(0, Math.floor((feishu.expires_in || 0) / 60)) }} 分钟 · 过期自动刷新</span>
+              </div>
+            </div>
+            <div class="fb-foot">
+              <el-button v-if="!feishu.bound" type="primary" :loading="feishu.loading" @click="bindFeishu">🔗 绑定飞书账号</el-button>
+              <template v-else>
+                <el-button type="success" plain @click="loadFeishu">🔄 刷新状态</el-button>
+                <el-button type="danger" plain :loading="feishu.loading" @click="unbindFeishu">解绑</el-button>
+              </template>
             </div>
           </section>
 
@@ -833,6 +905,15 @@ onBeforeUnmount(() => {
 .fb-block {
   .fb-tip { margin: 0 0 10px; font-size: 12.5px; color: var(--text-2); }
   .fb-foot { margin-top: 10px; display: flex; justify-content: flex-end; }
+}
+
+// 飞书绑定卡
+.feishu-bound {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+  .feishu-info { display: flex; flex-direction: column; gap: 2px; }
+  .feishu-sub { font-size: 12px; color: var(--text-2); }
 }
 
 .code-row { display: flex; gap: 8px; width: 100%; }

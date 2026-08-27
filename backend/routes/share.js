@@ -21,9 +21,9 @@ function normAttachments(raw) {
     const name = String(a?.name || '').slice(0, 120);
     const mime = String(a?.mime || 'application/octet-stream').slice(0, 100);
     if (!name) continue;
-    // 引用型：url 必须是本站分享白名单格式（防任意外链注入）
+    // 引用型：url 必须是本站分享白名单格式（防任意外链注入），或飞书域链接（docx/file/sheet/wiki，飞书云盘引用）
     const url = String(a?.url || '');
-    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url)) {
+    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url) || /^https?:\/\/[^/]*(feishu\.cn|larksuite\.com)\//.test(url)) {
       out.push({ name, size: Number(a?.size) || 0, mime, url });
       continue;
     }

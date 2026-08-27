@@ -23,9 +23,9 @@ function sanitizeAttachments(attachments) {
     const name = String(a?.name || '').trim();
     const mime = String(a?.mime || '').trim() || 'application/octet-stream';
     if (!name) continue;
-    // 引用型：url 必须是本站分享白名单格式（防任意外链注入），无 data 不计入总量
+    // 引用型：url 必须是本站分享白名单格式（防任意外链注入），或飞书域链接（docx/file/sheet/wiki，飞书云盘引用）；无 data 不计入总量
     const url = String(a?.url || '');
-    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url)) {
+    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url) || /^https?:\/\/[^/]*(feishu\.cn|larksuite\.com)\//.test(url)) {
       out.push({ name, size: Number(a?.size) || 0, mime, url });
       continue;
     }
@@ -167,8 +167,10 @@ r.get('/:id/logs', (req, res) => {
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
     `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id,
-            COALESCE(u.nickname, u.username) AS nickname, u.avatar
+            COALESCE(u.nickname, u.username) AS nickname, u.avatar,
+            m.doc_url AS feishu_url
      FROM progress_log l JOIN user u ON u.id = l.user_id
+     LEFT JOIN feishu_doc_map m ON m.biz_type = 'progress_log' AND m.biz_id = l.id
      WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT 100`
   ).all(ctx.team.id).map((l) => ({ ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments) }));
   res.json(attachComments(ctx.team.id, 'log', rows));

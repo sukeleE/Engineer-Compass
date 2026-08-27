@@ -9,7 +9,8 @@ import auth from '../auth.js';
 import { openImage } from '../utils/imageViewer.js';
 import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import RichEditor from './team/RichEditor.vue';
-import AttachmentList from './team/AttachmentList.vue';
+import DocPicker from './team/DocPicker.vue';
+import AttachmentList, { normAtts } from './team/AttachmentList.vue';
 import ResourcePicker from './ResourcePicker.vue';
 
 const router = useRouter();
@@ -96,6 +97,7 @@ const attPick = (e) => {
 };
 // 从「我的资源」引用：选中后生成/复用分享链接，push 引用型附件条目（无 data 有 url）
 const resPickDlg = ref(false);
+const impDlg = ref(false);   // 从飞书导入文档选择器
 const onResourcePick = (r) => {
   form.value.atts.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
   ElMessage.success(`已引用「${r.name}」`);
@@ -104,11 +106,13 @@ function openNew() {
   if (needLogin()) return;
   editingId.value = null;
   form.value = { title: '', content: '', atts: [], tags: [] };
+  feishuOpened.value = false;
   postDlg.value = true;
 }
 function openEdit(p) {
   if (!isMine(p)) return;
   editingId.value = p.id;
+  feishuOpened.value = false;
   let atts = [];
   try { atts = typeof p.attachments === 'string' ? JSON.parse(p.attachments) : p.attachments || []; } catch {}
   form.value = { title: p.title, content: p.content, atts, tags: [...(p.tags || [])] };
@@ -155,6 +159,56 @@ async function toggleFav(p, ev) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
+// —— 飞书编辑（P1）：分享帖 ↔ 飞书文档 ——
+// 「飞书编辑」= 创建/打开飞书文档（新建自动带存量内容 + 自动同步回库）；「从飞书同步」= 手动拉取最新
+const feishuBusy = ref(false);
+const feishuUrl = ref(''); // 当前详情帖已关联的飞书文档链接（嵌入式查看徽标）
+const feishuOpened = ref(false); // 本次编辑已打开飞书（显示「飞书编辑中」状态条）
+async function feishuEdit(p) {
+  let pid = p?.id || editingId.value;
+  // 新建帖尚未发布：有草稿先发布创建帖子拿 id；空内容直接让后端自动创建（share_post 需 title）
+  if (!pid) {
+    if (!form.value.title.trim()) return ElMessage.warning('先填标题，再转飞书编辑');
+    const text = form.value.content.replace(/<[^>]*>/g, '').trim();
+    if (text || form.value.atts.length) {
+      try {
+        const r = await api.shareCreate({ title: form.value.title, content: form.value.content, attachments: form.value.atts, tags: form.value.tags });
+        pid = r.id;
+        editingId.value = pid;
+        await load();
+      } catch (e) { ElMessage.error(e.message); return; }
+    }
+  }
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizOpen('share_post', pid ?? null, { title: form.value.title });
+    feishuUrl.value = r.url || '';
+    feishuOpened.value = true;
+    window.open(r.url, '_blank');
+    ElMessage.success(r.created ? '已创建飞书文档并打开，可在飞书里完善内容' : '已同步最新内容，飞书文档已打开');
+    if (detailDlg.value && cur.value?.id === pid) cur.value = await api.sharePost(pid);
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+
+// 从飞书导入：内容回填编辑器；无帖子时后端自动创建（id 绑定编辑态，提交走更新而非新建）
+function onImported(html, id) {
+  form.value.content = html;
+  if (id) editingId.value = id;
+  load();
+}
+async function feishuSync(p) {
+  const pid = p?.id || editingId.value;
+  if (!pid) return ElMessage.warning('请先发布帖子或点「飞书编辑」创建文档');
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizSync('share_post', pid);
+    ElMessage.success(r.message || '✅ 已从飞书同步');
+    if (detailDlg.value && cur.value?.id === p.id) cur.value = await api.sharePost(p.id);
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+
 // —— 详情弹窗（含评论） ——
 const detailDlg = ref(false);
 const cur = ref(null);
@@ -163,7 +217,11 @@ const commentSending = ref(false);
 async function openPost(p) {
   try {
     cur.value = await api.sharePost(p.id);
+    cur.value.attachments = normAtts(cur.value.attachments); // 库存储为 JSON 字符串，详情模板按数组用（AttachmentList 也内部容错）
     detailDlg.value = true;
+    // 嵌入式查看：查询该帖是否已关联飞书文档（有则显示「在飞书打开」徽标）
+    feishuUrl.value = '';
+    api.feishuBizStatus('share_post', p.id).then((s) => { if (s?.mapped) feishuUrl.value = s.doc_url; }).catch(() => {});
   } catch (e) { ElMessage.error(e.message); }
 }
 async function sendComment() {
@@ -270,6 +328,15 @@ async function delPost(p) {
           </el-tag>
         </span>
       </div>
+      <!-- 可切到飞书文档里写长文（P1）；新建帖点按钮自动发布后再编辑；打开后本站留窗显示状态条 -->
+      <div class="sh-tools" style="margin-bottom:6px">
+        <el-button size="small" type="primary" plain :loading="feishuBusy" @click="feishuEdit({ id: editingId })">✏️ 飞书编辑（长文在飞书写）</el-button>
+        <el-button size="small" plain :loading="feishuBusy" @click="feishuSync({ id: editingId })">🔄 从飞书同步</el-button>
+        <el-button size="small" plain @click="impDlg = true">📥 从飞书导入</el-button>
+      </div>
+      <div v-if="feishuOpened" class="pd-feishu-open">
+        ✅ 已在飞书打开该文档 — 在飞书写完后点「🔄 从飞书同步」更新到这里
+      </div>
       <RichEditor v-model="form.content" placeholder="分享资料说明 / 备赛经验 / 作品展示…" />
       <el-select v-model="form.tags" multiple filterable allow-create default-first-option :multiple-limit="5"
         placeholder="索引标签（≤5 个，自建即成为子板块）" class="sh-tags">
@@ -280,6 +347,9 @@ async function delPost(p) {
         <el-button type="primary" @click="submit">{{ editingId ? '保存修改' : '发布' }}</el-button>
       </template>
     </el-dialog>
+    <!-- 从飞书导入文档选择器（必须挂弹窗外面——弹窗 destroy-on-close 会销毁内部组件，导入按钮将无反应） -->
+    <DocPicker v-model="impDlg" biz-type="share_post" :biz-id="editingId ?? null"
+      :extra="{ title: form.title }" @imported="onImported" />
     <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
 
     <!-- 帖子详情弹窗 -->
@@ -294,9 +364,16 @@ async function delPost(p) {
           <span class="pd-time">{{ cur.create_time?.slice(0, 16) }}</span>
           <el-tag v-for="t in cur.tags" :key="t" size="small" effect="plain">#{{ t }}</el-tag>
           <span v-if="isMine(cur)" class="pd-own">
-            <el-button size="small" text type="primary" @click="openEdit(cur)">✏️ 编辑</el-button>
+            <el-button size="small" text type="primary" :loading="feishuBusy" @click="feishuEdit(cur)">📄 飞书编辑</el-button>
+            <el-button size="small" text type="primary" :loading="feishuBusy" @click="feishuSync(cur)">🔄 同步</el-button>
+            <el-button size="small" text @click="openEdit(cur)">✏️ 本地编辑</el-button>
             <el-button size="small" text type="danger" @click="delPost(cur)">🗑 删除</el-button>
           </span>
+        </div>
+
+        <!-- 已关联飞书文档 → 直达链接（点「飞书编辑」后出现） -->
+        <div v-if="feishuUrl" class="pd-feishu">
+          <a :href="feishuUrl" target="_blank" rel="noopener">📄 打开飞书文档编辑 →</a>
         </div>
 
         <!-- 正文（富文本，图片点击全屏预览） -->
@@ -422,6 +499,15 @@ async function delPost(p) {
   .pd-author { cursor: pointer; &:hover { color: #2563eb; } font-weight: 600; color: var(--text); }
   .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
   .pd-own { margin-left: auto; display: flex; gap: 2px; }
+}
+// 编写留窗状态条：飞书打开后提示回站同步
+.pd-feishu-open {
+  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
+}
+.pd-feishu { margin-bottom: 10px;
+  a { display: inline-block; font-size: 12.5px; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 8px; padding: 5px 12px; text-decoration: none; &:hover { background: #dbeafe; } }
 }
 .pd-body { line-height: 1.9; font-size: 14px; overflow-wrap: anywhere; /* 长串/URL 强制断行，防竖排 */
   :deep(img) { max-width: 100%; border-radius: 8px; cursor: zoom-in; }

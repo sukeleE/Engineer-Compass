@@ -14,6 +14,7 @@ import MyTeamTasks from './team/MyTeamTasks.vue';
 import TaskPanel from './task/TaskPanel.vue';
 import auth from '../auth.js';
 import { fmtDate } from '../utils/noteStatus.js';
+import { exportPlanToFeishu } from '../utils/planExport.js';
 import PlanChat from './PlanChat.vue';
 
 // 页面 tab：team 小组任务（默认）| comp 竞赛日程 | study 学习日程 | calendar 月历（支持 ?tab=xx 深链）
@@ -70,6 +71,18 @@ async function onCreated(r) {
 }
 
 // 即时保存（勾选/新增/删除/改日期/改文本都触发）；返回是否成功（面板评星/链接乐观更新据此回滚）
+// 导出到飞书：新建飞书文档写入计划（md 下载走后端 /api/schedule/:id/export，见导出下拉）
+// 注意：本页已把 s.plan 拍平为 s.phases（load 里 plan: undefined），必须传 {phases: s.phases}，否则导出只有标题
+const fsBusy = ref(false);
+async function exportFs(s) {
+  if (fsBusy.value) return;
+  fsBusy.value = true;
+  try {
+    const r = await exportPlanToFeishu(s.title || s.comp_name || '备赛计划', { phases: s.phases });
+    ElMessage.success(`✅ 已创建飞书文档：${r.title}（新标签页已打开）`);
+  } catch (e) { ElMessage.error(e.message); } finally { fsBusy.value = false; }
+}
+
 async function save(s) {
   savingId.value = s.id;
   try {
@@ -345,6 +358,7 @@ onMounted(load);
                     <el-dropdown-item>
                       <a :href="api.scheduleExportUrl(s.id, 'excel')" target="_blank" style="text-decoration:none;color:inherit">Excel（CSV）</a>
                     </el-dropdown-item>
+                    <el-dropdown-item :disabled="fsBusy" @click="exportFs(s)">📄 导出到飞书</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>

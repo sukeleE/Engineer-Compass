@@ -242,8 +242,9 @@ CREATE TABLE IF NOT EXISTS comment (
 );
 CREATE INDEX IF NOT EXISTS idx_comment_target ON comment(team_id, target_type, target_id);
 
--- 表20 daily_note 日程笔记（每日学习笔记，富文本 + 学习状态；月历回看）
--- 归属策略与 user_schedule 一致：'local' 匿名 / 登录用户 id；同用户同日期仅一条
+-- 表20 daily_note 日程笔记（学习笔记，富文本 + 学习状态；月历回看）
+-- 归属策略与 user_schedule 一致：'local' 匿名 / 登录用户 id；同用户同日期允许多篇（「写笔记」每次新建）
+-- 双击竞态由后端 30s 窗口复用兜底（routes/feishu.js ensureBizRecord），故无唯一索引
 CREATE TABLE IF NOT EXISTS daily_note (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     TEXT DEFAULT 'local',          -- 'local' 或账号 id
@@ -254,7 +255,7 @@ CREATE TABLE IF NOT EXISTS daily_note (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_note_ud ON daily_note(user_id, note_date);
+CREATE INDEX IF NOT EXISTS idx_daily_note_ud ON daily_note(user_id, note_date);
 
 -- 表21 team_plan 小组 AI 备赛计划（按部门/角色拆分任务，多部门并行跟进）
 -- plan_json: { comp_id, comp_name, roles:[角色名], phases:[{phase,date,check_standard,week_hours,tasks:[{text,done,dept,role_id}]}] }
@@ -407,6 +408,48 @@ CREATE TABLE IF NOT EXISTS user_resource (
   file_size   INTEGER NOT NULL,          -- 字节
   file_type   TEXT,                      -- mime
   store_path  TEXT NOT NULL,             -- 磁盘文件名（仅 basename，防路径穿越）
+  feishu_token TEXT,                     -- 飞书云盘 file_token（分享到飞书时记录；撤销分享时删除飞书文件）
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_user_resource_user ON user_resource(user_id);
+
+-- 表36 访问记录（后台管理）：所有 /api 请求（含游客，user_id 为空即未登录）
+CREATE TABLE IF NOT EXISTS access_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER,                          -- 登录用户 id；游客为 NULL
+  username    TEXT,                             -- 用户名快照（游客为空）
+  ip          TEXT,                             -- 客户端 IP（x-forwarded-for 优先）
+  method      TEXT,                             -- GET/POST/PUT/DELETE
+  path        TEXT,                             -- 请求路径（不含 query）
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_access_time ON access_log(create_time);
+
+-- 表37 飞书 OAuth 绑定（方案三：网站 ↔ 飞书文档互传）：每用户绑定
+-- user_id 主键；open_id 可重复 → 一个飞书账号（open_id）可绑定多个网页账号
+-- access_token / refresh_token 只存服务端库，绝不返回前端；重启不丢，过期自动 refresh
+CREATE TABLE IF NOT EXISTS feishu_bind (
+  user_id       INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
+  open_id       TEXT NOT NULL,                          -- 飞书 open_id（同一飞书账号可对应多行）
+  user_name     TEXT DEFAULT '',                        -- 飞书用户姓名（展示用）
+  avatar_url    TEXT DEFAULT '',                        -- 飞书头像（展示用）
+  access_token  TEXT NOT NULL,                          -- user_access_token（约 2h）
+  refresh_token TEXT NOT NULL,                          -- 刷新凭证（30 天）
+  access_exp    INTEGER NOT NULL,                       -- access 过期时间戳（ms）
+  refresh_exp   INTEGER NOT NULL DEFAULT 0,             -- refresh 过期时间戳（ms）
+  create_time   TEXT DEFAULT (datetime('now','localtime')),
+  update_time   TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_feishu_bind_open ON feishu_bind(open_id);
+
+-- 表38 业务记录 ↔ 飞书文档映射（P1：飞书编辑页替代富文本编辑器）
+-- biz_type: daily_note | progress_log | share_post；同一条业务记录只映射一个飞书文档
+CREATE TABLE IF NOT EXISTS feishu_doc_map (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  biz_type    TEXT NOT NULL,                 -- 业务表名（白名单校验）
+  biz_id      INTEGER NOT NULL,              -- 业务记录 id
+  doc_id      TEXT NOT NULL,                 -- 飞书 document_id
+  doc_url     TEXT NOT NULL,                 -- 飞书文档链接（编辑跳转用）
+  create_time TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(biz_type, biz_id)
+);

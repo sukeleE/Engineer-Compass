@@ -154,6 +154,20 @@ const detailText = (d) => {
   } catch { return String(d); }
 };
 
+// ==================== Tab 访问记录（含游客） ====================
+const visits = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
+async function loadVisits() {
+  visits.loading = true;
+  try {
+    const r = await api.adminVisits({ q: visits.q, page: visits.page, size: visits.size });
+    visits.list = r.list; visits.total = r.total;
+  } catch (e) {
+    ElMessage.error(e.message);
+  } finally {
+    visits.loading = false;
+  }
+}
+
 // ==================== Tab4 公告管理 ====================
 const anns = ref([]);
 const annLoading = ref(false);
@@ -251,7 +265,7 @@ const fmtUp = (s) => {
 };
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 
-onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns(); loadResources(); loadStatus(); });
+onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisits(); loadAnns(); loadResources(); loadStatus(); });
 </script>
 
 <template>
@@ -415,7 +429,34 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
           :page-size="logs.size" v-model:current-page="logs.page" @current-change="loadLogs" />
       </el-tab-pane>
 
-      <!-- ========== Tab3 公告管理 ========== -->
+      <!-- ========== Tab 访问记录（含游客） ========== -->
+      <el-tab-pane label="🌐 访问记录" name="visits">
+        <div class="toolbar">
+          <el-input v-model="visits.q" placeholder="搜索 IP / 用户名 / 路径" clearable style="width: 240px"
+            @keyup.enter="visits.page = 1; loadVisits()" @clear="visits.page = 1; loadVisits()" />
+          <el-button @click="visits.page = 1; loadVisits()">查询</el-button>
+          <span class="count">共 {{ visits.total }} 次访问</span>
+        </div>
+        <el-table :data="visits.list" v-loading="visits.loading" stripe>
+          <el-table-column prop="create_time" label="时间" width="165" />
+          <el-table-column label="访问者" width="140">
+            <template #default="{ row }">
+              <template v-if="row.user_id != null">
+                <b>{{ row.username }}</b>
+                <span class="cell-sub">#{{ row.user_id }}</span>
+              </template>
+              <el-tag v-else size="small" type="warning" effect="plain">游客</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="method" label="方法" width="80" />
+          <el-table-column prop="path" label="路径" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="ip" label="IP" width="130" />
+        </el-table>
+        <el-pagination class="pg" background layout="total, prev, pager, next" :total="visits.total"
+          :page-size="visits.size" v-model:current-page="visits.page" @current-change="loadVisits" />
+      </el-tab-pane>
+
+      <!-- ========== Tab 公告管理 ========== -->
       <el-tab-pane label="📢 公告管理" name="anns">
         <div class="toolbar">
           <el-button type="primary" size="small" @click="openAnnDlg(null)">＋ 发布公告</el-button>
@@ -533,6 +574,23 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
             <div><b>{{ detail.stats.comments }}</b><span>评论</span></div>
             <div><b>{{ detail.stats.teams }}</b><span>所在小组</span></div>
           </div>
+          <div class="ud-res">
+            <div class="ud-res-title">📁 上传资源（{{ detail.resources.length }}）</div>
+            <el-table :data="detail.resources" size="small" max-height="200" stripe>
+              <el-table-column prop="file_name" label="文件名" min-width="180" show-overflow-tooltip />
+              <el-table-column label="大小" width="90">
+                <template #default="{ row }">{{ fmtBytes(row.file_size) }}</template>
+              </el-table-column>
+              <el-table-column prop="create_time" label="上传时间" width="155" />
+              <el-table-column label="操作" width="70">
+                <template #default="{ row }">
+                  <el-button link type="primary" size="small" tag="a"
+                    :href="api.resourceDownload(row.id)" target="_blank">下载</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!detail.resources.length" description="该用户未上传资源" :image-size="50" />
+          </div>
           <div class="ud-logs">
             <div class="ud-logs-title">最近操作日志（最多 20 条）</div>
             <el-table :data="detail.logs" size="small" max-height="300" stripe>
@@ -613,7 +671,8 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
     span { font-size: 12px; color: var(--text-2, #64748b); }
   }
 }
-.ud-logs {
-  .ud-logs-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.ud-res, .ud-logs {
+  margin-top: 14px;
+  .ud-res-title, .ud-logs-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 }
 </style>

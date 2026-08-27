@@ -6,10 +6,12 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { fmtDate } from '../../utils/noteStatus.js';
+import { downloadPlanMd, exportPlanToFeishu } from '../../utils/planExport.js';
 import TeamPlans from './TeamPlans.vue';
 import PlanChat from '../PlanChat.vue';
 import TaskPanel from '../task/TaskPanel.vue';
 import ImportPlanDialog from '../ImportPlanDialog.vue';
+import DocPicker from './DocPicker.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
@@ -201,10 +203,20 @@ function openEditChat(p) {
 }
 
 const editDlg = ref(false);
-const editPlan = ref(null); // { id, title, phases[] }
+const editPlan = ref(null); // { id, title, desc, phases[] }
 function openEdit(prow) {
-  editPlan.value = { id: prow.id, title: prow.title, phases: JSON.parse(JSON.stringify(prow.plan.phases || [])) };
+  editPlan.value = { id: prow.id, title: prow.title, desc: prow.plan?.desc || '', phases: JSON.parse(JSON.stringify(prow.plan.phases || [])) };
   editDlg.value = true;
+}
+// 计划说明：从飞书文档导入（raw 选文档 → 读 HTML → 填入 desc，保存时随 plan_json 落库）
+const impPlanDlg = ref(false);
+async function onPlanPicked({ document_id }) {
+  try {
+    const r = await api.feishuDocContent(document_id, 'html');
+    if (!editPlan.value) return;
+    editPlan.value.desc = r.content || '';
+    ElMessage.success(r.title ? `已读取「${r.title}」` : '✅ 已读取文档内容');
+  } catch (e) { ElMessage.error(e.message); }
 }
 const addTask = (ph) => { ph.tasks = ph.tasks || []; ph.tasks.push({ text: '', dept: '通用', done: false }); };
 const delTask = (ph, i) => ph.tasks.splice(i, 1);
@@ -216,11 +228,26 @@ async function saveEdit() {
   const valid = ep.phases.some((p) => (p.tasks || []).some((t) => t.text && String(t.text).trim()));
   if (!valid) return ElMessage.warning('计划需至少包含一个带任务名称的阶段');
   try {
-    await api.teamPlanSave(props.teamId, { id: ep.id, title: ep.title, plan_json: { phases: ep.phases } });
+    await api.teamPlanSave(props.teamId, { id: ep.id, title: ep.title, plan_json: { desc: ep.desc || '', phases: ep.phases } });
     ElMessage.success('已保存');
     editDlg.value = false;
     await load();
   } catch (e) { ElMessage.error(e.message); }
+}
+
+// 导出：md 文件下载 / 新建飞书文档（全员可用）
+const fsBusy = ref(false);
+function exportMd(prow) {
+  downloadPlanMd(prow.title || '小组计划', prow.title || '小组计划', prow.plan);
+  ElMessage.success('✅ 已导出 Markdown 文件');
+}
+async function exportFs(prow) {
+  if (fsBusy.value) return;
+  fsBusy.value = true;
+  try {
+    const r = await exportPlanToFeishu(prow.title || '小组计划', prow.plan);
+    ElMessage.success(`✅ 已创建飞书文档：${r.title}（新标签页已打开）`);
+  } catch (e) { ElMessage.error(e.message); } finally { fsBusy.value = false; }
 }
 
 async function removePlan(prow) {
@@ -263,11 +290,24 @@ onMounted(() => { load(); loadComps(); });
             <span class="pb-time">{{ String(p.update_time || p.create_time || '').slice(0, 16) }} 更新</span>
           </div>
           <div class="pb-ops">
+            <!-- 导出全员可用：md 下载 / 新建飞书文档 -->
+            <el-dropdown trigger="click" style="margin: 0 4px">
+              <el-button size="small" plain>⬇️ 导出</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="exportMd(p)">Markdown 文件</el-dropdown-item>
+                  <el-dropdown-item :disabled="fsBusy" @click="exportFs(p)">📄 导出到飞书</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button v-if="canEdit" size="small" type="success" plain @click="openEditChat(p)">💬 AI 修改</el-button>
             <el-button v-if="canEdit" size="small" @click="openEdit(p)">✏️ 手动编辑</el-button>
             <el-button v-if="canEdit" size="small" type="danger" plain @click="removePlan(p)">删除</el-button>
           </div>
         </div>
+
+        <!-- 计划说明（飞书文档导入 / 手输，后端已消毒） -->
+        <div v-if="p.plan?.desc" class="pb-desc" v-html="p.plan.desc"></div>
 
         <!-- 总进度 + 部门看板 -->
         <div class="pb-stats">
@@ -338,6 +378,11 @@ onMounted(() => { load(); loadComps(); });
         <div class="ed-title">
           <el-input v-model="editPlan.title" placeholder="计划名称" style="max-width: 340px" />
         </div>
+        <!-- 计划说明：展示在计划卡标题下方；可从飞书文档导入（HTML 渲染） -->
+        <div class="ed-desc">
+          <el-input v-model="editPlan.desc" type="textarea" :rows="3" placeholder="计划说明（备赛思路/目标/分工说明，可从飞书文档导入）" />
+          <el-button size="small" type="primary" plain @click="impPlanDlg = true">📥 从飞书导入</el-button>
+        </div>
         <div class="ed-scroll">
           <div v-for="(ph, pi) in editPlan.phases" :key="pi" class="ed-phase">
             <div class="ed-phase-head">
@@ -382,6 +427,9 @@ onMounted(() => { load(); loadComps(); });
 
     <!-- 文档导入：AI 转阶段任务 → 预览确认 → 保存为小组计划（任务归「通用」部门） -->
     <ImportPlanDialog v-model="importDlg" mode="team" :team-id="teamId" @created="load" />
+
+    <!-- 计划说明从飞书导入（raw 模式：只选文档，不写业务记录） -->
+    <DocPicker v-model="impPlanDlg" raw @picked="onPlanPicked" />
   </div>
 </template>
 
@@ -400,6 +448,14 @@ onMounted(() => { load(); loadComps(); });
       .pb-time { color: #94a3b8; font-size: 12px; }
     }
     .pb-ops { flex-shrink: 0; }
+  }
+  .pb-desc { margin-bottom: 10px; font-size: 13px; line-height: 1.8; color: var(--text-2);
+    background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; overflow-wrap: anywhere;
+    :deep(p) { margin: 6px 0; }
+    :deep(ul), :deep(ol) { margin: 6px 0; padding-left: 20px; }
+    :deep(h1), :deep(h2), :deep(h3) { margin: 10px 0 6px; font-size: 15px; }
+    :deep(pre) { background: #f1f5f9; border-radius: 8px; padding: 8px 12px; overflow-x: auto; }
+    :deep(a) { color: #2563eb; }
   }
   .pb-stats { margin-bottom: 10px;
     .pb-bar { margin-bottom: 6px; }
@@ -439,6 +495,10 @@ onMounted(() => { load(); loadComps(); });
 
 .ed-scroll { max-height: 56vh; overflow-y: auto; padding-right: 6px; }
 .ed-title { margin-bottom: 10px; }
+.ed-desc { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px;
+  .el-textarea { flex: 1; }
+  .el-button { flex-shrink: 0; margin-top: 2px; }
+}
 .ed-phase { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
   .ed-phase-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .ed-grid { display: flex; gap: 8px; align-items: center;

@@ -219,7 +219,11 @@ r.get('/users/:id/detail', (req, res) => {
     try { row.detail = row.detail ? JSON.parse(row.detail) : null; } catch { row.detail = null; }
     return row;
   });
-  res.json({ user: safeUser(u), stats, logs });
+  // 该用户上传的资源（管理员可见；下载走 /api/resource/:id/download 已对管理员放行）
+  const resources = db.prepare(
+    `SELECT id, file_name, file_size, file_type, create_time FROM user_resource WHERE user_id = ? ORDER BY id DESC LIMIT 20`
+  ).all(id);
+  res.json({ user: safeUser(u), stats, resources, logs });
 });
 
 // PUT /api/admin/users/:id/role {is_admin} — 设为/取消管理员；禁止操作自己
@@ -254,6 +258,25 @@ r.get('/resources', (req, res) => {
 
 // DELETE /api/admin/resources/:id — 删除任意用户资源（复用 resource.js 的 deleteResource，审计记 admin 变体）
 r.delete('/resources/:id', (req, res) => deleteResource(req, res, Number(req.params.id)));
+
+// GET /api/admin/visits?page&size&userId&q — 访问记录（含游客：user_id 为 NULL 即未登录；q 模糊 ip/用户名/路径）
+r.get('/visits', (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
+  const userId = req.query.userId ? Number(req.query.userId) : null;
+  const q = String(req.query.q || '').trim();
+  const conds = [];
+  const params = [];
+  if (userId) { conds.push('user_id = ?'); params.push(userId); }
+  if (q) { conds.push('(ip LIKE ? OR username LIKE ? OR path LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM access_log ${where}`).get(...params).n;
+  const list = db.prepare(
+    `SELECT id, user_id, username, ip, method, path, create_time FROM access_log ${where}
+     ORDER BY id DESC LIMIT ? OFFSET ?`
+  ).all(...params, size, (page - 1) * size);
+  res.json({ total, page, size, list });
+});
 
 export default r;
 

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞书文档互传工作台</title>
+<!-- Markdown 渲染（CDN 不可达时自动回退 <pre> 纯文本） -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --dim:#94a3b8; --ok:#4ade80; --err:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.6 system-ui,"Segoe UI",sans-serif; padding:24px; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:var(--dim); margin-bottom:20px; font-size:13px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:820px){ .grid{grid-template-columns:1fr} }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card h2 { font-size:15px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; background:#334155; color:var(--dim); }
+  .badge.ok { background:#14532d; color:var(--ok); }
+  .badge.no { background:#7f1d1d; color:var(--err); }
+  .kv { font-size:12px; color:var(--dim); margin-bottom:8px; }
+  .kv b { color:var(--txt); font-weight:600; }
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 4px; }
+  input, textarea, select { width:100%; background:#0f172a; border:1px solid var(--line); color:var(--txt); border-radius:8px; padding:8px 10px; font:13px system-ui; outline:none; }
+  input:focus, textarea:focus, select:focus { border-color:var(--acc); }
+  textarea { min-height:80px; resize:vertical; }
+  button { margin-top:10px; background:var(--acc); color:#0f172a; border:none; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; font-size:13px; }
+  button:hover { filter:brightness(1.1); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--acc); border:1px solid var(--acc); }
+  button.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .log { margin-top:14px; background:#0f172a; border:1px solid var(--line); border-radius:10px; padding:10px; font:12px/1.7 ui-monospace,Consolas,monospace; max-height:300px; overflow:auto; }
+  .log .l { white-space:pre-wrap; word-break:break-all; margin-bottom:6px; }
+  .log .in { color:var(--dim); }
+  .log .ok { color:var(--ok); }
+  .log .err { color:var(--err); }
+  .hint { font-size:12px; color:var(--dim); margin-top:8px; }
+  a { color:var(--acc); }
+  .step-num { display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--acc); color:#0f172a; font-size:12px; font-weight:700; align-items:center; justify-content:center; flex:none; }
+  code { background:#0f172a; padding:1px 6px; border-radius:6px; font-size:12px; }
+  .docs { font-size:12px; color:var(--dim); margin:6px 0; }
+  .docs li { margin:3px 0 3px 18px; }
+  table.list { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  table.list th, table.list td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+  table.list th { color:var(--dim); font-weight:600; font-size:12px; }
+  table.list td a { text-decoration:none; }
+  .empty { color:var(--dim); font-size:13px; padding:14px 0; text-align:center; }
+  .md { background:#0f172a; border:1px solid var(--line); border-radius:10px; padding:14px; margin-top:10px; font-size:14px; line-height:1.7; overflow-x:auto; }
+  .md h1, .md h2, .md h3 { margin:12px 0 6px; }
+  .md h1 { font-size:20px; } .md h2 { font-size:17px; } .md h3 { font-size:15px; }
+  .md ul, .md ol { padding-left:22px; margin:6px 0; }
+  .md pre { background:#1e293b; border:1px solid var(--line); border-radius:8px; padding:10px; overflow-x:auto; margin:8px 0; }
+  .md code { background:#1e293b; }
+  .md pre code { background:none; padding:0; }
+  .md blockquote { border-left:3px solid var(--acc); padding-left:10px; color:var(--dim); margin:8px 0; }
+  .md table { border-collapse:collapse; margin:8px 0; }
+  .md th, .md td { border:1px solid var(--line); padding:5px 10px; }
+  .md a { color:var(--acc); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📄 飞书文档互传工作台</h1>
+  <div class="sub">方案三：网站自有 UI，不嵌入飞书编辑器；所有飞书 API 由后端代理，密钥不出服务端。链路：OAuth 绑定 → 文档列表 → 查看（Markdown 渲染）/ 新建 / 追加 / 附件上传下载</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2><span class="step-num">①</span> 飞书绑定（OAuth）</h2>
+      <div id="cfg" class="kv">读取中…</div>
+      <div class="row">
+        <button id="btnAuth" onclick="authUrl()">🔗 绑定飞书账号</button>
+        <button class="ghost" onclick="loadStatus()">刷新状态</button>
+      </div>
+      <button class="danger" id="btnUnbind" style="display:none" onclick="unbind()">解绑</button>
+      <div class="hint">重定向 URL：<b id="redirect">-</b>（开发者后台「安全设置」配置；授权后权限生效需「版本管理与发布」并重新授权）</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step-num">②</span> 文档列表</h2>
+      <p class="kv">云空间：填 <b>folder_token</b>（留空=我的空间根）；知识库 wiki：选 space_id</p>
+      <div class="row">
+        <input id="folderToken" placeholder="folder_token（云空间文件夹，可留空）">
+        <select id="spaceId"><option value="">— 或选知识库空间 —</option></select>
+        <button class="ghost" style="flex:none" onclick="loadSpaces()">列空间</button>
+      </div>
+      <button onclick="loadList()">📂 加载文档列表</button>
+      <div id="listBox"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2><span class="step-num">③</span> 文档查看（飞书 → 网站，Markdown 渲染）</h2>
+    <p class="kv">粘贴 <b>document_id</b> 或完整飞书链接（docx / wiki 均可）</p>
+    <div class="row">
+      <input id="docId" placeholder="document_id 或 https://xxx.feishu.cn/docx/… / wiki/…">
+      <select id="fmt"><option value="markdown">markdown（结构）</option><option value="text">纯文本（最快）</option><option value="block">block（原始）</option></select>
+    </div>
+    <button onclick="viewDoc()">👁 查看文档</button>
+    <div id="viewBox"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2><span class="step-num">④</span> 新建 / 追加（网站 → 飞书）</h2>
+    <div class="row">
+      <input id="newTitle" placeholder="新文档标题（默认：未命名文档）">
+      <input id="newFolder" placeholder="folder_token（留空=我的空间根）">
+    </div>
+    <textarea id="newMd" placeholder="Markdown 内容（标题 # / 列表 - / 任务 [x] / 引用 > / 代码 ``` 均转为飞书 Block）"># 备赛计划
+
+- 第一阶段：资料收集
+- 第二阶段：方案设计
+
+## 里程碑
+
+| 任务 | 日期 |
+|------|------|
+| 初赛 | 9月 |
+</textarea>
+    <div class="row">
+      <button onclick="createDoc()">✨ 新建飞书文档</button>
+      <input id="appendId" placeholder="追加目标 document_id" style="margin-top:10px">
+      <button class="ghost" onclick="appendDoc()">＋ 追加到目标文档</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2><span class="step-num">⑤</span> 附件互传（云盘文件）</h2>
+    <p class="kv">上传：本机文件 → 飞书云盘；下载：file_token → 本机（文档里的附件在查看区以 <code>📎 占位</code> 显示 token）</p>
+    <input type="file" id="upFile">
+    <button onclick="uploadFile()">⬆ 上传到飞书云盘</button>
+    <div class="row" style="margin-top:10px">
+      <input id="dlToken" placeholder="file_token">
+      <button class="ghost" onclick="downloadFile()">⬇ 下载文件</button>
+    </div>
+    <div id="upBox" class="kv" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>📋 调用日志</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = document.getElementById('log');
+function println(cls, text) {
+  const div = document.createElement('div');
+  div.className = 'l ' + cls;
+  div.textContent = text;
+  log.prepend(div);
+}
+async function api(path, opts = {}) {
+  const res = await fetch('/api/feishu' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { data });
+  return data;
+}
+const btn = (id, on) => { const b = $(id); if (b) b.disabled = on; };
+
+// ① 绑定
+async function loadStatus() {
+  try {
+    const s = await api('/oauth/status');
+    $('cfg').innerHTML =
+      `应用凭证：${s.configured ? '<b>已配置</b> <span class="badge ok">' + s.app_id + '</span>' : '<b>未配置</b> <span class="badge no">去 backend/.env 填 FEISHU_APP_ID / FEISHU_APP_SECRET</span>'}<br>` +
+      `绑定状态：${s.bound ? '<span class="badge ok">已绑定</span> ' + (s.user_name ? '用户 <b>' + s.user_name + '</b> ' : '') + '（剩余 ' + s.expires_in + 's，到期自动刷新）' : '<span class="badge no">未绑定</span> 需先走 OAuth 授权'}` +
+      (s.open_id ? `<br>open_id：<b>${s.open_id}</b>` : '');
+    $('redirect').textContent = s.redirect_uri || '-';
+    btn('btnAuth', !s.configured);
+    $('btnUnbind').style.display = s.bound ? '' : 'none';
+  } catch (e) { println('err', '[状态] ' + e.message); }
+}
+async function authUrl() {
+  try {
+    const d = await api('/oauth/auth');
+    println('in', '[绑定] 跳转飞书授权页…（若被拦截请复制链接手动打开）');
+    location.href = d.url;
+  } catch (e) { println('err', '[绑定] ' + e.message); }
+}
+async function unbind() {
+  try {
+    await api('/oauth/unbind', { method: 'POST' });
+    println('in', '[绑定] 已解绑，可重新授权');
+  } catch (e) { println('err', '[绑定] ' + e.message); }
+  loadStatus();
+}
+
+// ② 列表
+async function loadSpaces() {
+  try {
+    const d = await api('/doc/spaces');
+    const sel = $('spaceId');
+    sel.innerHTML = '<option value="">— 或选知识库空间 —</option>' +
+      (d.items || []).map((s) => `<option value="${s.space_id}">${s.name}（${s.space_id}）</option>`).join('') ||
+      '<option value="">无可见知识库（需把应用/用户加为知识库成员）</option>';
+    println('ok', '[列表] 知识库空间：' + ((d.items || []).map((s) => s.name).join('、') || '无'));
+  } catch (e) { println('err', '[列表] ' + e.message); }
+}
+async function loadList() {
+  const folder = $('folderToken').value.trim();
+  const space = $('spaceId').value;
+  try {
+    const q = space ? '?space_id=' + space : '?folder_token=' + encodeURIComponent(folder);
+    const d = await api('/doc/list' + q);
+    println('ok', `[列表] ${d.mode === 'wiki' ? '知识库' : '云空间'} 共 ${d.items.length} 项`);
+    renderList(d.items);
+  } catch (e) { println('err', '[列表] ' + e.message); }
+}
+function renderList(items) {
+  const box = $('listBox');
+  if (!items.length) { box.innerHTML = '<div class="empty">空目录</div>'; return; }
+  box.innerHTML = `<table class="list"><tr><th>名称</th><th>类型</th><th>操作</th></tr>` +
+    items.map((it) => `<tr>
+      <td>${it.name || '(未命名)'}${it.has_child ? ' 📁' : ''}</td>
+      <td><span class="badge">${it.type}</span></td>
+      <td><a href="javascript:void(0)" onclick="openDoc('${it.obj_token || it.token}')">查看</a>
+          ${it.url ? ` · <a href="${it.url}" target="_blank">飞书原链↗</a>` : ''}</td>
+    </tr>`).join('') + `</table>`;
+}
+function openDoc(tok) {
+  $('docId').value = tok;
+  $('fmt').value = 'markdown';
+  viewDoc();
+  $('viewBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ③ 查看
+async function viewDoc() {
+  const id = $('docId').value.trim();
+  if (!id) return println('err', '[查看] 需要 document_id 或链接');
+  const fmt = $('fmt').value;
+  const box = $('viewBox');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const d = await api('/doc/content?document_id=' + encodeURIComponent(id) + '&format=' + fmt);
+    println('ok', `[查看] 「${d.title || '(未命名)'}」 ${fmt} 格式 ${d.count != null ? d.count + ' blocks' : d.chars + ' 字'}`);
+    if (fmt === 'block') {
+      box.innerHTML = '<pre class="md" style="white-space:pre-wrap">' + esc(JSON.stringify(d.blocks || [], null, 1)) + '</pre>';
+      return;
+    }
+    if (fmt === 'text') { box.innerHTML = '<pre class="md" style="white-space:pre-wrap">' + esc(d.content) + '</pre>'; return; }
+    const mdText = d.content || '';
+    if (window.marked) {
+      box.innerHTML = '<div class="md">' + window.marked.parse(mdText) + '</div>';
+    } else {
+      box.innerHTML = '<pre class="md" style="white-space:pre-wrap">' + esc(mdText) + '</pre>';
+    }
+  } catch (e) { box.innerHTML = ''; println('err', '[查看] ' + e.message); }
+}
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// ④ 新建 / 追加
+async function createDoc() {
+  const title = $('newTitle').value.trim();
+  const md = $('newMd').value.trim();
+  const folder = $('newFolder').value.trim();
+  if (md.length < 3 && !title) return println('err', '[新建] 需要标题或内容');
+  println('in', '[新建] 创建 docx 并写入内容…');
+  try {
+    const d = await api('/doc/create', { method: 'POST', body: JSON.stringify({ title, content: md, folder_token: folder }) });
+    println('ok', `[新建] ${d.message}\n链接：${d.url}\ndocument_id：${d.document_id}（写入 ${d.blocks} 个 Block）`);
+    $('appendId').value = d.document_id || $('appendId').value;
+  } catch (e) { println('err', '[新建] ' + e.message); }
+}
+async function appendDoc() {
+  const docId = $('appendId').value.trim();
+  const md = $('newMd').value.trim();
+  if (!docId) return println('err', '[追加] 需要 document_id');
+  if (!md) return println('err', '[追加] 内容为空');
+  try {
+    const d = await api('/doc/append', { method: 'POST', body: JSON.stringify({ document_id: docId, content: md }) });
+    println('ok', `[追加] ${d.message}（${d.blocks} 个 Block）`);
+  } catch (e) { println('err', '[追加] ' + e.message); }
+}
+
+// ⑤ 附件
+async function uploadFile() {
+  const f = $('upFile').files[0];
+  if (!f) return println('err', '[上传] 先选择文件');
+  if (f.size > 20 * 1024 * 1024) return println('err', '[上传] 单文件 ≤20MB');
+  const fd = new FormData();
+  fd.append('file', f);
+  println('in', `[上传] ${f.name}（${(f.size / 1024 / 1024).toFixed(2)}MB）→ 飞书云盘…`);
+  try {
+    const res = await fetch('/api/feishu/file/upload', { method: 'POST', body: fd });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    $('upBox').innerHTML = `<b>${d.file_name}</b> file_token：<code>${d.file_token}</code>`;
+    $('dlToken').value = d.file_token || $('dlToken').value;
+    println('ok', `[上传] ${d.message}（token：${d.file_token}）`);
+  } catch (e) { println('err', '[上传] ' + e.message); }
+}
+function downloadFile() {
+  const tok = $('dlToken').value.trim();
+  if (!tok) return println('err', '[下载] 需要 file_token');
+  location.href = '/api/feishu/file/download?file_token=' + encodeURIComponent(tok);
+  println('in', '[下载] 开始下载（浏览器标签页/下载列表查看）');
+}
+
+loadStatus();
+loadSpaces();
+</script>
+</body>
+</html>

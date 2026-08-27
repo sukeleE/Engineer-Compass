@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import { fmtDate } from '../utils/noteStatus.js';
 import auth from '../auth.js';
+import { downloadPlanMd, exportPlanToFeishu } from '../utils/planExport.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
 import ImportPlanDialog from './ImportPlanDialog.vue';
 import PlanChat from './PlanChat.vue';
@@ -268,6 +269,21 @@ async function onManualCreated(res) {
   if (item) select(item);
 }
 
+// 导出：md 文件下载 / 新建飞书文档（导出不落库，飞书文档由用户自助创建）
+const fsBusy = ref(false);
+function exportMd(s) {
+  downloadPlanMd(s.topic || '学习计划', s.topic || '学习计划', s.plan);
+  ElMessage.success('✅ 已导出 Markdown 文件');
+}
+async function exportFs(s) {
+  if (fsBusy.value) return;
+  fsBusy.value = true;
+  try {
+    const r = await exportPlanToFeishu(s.topic || '学习计划', s.plan);
+    ElMessage.success(`✅ 已创建飞书文档：${r.title}（新标签页已打开）`);
+  } catch (e) { ElMessage.error(e.message); } finally { fsBusy.value = false; }
+}
+
 async function removeStudy(s) {
   try {
     await ElMessageBox.confirm(`删除学习日程「${s.topic}」？`, '确认删除', { type: 'warning' });
@@ -375,6 +391,15 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
               <p v-if="detail.plan?.summary" class="dh-summary">{{ detail.plan.summary }}</p>
             </div>
             <div class="dh-ops">
+              <el-dropdown trigger="click" style="margin: 0 4px">
+                <el-button size="small" plain>⬇️ 导出</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="exportMd(detail)">Markdown 文件</el-dropdown-item>
+                    <el-dropdown-item :disabled="fsBusy" @click="exportFs(detail)">📄 导出到飞书</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-button size="small" type="success" plain @click="chatEdit = true">💬 AI 修改</el-button>
               <el-button size="small" type="danger" plain @click="removeStudy(detail)">删除</el-button>
             </div>

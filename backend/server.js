@@ -22,7 +22,9 @@ import notifications from './routes/notifications.js';
 import admin, { publicAnnounce } from './routes/admin.js';
 import resource, { publicR } from './routes/resource.js';
 import importPlan from './routes/importPlan.js';
+import feishu from './routes/feishu.js';
 import { hasSMTP } from './routes/mailer.js';
+import { accessLog } from './routes/middleware.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -30,6 +32,9 @@ if (existsSync('.env')) process.loadEnvFile('.env');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '30mb' })); // 资料上传走 base64 JSON（20MB 文件 → ~27MB）
+
+// 访问日志：认证前挂载（游客/认证失败也记录），health 探活不算噪音
+app.use('/api', (req, res, next) => (req.originalUrl === '/api/health' ? next() : accessLog(req, res, next)));
 
 app.use('/api/competition', competitions);
 app.use('/api/ai', ai);
@@ -51,6 +56,9 @@ app.use('/api/announcements', publicAnnounce);
 app.use('/api/resource', publicR); // 公开分享下载先声明（无鉴权，token 即钥匙）；主 router 挂在后
 app.use('/api/resource', resource);
 app.use('/api/import', importPlan);
+app.use('/api/feishu', feishu);
+// 飞书互传工作台页面（独立静态工具页，不参与业务）
+app.use(express.static('public'));
 
 // 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；mail=true 表示邮箱登录发真邮件）
 app.get('/api/health', (req, res) => {

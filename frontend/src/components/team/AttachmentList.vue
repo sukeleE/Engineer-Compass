@@ -1,8 +1,20 @@
+<script>
+// 普通 script 块：具名导出工具（<script setup> 不允许 export）
+// attachments 库存储为 JSON 字符串（如 "[]"）——统一归一为数组，调用方也能 import 复用
+export const normAtts = (a) => {
+  if (Array.isArray(a)) return a;
+  if (typeof a === 'string') { try { const p = JSON.parse(a); return Array.isArray(p) ? p : []; } catch { return []; } }
+  return [];
+};
+</script>
+
 <script setup>
 // 附件渲染：图片→可点击缩略图（点开全屏预览+下载）、视频/音频内联播放、其他文件下载链接
+import { computed } from 'vue';
 import { openImage } from '../../utils/imageViewer.js';
 
-defineProps({ attachments: { type: Array, default: () => [] } });
+const props = defineProps({ attachments: { type: [Array, String], default: () => [] } });
+const atts = computed(() => normAtts(props.attachments));
 
 // 条目两种形态：base64 内嵌（data）/ 引用型公开分享链接（url，我的资源引用）
 const src = (a) => (a.data ? `data:${a.mime || 'application/octet-stream'};base64,${a.data}` : a.url || '');
@@ -13,15 +25,15 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
 <template>
   <div class="att-list">
     <!-- 图片：缩略图网格，点击全屏预览 -->
-    <div v-if="attachments.some((a) => is(a, 'image/'))" class="att-imgs">
-      <div v-for="(a, i) in attachments.filter((x) => is(x, 'image/'))" :key="i" class="att-thumb"
+    <div v-if="atts.some((a) => is(a, 'image/'))" class="att-imgs">
+      <div v-for="(a, i) in atts.filter((x) => is(x, 'image/'))" :key="i" class="att-thumb"
         @click="openImage(src(a), a.name)" title="点击预览 / 下载">
         <img :src="src(a)" :alt="a.name" loading="lazy" />
         <span class="att-zoom">🔍</span>
       </div>
     </div>
     <!-- 视频 / 音频 / 文件 -->
-    <template v-for="(a, i) in attachments" :key="i">
+    <template v-for="(a, i) in atts" :key="i">
       <video v-if="is(a, 'video/')" class="att-media" :src="src(a)" controls preload="metadata" />
       <audio v-else-if="is(a, 'audio/')" class="att-audio" :src="src(a)" controls preload="metadata" />
       <a v-else-if="!is(a, 'image/')" class="att-file" :href="src(a)" :download="a.name" :title="a.name">

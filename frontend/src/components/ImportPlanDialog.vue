@@ -4,6 +4,7 @@
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
+import DocPicker from './team/DocPicker.vue';
 
 const props = defineProps({
   modelValue: Boolean,
@@ -14,6 +15,7 @@ const emit = defineEmits(['update:modelValue', 'created']);
 
 const MAX_SIZE = 20 * 1024 * 1024;
 const fileInput = ref(null);
+const docDlg = ref(false);   // 飞书文档拾取弹窗
 const fileName = ref('');
 const converting = ref(false);
 const result = ref(null); // {title|topic, phases[], summary?, resource_keywords[]}
@@ -33,6 +35,28 @@ async function onFile(e) {
   converting.value = true;
   try {
     const r = await api.planImport(f, props.mode);
+    result.value = r.plan;
+  } catch (err) {
+    ElMessage.error(err.message);
+    result.value = null;
+  } finally {
+    converting.value = false;
+  }
+}
+
+// 飞书文档导入：raw 模式拿到 document_id → 后端拉 markdown → 走 /import/plan-text 与文件导入同一套 AI 转换
+async function onDocPicked(doc) {
+  if (!doc?.document_id) return;
+  fileName.value = doc.name || '飞书文档';
+  docDlg.value = false;
+  converting.value = true;
+  try {
+    const c = await api.feishuDocContent(doc.document_id, 'markdown');
+    if (!c?.content || c.content.replace(/\s/g, '').length < 20) {
+      ElMessage.warning('该文档没有可读文本内容（纯图片文档暂不支持）');
+      return;
+    }
+    const r = await api.planImportText({ mode: props.mode, text: c.content, source_name: doc.name || '飞书文档' });
     result.value = r.plan;
   } catch (err) {
     ElMessage.error(err.message);
@@ -72,13 +96,16 @@ async function confirm() {
     width="760px" :close-on-click-modal="false" append-to-body @update:model-value="(v) => emit('update:modelValue', v)">
     <p class="ip-tip">上传文档，AI 只做格式划分（保留原文），预览确认后保存</p>
 
-    <!-- ① 文件选择 -->
+    <!-- ① 文档选择：本地文件 / 飞书文档 -->
     <div v-if="!converting && !result" class="ip-pick">
       <input ref="fileInput" type="file" class="hide-file"
         accept=".docx,.pdf,.xls,.xlsx,.md,.txt" @change="onFile" />
-      <el-button type="primary" size="large" @click="fileInput?.click()">📂 选择文件导入</el-button>
-      <p class="ip-hint">支持 Word .docx / PDF / Excel .xls/.xlsx / Markdown / 纯文本，单文件 ≤20MB<br>
-        （扫描版 PDF 无文字层、纯图片文档无法阅读）</p>
+      <div class="ip-btns">
+        <el-button type="primary" size="large" @click="fileInput?.click()">📂 选择文件导入</el-button>
+        <el-button type="success" size="large" plain @click="docDlg = true">📄 从飞书文档导入</el-button>
+      </div>
+      <p class="ip-hint">支持 Word .docx / PDF / Excel .xls/.xlsx / Markdown / 纯文本，单文件 ≤20MB；<br>
+        或从飞书云文档导入（扫描版 PDF 无文字层、纯图片文档无法阅读）</p>
     </div>
 
     <!-- ② AI 转换中 -->
@@ -120,6 +147,9 @@ async function confirm() {
       <el-button @click="emit('update:modelValue', false)">取消</el-button>
       <el-button v-if="result" type="primary" :loading="saving" @click="confirm">✅ 确认导入</el-button>
     </template>
+
+    <!-- 飞书文档拾取（raw 模式仅回传 document_id/name/url，不落 biz 映射） -->
+    <DocPicker v-model="docDlg" raw @picked="onDocPicked" />
   </el-dialog>
 </template>
 
@@ -127,6 +157,7 @@ async function confirm() {
 .hide-file { display: none; }
 .ip-tip { color: #94a3b8; font-size: 12.5px; margin: 0 0 14px; }
 .ip-pick { text-align: center; padding: 30px 0 24px;
+  .ip-btns { display: flex; justify-content: center; gap: 12px; }
   .ip-hint { color: #94a3b8; font-size: 12.5px; margin: 14px 0 0; line-height: 1.9; }
 }
 .ip-loading { text-align: center; padding: 30px 0; min-height: 120px;

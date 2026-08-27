@@ -5,6 +5,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import RichEditor from './team/RichEditor.vue';
+import DocPicker from './team/DocPicker.vue';
 import { NOTE_STATUS, statusOf, excerpt, fmtDate } from '../utils/noteStatus.js';
 
 const props = defineProps({
@@ -23,14 +24,19 @@ const deleting = ref(false);
 const loading = ref(false);
 const dlg = ref(false);      // 笔记弹窗
 const dlgMode = ref('edit'); // view 回看 | edit 编写/编辑
+const impDlg = ref(false);   // 从飞书导入文档选择器
 
-// 当前日期对应的笔记（本月列表内查找；跨月时重拉列表）
-const activeNote = computed(() => monthNotes.value.find((n) => n.note_date === date.value) || null);
+// 当前日期对应的笔记（同天可多篇：取最新一篇，编辑/回填用它；本月列表内查找，跨月时重拉）
+const activeNote = computed(() => {
+  const arr = monthNotes.value.filter((n) => n.note_date === date.value);
+  return arr.length ? arr.reduce((a, b) => (b.id > a.id ? b : a)) : null;
+});
 
-// 历史列表：按日期倒序；同日期多条（登录后遗留的 'local' 旧笔记）只保留一条
+// 历史列表：按日期倒序、同日按新到旧；同天多篇全部显示（dayIdx=当天第几篇，最新为 1）
 const history = computed(() => {
-  const seen = new Set();
-  return monthNotes.value.filter((n) => !seen.has(n.note_date) && seen.add(n.note_date));
+  const list = [...monthNotes.value].sort((a, b) => b.note_date.localeCompare(a.note_date) || b.id - a.id);
+  const cnt = {};
+  return list.map((n) => { const k = n.note_date; cnt[k] = (cnt[k] || 0) + 1; return { ...n, dayIdx: cnt[k] }; });
 });
 
 async function loadMonth() {
@@ -64,6 +70,13 @@ function openDlg(d, mode) {
   dlgMode.value = mode;
   applyDate(); // 与当前日期相同时 watch 不触发，手动回填
   dlg.value = true;
+  // 嵌入式查看：查询该笔记是否已关联飞书文档（有则显示「在飞书打开」徽标）
+  feishuDoc.value = '';
+  feishuOpened.value = false;
+  const n = activeNote.value;
+  if (n?.id) {
+    api.feishuBizStatus('daily_note', n.id).then((s) => { if (s?.mapped) feishuDoc.value = s.doc_url; }).catch(() => {});
+  }
 }
 
 // 编辑态切到查看态（保存后回看刚写的内容）
@@ -90,6 +103,83 @@ async function saveNote() {
   } finally {
     saving.value = false;
   }
+}
+
+// ---- 飞书编辑（P1）：日程笔记 ↔ 飞书文档（无笔记时先自动保存草稿创建记录，再在飞书里完善）
+// 交互：查看 = 弹窗内嵌入式渲染 + 飞书链接徽标；编写 = 飞书新标签打开 + 本站留窗显示状态条，写完后点「从飞书同步」
+const feishuBusy = ref(false);
+const feishuDoc = ref('');      // 已关联飞书文档链接（查看模式显示「在飞书打开」）
+const feishuOpened = ref(false); // 本次编辑已打开飞书（显示「飞书编辑中」状态条）
+// 「📝 写笔记」主按钮：每次点击都新建一篇（同天可多篇），直跳新飞书文档；防双击锁开头即置位
+async function feishuNewNote() {
+  if (feishuBusy.value) return;
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizOpen('daily_note', null, { note_date: date.value });
+    feishuDoc.value = r.url || '';
+    feishuOpened.value = true;
+    window.open(r.url, '_blank');
+    ElMessage.success(r.created ? '已新建飞书笔记并打开' : '已打开飞书文档');
+    await loadMonth();
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+async function feishuEditNote() {
+  // 防双击：锁定期间再点直接忽略（noteSave 阶段也锁，避免并发双建飞书文档）
+  if (feishuBusy.value) return;
+  feishuBusy.value = true;
+  let n = activeNote.value;
+  try {
+    // 尚无笔记：有草稿先保存（保留本地内容）；空草稿直接让后端自动创建记录（「写笔记」直跳飞书的入口）
+    if (!n?.id) {
+      if (content.value.trim() || status.value) {
+        await api.noteSave({ note_date: date.value, content: content.value, status: status.value, schedule_id: scheduleId.value || null });
+        await loadMonth();
+        n = activeNote.value;
+        if (!n?.id) return ElMessage.error('笔记创建失败，请重试');
+      }
+    }
+    const r = await api.feishuBizOpen('daily_note', n?.id ?? null, { note_date: date.value });
+    feishuDoc.value = r.url || '';
+    feishuOpened.value = true;
+    window.open(r.url, '_blank');
+    ElMessage.success(r.created ? '已创建飞书文档并打开，本站窗口保持可同步' : '已同步最新内容，飞书文档已打开');
+    await loadMonth();
+    applyDate();
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+
+// 历史列表点击：已关联飞书文档 → 直接飞书新标签查看（用户需求：点笔记即跳飞书查看）；未关联 → 站内弹窗回看
+const opening = ref(false);
+async function openNote(n) {
+  if (opening.value) return;
+  opening.value = true;
+  try {
+    const s = await api.feishuBizStatus('daily_note', n.id);
+    if (s?.mapped && s.doc_url) { window.open(s.doc_url, '_blank'); return; }
+  } catch (e) { /* 查询失败回退站内弹窗 */ }
+  finally { opening.value = false; }
+  openDlg(n.note_date, 'view');
+}
+
+// 从飞书导入：内容回填编辑器，列表可能新增记录（无笔记时后端自动创建）
+function onImported(html) {
+  content.value = html;
+  loadMonth();
+  dlgMode.value = 'edit';
+}
+async function feishuSyncNote() {
+  const n = activeNote.value;
+  if (!n?.id) return ElMessage.warning('先点「飞书编辑」创建文档，再从飞书同步');
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizSync('daily_note', n.id);
+    ElMessage.success(r.message || '✅ 已从飞书同步');
+    await loadMonth();
+    applyDate();
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
 }
 
 async function deleteNote(n) {
@@ -129,20 +219,21 @@ onMounted(() => { loadMonth().then(applyDate); });
       </div>
 
       <div class="note-body">
-        <!-- 写笔记入口（防御样式：不依赖主题变量层，线上偶发缺失时仍显示蓝色） -->
-        <el-button type="primary" size="large" class="note-write" @click="openDlg(date, 'edit')">📝 写笔记</el-button>
+        <!-- 写笔记入口：直接跳飞书编辑页（未绑定飞书则提示绑定）；防御样式不依赖主题变量层 -->
+        <el-button type="primary" size="large" class="note-write" :loading="feishuBusy" @click="feishuNewNote">📝 写笔记（飞书编辑）</el-button>
 
         <div class="note-list-head">本月笔记（{{ history.length }}）</div>
         <div class="note-list" v-loading="loading">
           <div
             v-for="n in history" :key="n.id" class="note-item"
-            :class="{ cur: n.note_date === date }" :title="'回看 ' + n.note_date"
-            @click="openDlg(n.note_date, 'view')"
+            :class="{ cur: n.note_date === date }" :title="'查看 ' + n.note_date"
+            @click="openNote(n)"
           >
             <span class="note-dot" :style="statusOf(n.status) ? { background: statusOf(n.status).color } : {}" />
             <div class="note-item-main">
               <div class="note-item-top">
                 {{ n.note_date.slice(5) }}
+                <template v-if="n.dayIdx > 1"> · 第{{ n.dayIdx }}篇</template>
                 <template v-if="statusOf(n.status)">· {{ statusOf(n.status).emoji }} {{ statusOf(n.status).label }}</template>
               </div>
               <div class="note-item-ex">{{ excerpt(n.content) }}</div>
@@ -156,8 +247,11 @@ onMounted(() => { loadMonth().then(applyDate); });
       <!-- 编写 / 回看弹窗（居中大尺寸） -->
       <el-dialog v-model="dlg" :title="`${date} ${['周日','周一','周二','周三','周四','周五','周六'][new Date(date + 'T00:00:00').getDay()]}${dlgMode === 'edit' ? ' · 编辑' : ''}`"
         width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false" destroy-on-close append-to-body>
-        <!-- 回看模式 -->
+        <!-- 回看模式（嵌入式查看：站内渲染 + 飞书链接徽标） -->
         <template v-if="dlgMode === 'view' && activeNote">
+          <div v-if="feishuDoc" class="dn-feishu-link">
+            🪶 已关联飞书文档 <a :href="feishuDoc" target="_blank" rel="noopener">📄 在飞书打开 →</a>
+          </div>
           <div v-if="statusOf(activeNote.status)" class="dn-status"
             :style="{ color: statusOf(activeNote.status).color, background: statusOf(activeNote.status).color + '1a' }">
             {{ statusOf(activeNote.status).emoji }} 今日状态：{{ statusOf(activeNote.status).label }}
@@ -179,11 +273,22 @@ onMounted(() => { loadMonth().then(applyDate); });
               <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
             </el-select>
           </div>
+          <!-- 可切到飞书文档写长文（P1）；无笔记时点按钮自动保存草稿再创建；打开后本站留窗显示状态条 -->
+          <div class="dn-feishu">
+            <el-button size="small" type="primary" plain :loading="feishuBusy" @click="feishuEditNote">📄 飞书编辑</el-button>
+            <el-button size="small" plain :loading="feishuBusy" @click="feishuSyncNote">🔄 从飞书同步</el-button>
+            <el-button size="small" plain @click="impDlg = true">📥 从飞书导入</el-button>
+            <el-button v-if="feishuDoc" size="small" text type="primary" @click="feishuOpened = true">📄 已在飞书打开</el-button>
+          </div>
+          <div v-if="feishuOpened" class="dn-feishu-open">
+            ✅ 已在飞书打开该文档 — 在飞书写完后点「🔄 从飞书同步」更新到这里
+          </div>
           <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…" />
         </template>
         <template #footer>
           <template v-if="dlgMode === 'view' && activeNote">
             <el-button size="small" type="danger" plain :loading="deleting" @click="deleteNote(activeNote)">🗑 删除</el-button>
+            <el-button size="small" type="primary" plain :loading="feishuBusy" @click="feishuEditNote">📄 飞书编辑</el-button>
             <el-button size="small" type="primary" plain @click="dlgMode = 'edit'">✏️ 编辑</el-button>
           </template>
           <template v-else>
@@ -194,11 +299,30 @@ onMounted(() => { loadMonth().then(applyDate); });
           </template>
         </template>
       </el-dialog>
+
+      <!-- 从飞书导入文档选择器（无笔记时后端自动创建记录） -->
+      <DocPicker v-model="impDlg" biz-type="daily_note" :biz-id="activeNote?.id ?? null"
+        @imported="onImported" />
     </div>
   </transition>
 </template>
 
 <style lang="scss" scoped>
+// 飞书编辑按钮行（P1）
+.dn-feishu { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+// 嵌入式查看：飞书文档徽标（查看模式顶部）
+.dn-feishu-link {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  font-size: 12.5px; color: #64748b; background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 8px; padding: 6px 12px; margin-bottom: 12px;
+  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+}
+// 编写留窗状态条：飞书打开后提示回站同步
+.dn-feishu-open {
+  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
+}
+
 // 面板：与 AI 对话 / 消息中心完全同款（420×640 白底圆角阴影 + 蓝色头部 + 滚动内容区；移动端全屏）
 .note-panel {
   position: fixed; right: 22px; bottom: 86px; z-index: 1000;

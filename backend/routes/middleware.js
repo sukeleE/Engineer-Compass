@@ -55,6 +55,29 @@ export function mutedGuard(req, res, next) {
   next();
 }
 
+// 客户端 IP：反代部署取 x-forwarded-for 第一个（最接近客户端），直连取 req.ip
+export function clientIp(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || String(req.ip || '').replace('::ffff:', '');
+}
+
+// 访问日志中间件：记录所有 /api 请求（含游客、认证失败的），health 探活不算噪音
+// 挂载在认证中间件之前 → 自己解析 token 取 user_id（游客/无效 token 记 null）
+export function accessLog(req, res, next) {
+  try {
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token || '';
+    let uid = null, uname = '';
+    if (token) {
+      const s = db.prepare('SELECT s.user_id, u.username FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?').get(token);
+      if (s) { uid = s.user_id; uname = s.username; }
+    }
+    db.prepare('INSERT INTO access_log (user_id, username, ip, method, path) VALUES (?,?,?,?,?)').run(
+      uid, uname, clientIp(req), req.method, req.originalUrl || req.url || ''
+    );
+  } catch { /* 记录失败不影响主流程 */ }
+  next();
+}
+
 // 审计日志埋点：action 见 audit_log 注释；target 为业务对象名；detail 为可选对象
 export function logAudit(req, action, target = '', detail = null) {
   try {
@@ -66,7 +89,7 @@ export function logAudit(req, action, target = '', detail = null) {
       action,
       String(target || ''),
       detail ? JSON.stringify(detail) : null,
-      String(req.ip || '').replace('::ffff:', '')
+      clientIp(req)
     );
   } catch { /* 审计失败不影响主流程 */ }
 }

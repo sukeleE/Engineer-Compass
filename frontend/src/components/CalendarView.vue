@@ -6,6 +6,7 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import RichEditor from './team/RichEditor.vue';
+import DocPicker from './team/DocPicker.vue';
 import auth from '../auth.js';
 import { NOTE_STATUS, statusOf, fmtDate, pad2 } from '../utils/noteStatus.js';
 
@@ -101,6 +102,7 @@ const calDlgDate = ref('');
 const calDlgItems = ref({ comp: [], study: [], team: [] });
 const calDlgNote = ref(null);
 const calDlgMode = ref('view'); // view 回看 | edit 记录/编辑
+const impDlg = ref(false);   // 从飞书导入文档选择器
 const dlgStatus = ref('');
 const dlgContent = ref('');
 const dlgSaving = ref(false);
@@ -114,6 +116,12 @@ function openCalDay(c) {
   dlgContent.value = c.note?.content || '';
   calDlgMode.value = c.note ? 'view' : 'edit';
   calDlg.value = true;
+  // 嵌入式查看：查询该笔记是否已关联飞书文档（有则显示「在飞书打开」徽标）
+  feishuDoc.value = '';
+  feishuOpened.value = false;
+  if (c.note?.id) {
+    api.feishuBizStatus('daily_note', c.note.id).then((s) => { if (s?.mapped) feishuDoc.value = s.doc_url; }).catch(() => {});
+  }
 }
 const dlgHasItems = computed(() => ['comp', 'study', 'team'].some((k) => calDlgItems.value[k].length));
 async function calDlgSave() {
@@ -149,6 +157,55 @@ async function calDlgDelete() {
   } finally {
     dlgDeleting.value = false;
   }
+}
+
+// ---- 飞书编辑（P1）：日程笔记 ↔ 飞书文档（无笔记时先自动保存草稿创建记录，再在飞书里完善）
+// 交互：查看 = 弹窗内嵌入式渲染 + 飞书链接徽标；编写 = 飞书新标签打开 + 本站留窗显示状态条
+const feishuBusy = ref(false);
+const feishuDoc = ref('');      // 已关联飞书文档链接（查看模式显示「在飞书打开」）
+const feishuOpened = ref(false); // 本次编辑已打开飞书（显示「飞书编辑中」状态条）
+async function feishuCalEdit() {
+  // 防双击：锁定期间再点直接忽略（noteSave 阶段也锁，避免并发双建飞书文档）
+  if (feishuBusy.value) return;
+  feishuBusy.value = true;
+  let n = calDlgNote.value;
+  try {
+    // 尚无笔记：有草稿先保存（保留本地内容）；空草稿直接让后端自动创建记录（「记录」直跳飞书的入口）
+    if (!n?.id) {
+      if (dlgContent.value.trim() || dlgStatus.value) {
+        const res = await api.noteSave({ note_date: calDlgDate.value, content: dlgContent.value, status: dlgStatus.value });
+        n = { id: res.id, note_date: calDlgDate.value, status: dlgStatus.value, content: dlgContent.value };
+        calDlgNote.value = n;
+        await loadCal();
+      }
+    }
+    const r = await api.feishuBizOpen('daily_note', n?.id ?? null, { note_date: calDlgDate.value });
+    feishuDoc.value = r.url || '';
+    feishuOpened.value = true;
+    window.open(r.url, '_blank');
+    ElMessage.success(r.created ? '已创建飞书文档并打开，本站窗口保持可同步' : '已同步最新内容，飞书文档已打开');
+    await loadCal();
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+
+// 从飞书导入：内容回填编辑器（无笔记时后端自动创建，reload 后弹窗切换为查看态数据）
+function onImported(html) {
+  dlgContent.value = html;
+  loadCal();
+}
+async function feishuCalSync() {
+  const n = calDlgNote.value;
+  if (!n?.id) return ElMessage.warning('先点「飞书编辑」创建文档，再从飞书同步');
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizSync('daily_note', n.id);
+    ElMessage.success(r.message || '✅ 已从飞书同步');
+    await loadCal();
+    const fresh = byDate.value[calDlgDate.value]?.note;
+    if (fresh) { calDlgNote.value = fresh; dlgContent.value = fresh.content || ''; }
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
 }
 
 // ---- 底部「✅ 已完成计划」：任务全部完成即计入（含完成日期 = 最后任务完成日）----
@@ -270,6 +327,10 @@ onMounted(() => {
       <!-- 📝 笔记区 -->
       <div class="dlg-note-sec">
         <div v-if="calDlgMode === 'view' && calDlgNote" class="dlg-note-view">
+          <!-- 嵌入式查看：已关联飞书文档 → 徽标 + 在飞书打开 -->
+          <div v-if="feishuDoc" class="dlg-feishu-link">
+            🪶 已关联飞书文档 <a :href="feishuDoc" target="_blank" rel="noopener">📄 在飞书打开 →</a>
+          </div>
           <div v-if="statusOf(calDlgNote.status)" class="dlg-status"
             :style="{ color: statusOf(calDlgNote.status).color, background: statusOf(calDlgNote.status).color + '1a' }">
             {{ statusOf(calDlgNote.status).emoji }} 今日状态：{{ statusOf(calDlgNote.status).label }}
@@ -281,12 +342,24 @@ onMounted(() => {
           <el-select v-model="dlgStatus" size="small" placeholder="今日学习状态" clearable class="dlg-status-sel">
             <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key" :label="`${st.emoji} ${st.label}`" />
           </el-select>
+          <!-- 已有笔记：可切到飞书文档写长文（P1） -->
+          <!-- 可切到飞书文档写长文（P1）；无笔记时点按钮自动保存草稿再创建；打开后本站留窗显示状态条 -->
+          <div class="dlg-feishu">
+            <el-button size="small" type="primary" plain :loading="feishuBusy" @click="feishuCalEdit">📄 飞书编辑</el-button>
+            <el-button size="small" plain :loading="feishuBusy" @click="feishuCalSync">🔄 从飞书同步</el-button>
+            <el-button size="small" plain @click="impDlg = true">📥 从飞书导入</el-button>
+          </div>
+          <div v-if="feishuOpened" class="dlg-feishu-open">
+            ✅ 已在飞书打开该文档 — 在飞书写完后点「🔄 从飞书同步」更新到这里
+          </div>
           <RichEditor v-model="dlgContent" placeholder="记录今天做了什么、卡在哪…" />
         </div>
       </div>
       <template #footer>
         <el-button v-if="calDlgMode === 'view' && calDlgNote" size="small" type="danger" plain
           :loading="dlgDeleting" @click="calDlgDelete">删除</el-button>
+        <el-button v-if="calDlgMode === 'view' && calDlgNote" size="small" type="primary" plain :loading="feishuBusy"
+          @click="feishuCalEdit">📄 飞书编辑</el-button>
         <el-button v-if="calDlgMode === 'view' && calDlgNote" size="small" type="primary" plain
           @click="calDlgMode = 'edit'">✏️ 编辑</el-button>
         <el-button v-if="calDlgMode === 'edit'" size="small" @click="calDlg = false">取消</el-button>
@@ -294,6 +367,10 @@ onMounted(() => {
           @click="calDlgSave">💾 保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 从飞书导入文档选择器（必须挂弹窗外面——弹窗 destroy-on-close 会销毁内部组件，导入按钮将无反应） -->
+    <DocPicker v-model="impDlg" biz-type="daily_note" :biz-id="calDlgNote?.id ?? null"
+      @imported="onImported" />
   </div>
 </template>
 
@@ -369,6 +446,19 @@ onMounted(() => {
 }
 
 // 点击日期弹窗：完成事项分组 + 笔记回看
+.dlg-feishu { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+// 嵌入式查看：飞书文档徽标（查看模式顶部）
+.dlg-feishu-link {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  font-size: 12.5px; color: #64748b; background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 8px; padding: 6px 12px; margin-bottom: 10px;
+  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+}
+// 编写留窗状态条：飞书打开后提示回站同步
+.dlg-feishu-open {
+  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
+}
 .dlg-items { margin-bottom: 14px;
   .di-group { margin-bottom: 10px;
     .di-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }

@@ -186,6 +186,8 @@ export const api = {
     const token = localStorage.getItem('ec_token');
     return req('/import/plan', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
   },
+  // 计划导入（文本入口）：飞书文档等已取到文本的场景，同样 AI 转固定格式计划
+  planImportText: (body) => req('/import/plan-text', { method: 'POST', body: JSON.stringify(body) }, 300000),
   // 消息中心（评论/点赞/收藏通知）
   notifications: () => req('/notifications'),
   notificationsUnread: () => req('/notifications/unread-count'),
@@ -211,7 +213,25 @@ export const api = {
   // 后台：资源管理（全部用户上传）
   adminResources: (params) => req(`/admin/resources${qs(params)}`),
   adminResourceDelete: (id) => req(`/admin/resources/${id}`, { method: 'DELETE' }),
+  // 后台：访问记录（含游客）
+  adminVisits: (params) => req(`/admin/visits${qs(params)}`),
   serverStatus: () => req('/admin/server-status'),
   // 公告（公开）：全局顶部横幅
   announcementLatest: () => req('/announcements/latest'),
+  // 飞书（每用户绑定，P0）：状态 / 授权链接（登录专属）/ 解绑
+  feishuStatus: () => req('/feishu/oauth/status'),
+  feishuAuth: () => req('/feishu/oauth/auth'),
+  feishuUnbind: () => req('/feishu/oauth/unbind', { method: 'POST' }),
+  // 飞书编辑页（P1）：业务记录 ↔ 飞书文档（daily_note / progress_log / share_post）
+  // bizId 为空时后端自动创建业务记录（extra 传 note_date / team_id / title）
+  feishuBizOpen: (bizType, bizId, extra) => req('/feishu/biz/open', { method: 'POST', body: JSON.stringify({ biz_type: bizType, biz_id: bizId ?? null, ...(extra || {}) }) }),
+  feishuBizSync: (bizType, bizId) => req('/feishu/biz/sync', { method: 'POST', body: JSON.stringify({ biz_type: bizType, biz_id: bizId }) }),
+  // 从飞书文档导入内容到业务记录（不创建映射；bizId 为空时后端自动创建记录，extra 传 note_date/team_id/title）
+  feishuBizImport: (bizType, bizId, documentId, extra) => req('/feishu/biz/import', { method: 'POST', body: JSON.stringify({ biz_type: bizType, biz_id: bizId ?? null, document_id: documentId, ...(extra || {}) }) }),
+  feishuBizStatus: (bizType, bizId) => req(`/feishu/biz/status?biz_type=${bizType}&biz_id=${bizId}`),
+  // 飞书云盘（P2）：文件列表（folder_token 可进子文件夹，返回可引用链接）
+  feishuDocList: (params) => req(`/feishu/doc/list${qs(params)}`),
+  feishuDocCreate: (body) => req('/feishu/doc/create', { method: 'POST', body: JSON.stringify(body) }),
+  // 文档读取：blocks 分页 + 转换可能较慢，120s 超时（与 AI 接口一致，默认 30s 会误杀大文档）
+  feishuDocContent: (documentId, format = 'markdown') => req(`/feishu/doc/content?document_id=${documentId}&format=${format}`, {}, 120000),
 };

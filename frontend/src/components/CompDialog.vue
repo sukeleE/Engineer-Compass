@@ -3,8 +3,10 @@
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
+import { exportPlanToFeishu } from '../utils/planExport.js';
 import TechTreeChart from './TechTreeChart.vue';
 import PlanChat from './PlanChat.vue';
+import ImportPlanDialog from './ImportPlanDialog.vue';
 
 const props = defineProps({ open: Boolean, compId: Number });
 const emit = defineEmits(['close']);
@@ -16,6 +18,7 @@ const selProcess = ref(null);
 const joined = ref(null); // 加入日程的结果 { id, plan, note }
 const joining = ref(false);
 const showChat = ref(false); // AI 对话生成备赛日程弹窗
+const importDlg = ref(false); // 文档导入备赛日程（只做格式划分）
 
 const TYPE_COLORS = {
   电子机器人: '#3b82f6', 机械: '#f59e0b', 综合: '#10b981', 数学基础: '#8b5cf6',
@@ -94,10 +97,28 @@ async function join() {
 }
 
 // 对话式生成完成（后端已保存）→ 展示计划
+// 导出到飞书：新建飞书文档写入当前计划（md 下载走 scheduleExportUrl，见上方按钮）
+const fsBusy = ref(false);
+async function exportFs() {
+  if (fsBusy.value || !joined.value?.plan) return;
+  fsBusy.value = true;
+  try {
+    const r = await exportPlanToFeishu(comp.value?.name || '备赛计划', joined.value.plan);
+    ElMessage.success(`✅ 已创建飞书文档：${r.title}（新标签页已打开）`);
+  } catch (e) { ElMessage.error(e.message); } finally { fsBusy.value = false; }
+}
+
 async function onChatDone(r) {
   showChat.value = false;
   joined.value = { id: r.plan_id, plan: r.plan };
   ElMessage.success('✅ 备赛日程已按对话生成，可在顶部「📋 我的备赛日程」查看');
+}
+
+// 文档导入完成（scheduleManual 返回 { id, plan }）→ 就地展示计划
+function onImportCreated(r) {
+  importDlg.value = false;
+  joined.value = { id: r.id, plan: r.plan };
+  ElMessage.success('✅ 备赛日程已导入，可在顶部「📋 我的备赛日程」查看');
 }
 
 // 窄屏 el-descriptions 降为 1 列（880px 弹窗在手机上靠全局兜底自适应）
@@ -275,6 +296,7 @@ function lab(full, short) { return isNarrow.value ? short : full; }
               <div class="join-actions">
                 <el-button type="primary" size="large" @click="showChat = true">💬 AI 对话生成备赛日程</el-button>
                 <el-button size="large" :loading="joining" @click="join">⚡ 一键生成</el-button>
+                <el-button size="large" plain @click="importDlg = true">📄 导入计划</el-button>
               </div>
             </template>
             <template v-else>
@@ -283,6 +305,9 @@ function lab(full, short) { return isNarrow.value ? short : full; }
                 <div>
                   <el-button size="small" type="primary" plain tag="a" :href="api.scheduleExportUrl(joined.id)" target="_blank">
                     导出 Markdown
+                  </el-button>
+                  <el-button size="small" plain :disabled="fsBusy" @click="exportFs">
+                    📄 导出到飞书
                   </el-button>
                 </div>
               </div>
@@ -307,6 +332,8 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 
         <!-- AI 对话生成备赛日程（先确认水平/周期/投入，再生成） -->
         <PlanChat v-model="showChat" mode="schedule" :comp-id="comp.id" @done="onChatDone" />
+        <!-- 文档导入备赛日程（AI 只做格式划分，保留原文） -->
+        <ImportPlanDialog v-model="importDlg" mode="schedule" @created="onImportCreated" />
       </template>
     </div>
   </el-dialog>

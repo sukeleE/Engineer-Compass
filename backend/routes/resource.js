@@ -3,12 +3,13 @@
 // 下载走带鉴权路由 res.download（支持 ?token= 直连，与小组文件同机制）
 import { Router } from 'express';
 import multer from 'multer';
-import { mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdirSync, existsSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, dirname, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import db from '../db/database.js';
 import { authRequired, mutedGuard, logAudit } from './middleware.js';
+import { FEISHU, parentFolder, getBind, userToken } from '../lib/feishuClient.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const RESOURCE_DIR = join(__dirname, '..', 'uploads', 'resource');
@@ -50,22 +51,80 @@ export function ensureShareToken(rid) {
   return { token, url: `/api/resource/share/${token}` };
 }
 
+// ---------- P2：分享优先飞书云盘（链接对外引用），不可用时降级站内 token ----------
+const FEISHU_UPLOAD_MAX = 20 * 1024 * 1024;        // drive upload_all 请求体上限 20MB，超限走站内
+const FEISHU_URL_BASE = () => process.env.FEISHU_URL_BASE || 'https://feishu.cn';
+
+// 把资源上传到飞书云盘（绑定用户的身份；token 过期自动 refresh）；任一环节失败返回 null（调用方降级站内）
+async function uploadToFeishu(userId, abs, name, mime) {
+  if (!getBind(userId)) return null;               // 未绑定 → 降级
+  const tok = await userToken(userId);
+  if (!tok) return null;
+  try {
+    const buf = readFileSync(abs);
+    const fd = new FormData();
+    fd.append('file_name', name);
+    fd.append('parent_type', 'explorer');
+    fd.append('parent_node', parentFolder());
+    fd.append('size', String(buf.length));
+    fd.append('file', new Blob([buf], { type: mime || 'application/octet-stream' }), name);
+    const up = await fetch(`${FEISHU}/open-apis/drive/v1/files/upload_all`, {
+      method: 'POST', headers: { Authorization: `Bearer ${tok}` }, body: fd,
+    });
+    const j = await up.json();
+    if (!up.ok || j.code !== 0) return null;       // 上传失败（权限/配额/网络）→ 降级
+    return j.data?.file_token || null;
+  } catch { return null; }
+}
+
 // 分享链接管理（仅本人）：POST 幂等生成/查询，DELETE 撤销（token 清空后所有引用立即失效）
-r.post('/:id/share', (req, res) => {
+r.post('/:id/share', async (req, res) => {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
   if (!f) return res.status(404).json({ error: '资源不存在' });
   if (f.user_id !== req.user.id) return res.status(403).json({ error: '仅资源所有者可分享' });
+  // 已有飞书分享：幂等复用（不重复上传堆积文件）
+  if (f.feishu_token) {
+    logAudit(req, 'resource-share', f.file_name, { rid: f.id, mode: 'feishu' });
+    return res.json({ url: `${FEISHU_URL_BASE()}/file/${f.feishu_token}`, mode: 'feishu', message: '已开启飞书分享' });
+  }
+  // ≤20MB 且绑定飞书：上传云盘换飞书链接（对外可见性取决于飞书账号权限，用户自行管理）
+  if (f.file_size <= FEISHU_UPLOAD_MAX) {
+    const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
+    if (existsSync(abs)) {
+      const fileToken = await uploadToFeishu(req.user.id, abs, f.file_name, f.file_type);
+      if (fileToken) {
+        db.prepare('UPDATE user_resource SET feishu_token = ? WHERE id = ?').run(fileToken, f.id);
+        logAudit(req, 'resource-share', f.file_name, { rid: f.id, mode: 'feishu', file_token: fileToken });
+        return res.json({ url: `${FEISHU_URL_BASE()}/file/${fileToken}`, mode: 'feishu', message: '已上传到飞书云盘' });
+      }
+    }
+  }
+  // 降级：站内 token 链接（未绑定飞书 / 文件 >20MB / 上传失败）
   const share = ensureShareToken(f.id);
-  logAudit(req, 'resource-share', f.file_name, { rid: f.id, token: share.token });
-  res.json(share);
+  logAudit(req, 'resource-share', f.file_name, { rid: f.id, token: share.token, mode: 'local' });
+  res.json({ ...share, mode: 'local', message: '站内链接（未绑定飞书或文件过大，走站内公开下载）' });
 });
-r.delete('/:id/share', (req, res) => {
+r.delete('/:id/share', async (req, res) => {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
   if (!f) return res.status(404).json({ error: '资源不存在' });
   if (f.user_id !== req.user.id) return res.status(403).json({ error: '仅资源所有者可操作' });
+  if (f.feishu_token) {
+    // 同步删除飞书云盘文件（用户身份；失败不阻塞站内撤销，仅告警）
+    try {
+      const tok = await userToken(req.user.id);
+      if (tok) {
+        const d = await fetch(`${FEISHU}/open-apis/drive/v1/files/${f.feishu_token}?type=file`, {
+          method: 'DELETE', headers: { Authorization: `Bearer ${tok}` },
+        });
+        if (!d.ok) console.warn(`[resource] 飞书文件删除失败 rid=${f.id} status=${d.status}`);
+      }
+    } catch (e) { console.warn(`[resource] 飞书文件删除异常 rid=${f.id}: ${e.message}`); }
+    db.prepare('UPDATE user_resource SET feishu_token = NULL WHERE id = ?').run(f.id);
+    logAudit(req, 'resource-unshare', f.file_name, { rid: f.id, mode: 'feishu' });
+  }
   if (f.share_token) {
     db.prepare('UPDATE user_resource SET share_token = NULL WHERE id = ?').run(f.id);
-    logAudit(req, 'resource-unshare', f.file_name, { rid: f.id });
+    logAudit(req, 'resource-unshare', f.file_name, { rid: f.id, mode: 'local' });
   }
   res.json({ message: '分享已撤销' });
 });
