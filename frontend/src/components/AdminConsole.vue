@@ -18,6 +18,8 @@ const ACTION_LABELS = {
   'post-delete': '删除帖子', 'comment-delete': '删除评论',
   'announce-create': '发布公告', 'announce-update': '编辑公告', 'announce-delete': '删除公告',
   'resource-upload': '上传资源', 'resource-delete': '删除资源', 'resource-admin-delete': '管理员删资源',
+  'resource-share': '分享资源', 'resource-unshare': '撤销分享',
+  'plan-import': '导入计划',
 };
 const actionLabel = (a) => ACTION_LABELS[a] || a;
 const STATUS_LABELS = { 0: ['正常', 'success'], 1: ['封禁', 'danger'], 2: ['禁言', 'warning'] };
@@ -417,7 +419,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
       <el-tab-pane label="📢 公告管理" name="anns">
         <div class="toolbar">
           <el-button type="primary" size="small" @click="openAnnDlg(null)">＋ 发布公告</el-button>
-          <span class="tip">置顶公告会优先显示在全站顶部横幅（所有页面可见，用户可手动关闭）</span>
+          <span class="tip">置顶公告显示在全站顶部横幅</span>
         </div>
         <el-table :data="anns" v-loading="annLoading" stripe>
           <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
@@ -440,7 +442,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-if="!annLoading && !anns.length" description="暂无公告，点「发布公告」让全站用户看到通知" :image-size="60" />
+        <el-empty v-if="!annLoading && !anns.length" description="暂无公告 — 发布后全站可见" :image-size="60" />
       </el-tab-pane>
 
       <!-- ========== Tab4 资源管理 ========== -->
@@ -553,7 +555,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadAnns
     <el-dialog v-model="annDlg" :title="annForm.id ? '编辑公告' : '发布公告'" width="520px" :close-on-click-modal="false">
       <el-form label-width="70px">
         <el-form-item label="标题"><el-input v-model="annForm.title" maxlength="60" show-word-limit placeholder="公告标题（≤60 字）" /></el-form-item>
-        <el-form-item label="内容"><el-input v-model="annForm.content" type="textarea" :rows="6" maxlength="2000" show-word-limit placeholder="公告正文，将展示在全站顶部横幅" /></el-form-item>
+        <el-form-item label="内容"><el-input v-model="annForm.content" type="textarea" :rows="6" maxlength="2000" show-word-limit placeholder="公告正文（显示在全站顶部）" /></el-form-item>
         <el-form-item label="置顶"><el-switch v-model="annForm.pinned" active-text="顶部横幅优先展示" /></el-form-item>
       </el-form>
       <template #footer>

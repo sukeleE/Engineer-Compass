@@ -29,6 +29,8 @@ migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email)');
 migCol('user', 'avatar', 'ALTER TABLE user ADD COLUMN avatar TEXT'); // 头像 dataURL（feedback 表靠 schema.sql IF NOT EXISTS，无需迁移）
 migCol('user', 'status', 'ALTER TABLE user ADD COLUMN status INTEGER DEFAULT 0'); // 0=正常 1=封禁 2=禁言（后台管理）
+migCol('user_resource', 'share_token', 'ALTER TABLE user_resource ADD COLUMN share_token TEXT'); // 公开分享 token（引用功能：可撤销下载链接）
+migCol('team_file', 'resource_ref', 'ALTER TABLE team_file ADD COLUMN resource_ref INTEGER'); // 引用型文件：指向 user_resource.id（data 为空）
 
 // 成员多角色桥表：新库 schema.sql 已建；老库手动建表 + 从 team_member.role_id 搬迁存量角色
 const hasTMR = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='team_member_role'").get();

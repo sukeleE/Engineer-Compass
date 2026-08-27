@@ -7,6 +7,7 @@ import { api } from '../../api.js';
 import auth from '../../auth.js';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
+import ResourcePicker from '../ResourcePicker.vue';
 
 const router = useRouter();
 // 点击作者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -40,6 +41,16 @@ async function pickImgs(e) {
     imgAtts.value.push({ name: f.name, size: f.size, mime: f.type, data });
   }
 }
+
+// 从「我的资源」引用图片：生成/复用分享链接，push 引用型条目（无 data 有 url）
+const resPickDlg = ref(false);
+const onResourcePick = (r) => {
+  if (imgAtts.value.length >= 5) return ElMessage.warning('一次最多 5 张图');
+  imgAtts.value.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
+  ElMessage.success(`已引用「${r.name}」`);
+};
+// 待发送图片预览 src：兼容 base64（data）与引用型（url）
+const attSrc = (a) => (a.data ? `data:${a.mime};base64,${a.data}` : a.url || '');
 
 async function send() {
   if (!input.value.trim() && !imgAtts.value.length) return;
@@ -112,9 +123,11 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     <div class="chat-input">
       <input ref="imgInput" type="file" accept="image/*" multiple hidden @change="pickImgs" />
       <el-button :disabled="!perms.message" title="附图片" @click="imgInput.click()">🖼️</el-button>
+      <el-button :disabled="!perms.message" title="从我的资源引用图片" @click="resPickDlg = true">📁</el-button>
+      <ResourcePicker v-model="resPickDlg" only-image @pick="onResourcePick" />
       <div v-if="imgAtts.length" class="img-preview">
         <div v-for="(a, i) in imgAtts" :key="i" class="ip-item">
-          <img :src="`data:${a.mime};base64,${a.data}`" />
+          <img :src="attSrc(a)" />
           <el-button size="small" text type="danger" @click="imgAtts.splice(i, 1)">×</el-button>
         </div>
       </div>

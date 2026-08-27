@@ -4,7 +4,8 @@ import { openImage } from '../../utils/imageViewer.js';
 
 defineProps({ attachments: { type: Array, default: () => [] } });
 
-const dataUrl = (a) => `data:${a.mime || 'application/octet-stream'};base64,${a.data}`;
+// 条目两种形态：base64 内嵌（data）/ 引用型公开分享链接（url，我的资源引用）
+const src = (a) => (a.data ? `data:${a.mime || 'application/octet-stream'};base64,${a.data}` : a.url || '');
 const is = (a, prefix) => (a.mime || '').startsWith(prefix);
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : (n || 0) + ' B');
 </script>
@@ -14,16 +15,16 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
     <!-- 图片：缩略图网格，点击全屏预览 -->
     <div v-if="attachments.some((a) => is(a, 'image/'))" class="att-imgs">
       <div v-for="(a, i) in attachments.filter((x) => is(x, 'image/'))" :key="i" class="att-thumb"
-        @click="openImage(dataUrl(a), a.name)" title="点击预览 / 下载">
-        <img :src="dataUrl(a)" :alt="a.name" loading="lazy" />
+        @click="openImage(src(a), a.name)" title="点击预览 / 下载">
+        <img :src="src(a)" :alt="a.name" loading="lazy" />
         <span class="att-zoom">🔍</span>
       </div>
     </div>
     <!-- 视频 / 音频 / 文件 -->
     <template v-for="(a, i) in attachments" :key="i">
-      <video v-if="is(a, 'video/')" class="att-media" :src="dataUrl(a)" controls preload="metadata" />
-      <audio v-else-if="is(a, 'audio/')" class="att-audio" :src="dataUrl(a)" controls preload="metadata" />
-      <a v-else-if="!is(a, 'image/')" class="att-file" :href="dataUrl(a)" :download="a.name">
+      <video v-if="is(a, 'video/')" class="att-media" :src="src(a)" controls preload="metadata" />
+      <audio v-else-if="is(a, 'audio/')" class="att-audio" :src="src(a)" controls preload="metadata" />
+      <a v-else-if="!is(a, 'image/')" class="att-file" :href="src(a)" :download="a.name">
         📄 {{ a.name }} <span class="att-size">{{ fmtSize(a.size) }}</span> ⬇
       </a>
     </template>
@@ -51,6 +52,7 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
   .att-file {
     font-size: 13px; color: #2563eb; text-decoration: none; background: #eff6ff;
     border: 1px solid #bfdbfe; border-radius: 8px; padding: 5px 10px;
+    overflow-wrap: anywhere; /* 长文件名强制断行，防撑破 */
     &:hover { background: #dbeafe; }
     .att-size { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
   }

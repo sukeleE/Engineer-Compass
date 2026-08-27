@@ -31,10 +31,44 @@ const storage = multer.diskStorage({
 });
 // busboy 在 fileSize === limit 时即触发 limit（恰好等于 limit 的文件被拒），故 limit 放宽 1 字节
 // 实现语义：≤128MB 接受（业务上 MAX_FILE 仍为 128MB，配额/前端提示不变），>128MB 拒绝
-const upload = multer({ storage, limits: { fileSize: MAX_FILE + 1 } });
+// defParamCharset 'utf8'：busboy 默认 latin1 解 multipart 字段名 → 中文文件名乱码（UTF-8 字节被 latin1 读）
+const upload = multer({ storage, limits: { fileSize: MAX_FILE + 1 }, defParamCharset: 'utf8' });
 
 const r = Router();
 r.use(authRequired);
+
+// 生成/复用资源分享 token（引用功能共用，teamCollab.js 的 file/ref 也走它）：
+// 幂等——已有 token 直接返回；token = 32 位 hex 随机串（128bit 熵，不可枚举）
+export function ensureShareToken(rid) {
+  const f = db.prepare('SELECT share_token FROM user_resource WHERE id = ?').get(Number(rid));
+  if (!f) return null;
+  let token = f.share_token;
+  if (!token) {
+    token = randomBytes(16).toString('hex');
+    db.prepare('UPDATE user_resource SET share_token = ? WHERE id = ?').run(token, Number(rid));
+  }
+  return { token, url: `/api/resource/share/${token}` };
+}
+
+// 分享链接管理（仅本人）：POST 幂等生成/查询，DELETE 撤销（token 清空后所有引用立即失效）
+r.post('/:id/share', (req, res) => {
+  const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
+  if (!f) return res.status(404).json({ error: '资源不存在' });
+  if (f.user_id !== req.user.id) return res.status(403).json({ error: '仅资源所有者可分享' });
+  const share = ensureShareToken(f.id);
+  logAudit(req, 'resource-share', f.file_name, { rid: f.id, token: share.token });
+  res.json(share);
+});
+r.delete('/:id/share', (req, res) => {
+  const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
+  if (!f) return res.status(404).json({ error: '资源不存在' });
+  if (f.user_id !== req.user.id) return res.status(403).json({ error: '仅资源所有者可操作' });
+  if (f.share_token) {
+    db.prepare('UPDATE user_resource SET share_token = NULL WHERE id = ?').run(f.id);
+    logAudit(req, 'resource-unshare', f.file_name, { rid: f.id });
+  }
+  res.json({ message: '分享已撤销' });
+});
 
 // 上传（mutedGuard 在 multer 之前：被禁言者不落盘；响应 413 由 server.js 全局错误处理转中文）
 r.post('/upload', mutedGuard, upload.single('file'), (req, res) => {
@@ -67,8 +101,8 @@ r.get('/', (req, res) => {
   const total = db.prepare('SELECT COUNT(*) AS n FROM user_resource WHERE user_id = ?').get(uid).n;
   const used = db.prepare('SELECT COALESCE(SUM(file_size),0) AS n FROM user_resource WHERE user_id = ?').get(uid).n;
   const list = db.prepare(
-    `SELECT id, file_name, file_size, file_type, create_time FROM user_resource
-     WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`
+    `SELECT id, file_name, file_size, file_type, create_time, (share_token IS NOT NULL) AS shared
+     FROM user_resource WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`
   ).all(uid, size, (page - 1) * size);
   res.json({ total, page, size, used, quota: QUOTA, list });
 });
@@ -96,5 +130,18 @@ export function deleteResource(req, res, id) {
   res.json({ message: '资源已删除' });
 }
 r.delete('/:id', (req, res) => deleteResource(req, res, Number(req.params.id)));
+
+// ==================== 公开分享下载（引用功能） ====================
+// 独立 router 不挂 authRequired：知道 token 即可下载（公开链接语义，可撤销）。
+// server.js 中须挂在主 resource router 之前；token 查询用 = 精确匹配，防注入无拼接。
+export const publicR = Router();
+publicR.get('/share/:token', (req, res) => {
+  const f = db.prepare('SELECT * FROM user_resource WHERE share_token = ?').get(String(req.params.token || ''));
+  if (!f) return res.status(404).json({ error: '分享链接不存在或已撤销' });
+  if (basename(f.store_path) !== f.store_path) return res.status(404).json({ error: '资源不存在' }); // 防路径穿越
+  const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
+  if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失，请联系管理员' });
+  res.download(abs, f.file_name);
+});
 
 export default r;

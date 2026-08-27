@@ -337,6 +337,26 @@ async function onResFile(e) {
   } catch (err) { ElMessage.error(err.message); }
   finally { resUploading.value = false; }
 }
+// 分享管理（引用功能）：生成/复用公开下载链接（幂等）；撤销后所有引用处立即失效
+async function shareResource(row) {
+  try {
+    const s = await api.resourceShare(row.id);
+    try { await navigator.clipboard.writeText(`${location.origin}${s.url}`); }
+    catch { /* 非安全上下文剪贴板不可用，链接已在提示中展示 */ }
+    ElMessage.success(`已开启分享：${location.origin}${s.url}\n（复制成功，可在小组资料/帖子/编辑器等「我的资源」入口引用）`);
+    loadResources();
+  } catch (e) { ElMessage.error(e.message); }
+}
+async function unshareResource(row) {
+  try {
+    await ElMessageBox.confirm(`撤销「${row.file_name}」的分享？所有引用该资源的位置（小组资料/帖子附件/插图）将立即失效。`, '撤销分享', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.resourceUnshare(row.id);
+    ElMessage.success('分享已撤销');
+    loadResources();
+  } catch (e) { ElMessage.error(e.message); }
+}
 async function delResource(row) {
   try {
     await ElMessageBox.confirm(`删除资源「${row.file_name}」？磁盘文件将一并移除，不可恢复。`, '删除资源', { type: 'warning' });
@@ -517,9 +537,9 @@ onBeforeUnmount(() => {
           <!-- 意见反馈 -->
           <section class="me-block fb-block">
             <h3>📮 意见反馈</h3>
-            <p class="fb-tip">遇到问题或有好建议？告诉我们，反馈会直达管理员邮箱 📧</p>
+            <p class="fb-tip">有建议或问题？直达管理员邮箱 📧</p>
             <el-input v-model="fbContent" type="textarea" :rows="4" maxlength="5000" show-word-limit
-              placeholder="描述你遇到的问题或建议…（如：希望支持导出 PDF / 页面 XX 显示异常）" />
+              placeholder="描述你的问题或建议…" />
             <div class="fb-foot">
               <el-button type="primary" :loading="fbSending" @click="submitFeedback">提交反馈</el-button>
             </div>
@@ -599,9 +619,11 @@ onBeforeUnmount(() => {
               </el-table-column>
               <el-table-column prop="file_type" label="类型" width="150" show-overflow-tooltip />
               <el-table-column prop="create_time" label="上传时间" width="165" />
-              <el-table-column label="操作" width="130" fixed="right">
+              <el-table-column label="操作" width="225" fixed="right">
                 <template #default="{ row }">
                   <a :href="`${api.resourceDownload(row.id)}?token=${auth.token}`" class="res-dl">⬇ 下载</a>
+                  <el-button v-if="!row.shared" link type="primary" size="small" @click="shareResource(row)">🔗 分享</el-button>
+                  <el-button v-else link type="warning" size="small" @click="unshareResource(row)">取消分享</el-button>
                   <el-button link type="danger" size="small" @click="delResource(row)">删除</el-button>
                 </template>
               </el-table-column>
@@ -609,7 +631,7 @@ onBeforeUnmount(() => {
             <el-pagination v-if="resTotal > resSize" class="pg" background layout="total, prev, pager, next"
               :total="resTotal" :page-size="resSize" v-model:current-page="resPage" @current-change="loadResources" />
             <el-empty v-if="!resLoading && !resList.length"
-              description="还没有资源，点「上传资源」添加（单文件 ≤128MB，总配额 1GB）" :image-size="80" />
+              description="还没有资源 — 上传第一个（≤128MB/个）" :image-size="80" />
           </div>
         </div>
       </el-tab-pane>

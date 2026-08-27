@@ -7,9 +7,10 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
 import { openImage } from '../utils/imageViewer.js';
-import { cnt, excerpt, firstImage } from '../utils/share.js';
+import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import RichEditor from './team/RichEditor.vue';
 import AttachmentList from './team/AttachmentList.vue';
+import ResourcePicker from './ResourcePicker.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -92,6 +93,12 @@ const attPick = (e) => {
     };
     reader.readAsDataURL(f);
   }
+};
+// 从「我的资源」引用：选中后生成/复用分享链接，push 引用型附件条目（无 data 有 url）
+const resPickDlg = ref(false);
+const onResourcePick = (r) => {
+  form.value.atts.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
+  ElMessage.success(`已引用「${r.name}」`);
 };
 function openNew() {
   if (needLogin()) return;
@@ -199,7 +206,7 @@ async function delPost(p) {
     <div class="sp-head">
       <div>
         <h2>📤 资源分享</h2>
-        <p class="sp-sub">贴吧式资源交流区：开楼分享资料 / 经验 / 作品，支持图文、视频、音频与文件</p>
+        <p class="sp-sub">贴吧式交流区：分享资料/经验/作品，图文视频音频文件</p>
       </div>
       <el-button type="primary" size="large" @click="openNew">📝 开楼发帖</el-button>
     </div>
@@ -221,7 +228,7 @@ async function delPost(p) {
     <!-- 帖子列表 -->
     <div v-loading="loading" class="sp-list">
       <div v-for="p in rows" :key="p.id" class="post-card" @click="openPost(p)">
-        <img v-if="firstImage(p)" :src="`data:${firstImage(p).mime};base64,${firstImage(p).data}`" class="pc-thumb" alt="" loading="lazy" />
+        <img v-if="firstImage(p)" :src="attDataURL(firstImage(p))" class="pc-thumb" alt="" loading="lazy" />
         <div class="pc-main">
           <div class="pc-title">
             <b>{{ p.title }}</b>
@@ -255,13 +262,14 @@ async function delPost(p) {
       <div class="sh-tools">
         <input ref="fileInput" type="file" multiple hidden @change="attPick" />
         <el-button size="small" @click="fileInput.click()">📎 附件（图片/视频/音频/文件）</el-button>
+        <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
         <span v-if="form.atts.length" class="att-chips">
           <el-tag v-for="(a, i) in form.atts" :key="i" closable size="small" @close="form.atts.splice(i, 1)">
             {{ a.name }}
           </el-tag>
         </span>
       </div>
-      <RichEditor v-model="form.content" placeholder="分享资料说明 / 备赛经验 / 作品展示…（支持插图、粘贴视频链接）" />
+      <RichEditor v-model="form.content" placeholder="分享资料说明 / 备赛经验 / 作品展示…" />
       <el-select v-model="form.tags" multiple filterable allow-create default-first-option :multiple-limit="5"
         placeholder="索引标签（≤5 个，自建即成为子板块）" class="sh-tags">
         <el-option v-for="t in tagList" :key="t.name" :value="t.name" :label="`#${t.name}`" />
@@ -271,6 +279,7 @@ async function delPost(p) {
         <el-button type="primary" @click="submit">{{ editingId ? '保存修改' : '发布' }}</el-button>
       </template>
     </el-dialog>
+    <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
 
     <!-- 帖子详情弹窗 -->
     <el-dialog v-model="detailDlg" width="760px" top="3vh" class="sh-detail-dlg" :close-on-click-modal="true"
@@ -322,7 +331,7 @@ async function delPost(p) {
           </div>
           <div v-else class="c-empty">还没有评论，来抢沙发</div>
           <div class="c-input">
-            <el-input v-model="commentInput" placeholder="友善评论（1-1000 字），Enter 发送" @keyup.enter="sendComment" />
+            <el-input v-model="commentInput" placeholder="友善评论，Enter 发送" @keyup.enter="sendComment" />
             <el-button type="primary" :loading="commentSending" @click="sendComment">评论</el-button>
           </div>
         </div>
@@ -405,7 +414,7 @@ async function delPost(p) {
   .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
   .pd-own { margin-left: auto; display: flex; gap: 2px; }
 }
-.pd-body { line-height: 1.9; font-size: 14px;
+.pd-body { line-height: 1.9; font-size: 14px; overflow-wrap: anywhere; /* 长串/URL 强制断行，防竖排 */
   :deep(img) { max-width: 100%; border-radius: 8px; cursor: zoom-in; }
   :deep(video) { max-width: 100%; border-radius: 8px; }
   :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }

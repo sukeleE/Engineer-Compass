@@ -12,6 +12,7 @@ const SORTS = { hot: 'hot', new: 'new', fav: 'fav' };
 const MAX_ATT_TOTAL = 25 * 1024 * 1024; // base64 总量上限（与小组汇报一致）
 
 // 规范化附件：校验结构 + 总量上限；返回 [att...] 或 null（错误信息）
+// 条目两种形态：base64 {name,size,mime,data} / 引用型 {name,size,mime,url}（我的资源分享链接，无 data 不计总量）
 function normAttachments(raw) {
   if (!Array.isArray(raw)) return [];
   let total = 0;
@@ -19,8 +20,15 @@ function normAttachments(raw) {
   for (const a of raw) {
     const name = String(a?.name || '').slice(0, 120);
     const mime = String(a?.mime || 'application/octet-stream').slice(0, 100);
+    if (!name) continue;
+    // 引用型：url 必须是本站分享白名单格式（防任意外链注入）
+    const url = String(a?.url || '');
+    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url)) {
+      out.push({ name, size: Number(a?.size) || 0, mime, url });
+      continue;
+    }
     const data = String(a?.data || '');
-    if (!name || !data) continue;
+    if (!data) continue;
     total += data.length;
     if (total > MAX_ATT_TOTAL) return null;
     out.push({ name, size: Number(a?.size) || Math.round(data.length * 0.75), mime, data });

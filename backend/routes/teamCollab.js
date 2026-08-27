@@ -3,6 +3,9 @@ import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired, teamCtx, requirePerm, hasPerm, logAudit, mutedGuard } from './middleware.js';
 import { normalizePlan } from './schedule.js';
+import { ensureShareToken, RESOURCE_DIR } from './resource.js';
+import { existsSync } from 'node:fs';
+import { join, basename } from 'node:path';
 
 const r = Router();
 r.use(authRequired);
@@ -10,7 +13,7 @@ r.use(authRequired);
 const MAX_FILE = 20 * 1024 * 1024; // 单文件上限 20MB（base64 后约 27MB）
 const MAX_ATTACH = 25 * 1024 * 1024; // 单次附件总 base64 上限（留 json 30mb limit 余量）
 
-// 校验并归一化附件数组：[{name,size,mime,data}] → 只留合法项；超限抛错
+// 校验并归一化附件数组：[{name,size,mime,data}] 或引用型 [{name,size,mime,url}] → 只留合法项；超限抛错
 function sanitizeAttachments(attachments) {
   if (attachments === undefined || attachments === null) return [];
   if (!Array.isArray(attachments)) throw new Error('attachments 需为数组');
@@ -18,11 +21,19 @@ function sanitizeAttachments(attachments) {
   const out = [];
   for (const a of attachments) {
     const name = String(a?.name || '').trim();
+    const mime = String(a?.mime || '').trim() || 'application/octet-stream';
+    if (!name) continue;
+    // 引用型：url 必须是本站分享白名单格式（防任意外链注入），无 data 不计入总量
+    const url = String(a?.url || '');
+    if (/^\/api\/resource\/share\/[0-9a-f]{32}$/.test(url)) {
+      out.push({ name, size: Number(a?.size) || 0, mime, url });
+      continue;
+    }
     const data = String(a?.data || '');
-    if (!name || !data) continue;
+    if (!data) continue;
     total += data.length;
     if (total > MAX_ATTACH) throw new Error(`附件过大（总计 ≤${Math.floor(MAX_ATTACH / 1024 / 1024)}MB）`);
-    out.push({ name, size: Number(a.size) || 0, mime: String(a.mime || '').trim() || 'application/octet-stream', data });
+    out.push({ name, size: Number(a.size) || 0, mime, data });
   }
   return out;
 }
@@ -314,13 +325,16 @@ r.put('/:id/message/:mid', (req, res) => {
 
 // ==================== 资料共享 ====================
 
-// GET /api/team/:id/files — 文件列表
+// GET /api/team/:id/files — 文件列表（引用型附带 share_url：分享被撤销后为 null，前端显示失效）
 r.get('/:id/files', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
-    `SELECT f.id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader
+    `SELECT f.id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader, f.resource_ref,
+            CASE WHEN f.resource_ref IS NOT NULL AND ur.share_token IS NOT NULL
+                 THEN '/api/resource/share/' || ur.share_token END AS share_url
      FROM team_file f JOIN user u ON u.id = f.user_id
+     LEFT JOIN user_resource ur ON ur.id = f.resource_ref
      WHERE f.team_id = ? ORDER BY f.create_time DESC`
   ).all(ctx.team.id);
   res.json(rows);
@@ -342,12 +356,37 @@ r.post('/:id/file', (req, res) => {
   res.status(201).json({ id: rr.lastInsertRowid, file_name: name, file_size: buf.length, message: '已上传' });
 });
 
-// GET /api/team/file/:fid/download — 下载（返回原始字节流）
+// POST /api/team/:id/file/ref — 从「我的资源」引用（file_upload 权限；不复制文件，只存引用 +
+// 复用资源分享 token；撤销分享后组内引用即失效——公开链接语义的必然）
+r.post('/:id/file/ref', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  const deny = requirePerm(ctx, res, 'file_upload');
+  if (deny) return deny;
+  const rid = Number(req.body?.resource_id);
+  const src = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(rid);
+  if (!src) return res.status(404).json({ error: '资源不存在' });
+  if (src.user_id !== req.user.id) return res.status(403).json({ error: '只能引用自己「我的资源」里的文件' });
+  const share = ensureShareToken(src.id);
+  const rr = db.prepare('INSERT INTO team_file (team_id, user_id, file_name, file_size, file_type, resource_ref, data) VALUES (?,?,?,?,?,?,NULL)')
+    .run(ctx.team.id, req.user.id, src.file_name, src.file_size, src.file_type, src.id);
+  res.status(201).json({ id: rr.lastInsertRowid, file_name: src.file_name, file_size: src.file_size, share_url: share.url, message: '已引用' });
+});
+
+// GET /api/team/file/:fid/download — 下载（返回原始字节流；引用型走资源磁盘文件）
 r.get('/file/:fid/download', (req, res) => {
   const f = db.prepare('SELECT * FROM team_file WHERE id = ?').get(Number(req.params.fid));
   if (!f) return res.status(404).json({ error: '文件不存在' });
   const ctx = teamCtx(f.team_id, req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  if (f.resource_ref) {
+    // 引用型：从 user_resource 磁盘取（token 在则资源可用；撤销分享 = 引用失效）
+    const src = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(f.resource_ref);
+    if (!src || !src.share_token) return res.status(410).json({ error: '该引用已失效（分享已被撤销）' });
+    if (basename(src.store_path) !== src.store_path) return res.status(404).json({ error: '文件不存在' }); // 防路径穿越
+    const abs = join(RESOURCE_DIR, String(src.user_id), src.store_path);
+    if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失，请联系管理员' });
+    return res.download(abs, src.file_name);
+  }
   res.setHeader('Content-Type', f.file_type || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.file_name)}`);
   res.send(Buffer.from(f.data, 'base64'));

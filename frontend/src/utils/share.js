@@ -19,5 +19,5 @@ export const atts = (p) => {
 // 帖子的第一张图片附件（列表缩略图用），无图返回 null
 export const firstImage = (p) => atts(p).find((a) => String(a.mime || '').startsWith('image/')) || null;
 
-// 附件 dataURL（base64 预览）
-export const attDataURL = (a) => (a?.data ? `data:${a.mime};base64,${a.data}` : '');
+// 附件展示 URL：base64 内嵌（data）或引用型公开分享链接（url，我的资源引用）
+export const attDataURL = (a) => (a?.data ? `data:${a.mime};base64,${a.data}` : a?.url || '');

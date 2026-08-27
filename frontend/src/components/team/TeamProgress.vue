@@ -10,6 +10,7 @@ import { openImage } from '../../utils/imageViewer.js';
 import RichEditor from './RichEditor.vue';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
+import ResourcePicker from '../ResourcePicker.vue';
 
 const router = useRouter();
 // 点击作者头像/昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -83,6 +84,13 @@ async function pickAtts(e) {
     reportAtts.value.push({ name: f.name, size: f.size, mime: f.type || 'application/octet-stream', data });
   }
 }
+
+// 从「我的资源」引用：生成/复用分享链接，push 引用型附件（无 data 有 url，撤销后时间线处失效）
+const resPickDlg = ref(false);
+const onResourcePick = (r) => {
+  reportAtts.value.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
+  ElMessage.success(`已引用「${r.name}」`);
+};
 
 function openReport() {
   reportHtml.value = '';
@@ -161,10 +169,12 @@ reload().catch((e) => ElMessage.error(e.message));
     <!-- 汇报编写弹窗（富文本 + 附件，与浏览区分开） -->
     <el-dialog v-model="reportDlg" :title="editingLogId ? '✏️ 编辑进度汇报' : '📝 编写进度汇报'" width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false"
       destroy-on-close append-to-body>
-      <RichEditor v-model="reportHtml" placeholder="今天做了什么？卡在哪？下一步？（支持加粗/列表/插入图片）" />
+      <RichEditor v-model="reportHtml" placeholder="今天做了什么？卡在哪？下一步？" />
       <div class="rp-tools">
         <input ref="fileInput" type="file" multiple hidden @change="pickAtts" />
         <el-button size="small" @click="fileInput.click()">📎 附件（图片/音频/视频/文件）</el-button>
+        <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
+        <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
         <span v-if="reportAtts.length" class="att-chips">
           <el-tag v-for="(a, i) in reportAtts" :key="i" closable size="small" @close="reportAtts.splice(i, 1)">
             {{ a.name }}

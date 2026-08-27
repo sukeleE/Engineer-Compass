@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
+import ResourcePicker from '../ResourcePicker.vue';
 
 const router = useRouter();
 // 点击上传者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -29,9 +30,22 @@ const fmtType = (t) => {
   return '📄';
 };
 const isImg = (f) => (f.file_type || '').startsWith('image/');
-// 图片直连 URL（下载接口支持 ?token=，<img> 不带 Authorization 头也能加载）
-const dlUrl = (f) => `${api.teamFileDownload(f.id)}?token=${auth.token}`;
+// 图片直连 URL：引用型（我的资源）直接走公开分享链接；本地上传走下载接口 ?token= 直连
+const dlUrl = (f) => (f.share_url || `${api.teamFileDownload(f.id)}?token=${auth.token}`);
 const preview = (f) => openImage(dlUrl(f), f.file_name);
+
+// 从「我的资源」引用：不复制文件，生成分享链接后建引用行（撤销分享后组内即失效）
+const resPickDlg = ref(false);
+const refPicking = ref(false);
+async function onResourcePick(r) {
+  refPicking.value = true;
+  try {
+    await api.teamFileRef(props.teamId, r.id);
+    ElMessage.success(`已引用「${r.name}」`);
+    await load();
+  } catch (e) { ElMessage.error(e.message); }
+  finally { refPicking.value = false; }
+}
 
 async function load() {
   files.value = await api.teamFiles(props.teamId);
@@ -88,14 +102,18 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         <el-button type="primary" :disabled="!perms.file_upload" :loading="uploading" @click="inputEl.click()">
           ⬆️ 上传资料
         </el-button>
+        <el-button plain :disabled="!perms.file_upload" :loading="refPicking" @click="resPickDlg = true">
+          📁 从我的资源
+        </el-button>
+        <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
       </div>
     </div>
     <div v-if="!perms.file_upload" class="tf-noperm">你的角色没有「上传资料」权限（可让组长调整）</div>
 
     <div v-if="!files.length" class="tf-empty">暂无资料 — 上传第一份共享文件</div>
     <div v-for="f in files" :key="f.id" class="file-row" :class="{ isimg: isImg(f) }">
-      <!-- 图片：直接显示预览图，点击全屏放大 / 下载 -->
-      <img v-if="isImg(f)" class="f-preview" :src="dlUrl(f)" :alt="f.file_name" loading="lazy" @click="preview(f)" />
+      <!-- 图片：直接显示预览图，点击全屏放大 / 下载（引用型分享被撤销时链接失效显示占位） -->
+      <img v-if="isImg(f) && dlUrl(f)" class="f-preview" :src="dlUrl(f)" :alt="f.file_name" loading="lazy" @click="preview(f)" />
       <span v-else class="f-icon">{{ fmtType(f.file_type) }}</span>
       <div class="f-info">
         <b>{{ f.file_name }}</b>
@@ -103,9 +121,11 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
           {{ fmtSize(f.file_size) }} · <span class="u-link" @click="toProfile(f)">{{ f.uploader }}</span>
           <el-tag v-for="rn in roleNamesOf(f.user_id)" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
           · {{ f.create_time?.slice(0, 10) }}
+          <el-tag v-if="f.resource_ref" size="small" type="info" effect="plain" style="margin-left:4px">📁 引用</el-tag>
         </span>
       </div>
-      <a class="f-dl" :href="dlUrl(f)" target="_blank">下载 ⬇</a>
+      <span v-if="f.resource_ref && !dlUrl(f)" class="f-dead">已失效</span>
+      <a v-else class="f-dl" :href="dlUrl(f)" target="_blank">下载 ⬇</a>
       <el-button v-if="f.user_id === me.user_id || perms.file_delete" size="small" text type="danger" @click="remove(f)">删除</el-button>
     </div>
   </div>
@@ -134,5 +154,6 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     }
   }
   .f-dl { color: #2563eb; font-size: 13px; text-decoration: none; &:hover { text-decoration: underline; } }
+  .f-dead { color: #f43f5e; font-size: 12.5px; }
 }
 </style>

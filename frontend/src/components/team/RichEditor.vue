@@ -4,6 +4,7 @@ import { ref, shallowRef, onBeforeUnmount, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue';
 import '@wangeditor/editor/dist/css/style.css';
+import ResourcePicker from '../ResourcePicker.vue';
 
 const props = defineProps({ modelValue: String, placeholder: { type: String, default: '写点什么…' } });
 const emit = defineEmits(['update:modelValue']);
@@ -45,6 +46,13 @@ const editorConfig = {
 function handleCreated(editor) {
   editorRef.value = editor;
 }
+
+// 从「我的资源」插入图片：生成/复用分享链接，直接插 <img>（与 base64 内嵌图并列的第二种插图方式）
+const resPickDlg = ref(false);
+const onResourcePick = (r) => {
+  editorRef.value?.dangerouslyInsertHtml(`<img src="${r.url}" alt="${r.name}">`);
+  ElMessage.success(`已插入「${r.name}」`);
+};
 onBeforeUnmount(() => {
   editorRef.value?.destroy();
   editorRef.value = null;
@@ -53,11 +61,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="rich-editor">
-    <!-- 工具栏开关：默认收起，点击展开 -->
-    <button type="button" class="re-toggle" :class="{ open: toolbarOpen }" @click="toolbarOpen = !toolbarOpen">
-      <span class="re-arrow">▾</span>
-      {{ toolbarOpen ? '收起工具栏' : '展开工具栏' }}
-    </button>
+    <!-- 工具栏开关：默认收起，点击展开；旁边放「我的图片」入口（引用功能） -->
+    <div class="re-toggle-row">
+      <button type="button" class="re-toggle" :class="{ open: toolbarOpen }" @click="toolbarOpen = !toolbarOpen">
+        <span class="re-arrow">▾</span>
+        {{ toolbarOpen ? '收起工具栏' : '展开工具栏' }}
+      </button>
+      <button type="button" class="re-pick" @click="resPickDlg = true">📁 我的图片</button>
+    </div>
+    <ResourcePicker v-model="resPickDlg" only-image @pick="onResourcePick" />
     <Toolbar v-show="toolbarOpen" :editor="editorRef" :default-config="toolbarConfig" mode="simple" class="re-toolbar" />
     <Editor
       v-model="html" :default-config="editorConfig" mode="simple" class="re-body"
@@ -69,14 +81,20 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .rich-editor { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff;
   display: flex; flex-direction: column;
-  // 工具栏开关条：细链接样式，默认收起
+  // 工具栏开关条：细链接样式，默认收起；「我的图片」按钮同排
+  .re-toggle-row { display: flex; align-items: center; gap: 12px; }
   .re-toggle {
-    display: flex; align-items: center; gap: 4px; align-self: flex-start;
+    display: flex; align-items: center; gap: 4px;
     border: none; background: none; cursor: pointer;
     padding: 6px 10px 0; font-size: 12px; color: #2563eb; user-select: none;
     .re-arrow { display: inline-block; transition: transform .2s; }
     &.open .re-arrow { transform: rotate(180deg); }
     &:hover { color: #1d4ed8; }
+  }
+  .re-pick {
+    border: 1px solid #bfdbfe; background: #eff6ff; cursor: pointer;
+    padding: 3px 10px; font-size: 12px; color: #2563eb; border-radius: 6px; user-select: none;
+    &:hover { background: #dbeafe; }
   }
   :deep(.re-toolbar) {
     border-bottom: 1px solid var(--border); flex-shrink: 0;
