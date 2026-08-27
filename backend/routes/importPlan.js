@@ -85,10 +85,22 @@ r.post('/plan', mutedGuard, (req, res, next) => {
   if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS) + '\n…（内容过长已截断）';
 
   // 2) AI 转换：固定格式 JSON（json:true 由 callDeepSeek 强制）
+  // 只做格式划分：任务/阶段/日期逐字保留文档原文，禁止改写扩写（尊重原文件）
+  const fileName = basename(file.originalname, extname(file.originalname));
   const system = mode === 'study'
-    ? '你是学习规划顾问。把用户提供的文档内容整理成一份学习计划，输出严格 JSON（不要 Markdown 代码块），格式：{"topic":"学习主题（≤30字）","summary":"学习目标与整体安排（2-3句话）","phases":[{"phase":"阶段名称","date":"约第x-y周","tasks":["具体任务描述"],"check_standard":"达标要求","week_hours":10}],"resource_keywords":["学习资源关键词","..."]}。'
-    : '你是工科竞赛备赛规划顾问。把用户提供的文档内容整理成一份竞赛备赛计划，输出严格 JSON（不要 Markdown 代码块），格式：{"title":"计划标题（从文档提炼，≤30字）","phases":[{"phase":"阶段名称","date":"起止日期或周期","tasks":["具体任务描述，每条一句、可执行"],"check_standard":"本阶段达标要求","week_hours":10}]}。';
-  const prompt = `请阅读以下文档内容，整理成${mode === 'study' ? '学习计划' : '竞赛备赛计划'}。保留文档中的关键任务、时间安排、目标要求，任务要具体可执行，一般 3-6 个阶段。\n\n【文档内容开始】\n${text}\n【文档内容结束】`;
+    ? '你是文档格式转换器：只做格式划分，不改写内容。把用户提供的文档内容划分成学习计划结构，输出严格 JSON（不要 Markdown 代码块）：{"topic":"学习主题（≤30字）","summary":"学习目标与整体安排（2-3句话）","phases":[{"phase":"阶段名称","date":"日期或周期","tasks":["任务描述"],"check_standard":"达标要求","week_hours":10}],"resource_keywords":["学习资源关键词"]}。'
+    : '你是文档格式转换器：只做格式划分，不改写内容。把用户提供的文档内容划分成竞赛备赛计划结构，输出严格 JSON（不要 Markdown 代码块）：{"title":"计划标题（≤30字）","phases":[{"phase":"阶段名称","date":"日期或周期","tasks":["任务描述"],"check_standard":"达标要求","week_hours":10}]}。';
+  const prompt = `把下面的文档内容按系统结构划分成${mode === 'study' ? '学习计划' : '竞赛备赛计划'}。硬性规则：
+1. 任务描述逐字来自文档原文：只允许去掉序号/项目符号前缀、长段落按句拆成多条；禁止改写、润色、扩写、缩写、合并、总结；禁止添加文档中没有的内容。
+2. 阶段名称优先用文档章节标题（原样）；无章节时按自然段落/日期/内容主题分组；无法分组用单阶段兜底。
+3. date 用文档原文日期；文档没有就留空字符串，禁止编造。
+4. check_standard 用文档原文达标要求；没有就留空字符串。
+5. ${mode === 'study'
+    ? 'topic 优先文档标题，没有则用文件名「' + fileName + '」，≤30 字；summary 允许用自己的话概括；resource_keywords 从文档提取。'
+    : 'title 优先文档第一行标题，没有则用文件名「' + fileName + '」，≤30 字。'}
+【文档内容开始】
+${text}
+【文档内容结束】`;
   let raw;
   try {
     raw = await callDeepSeek([{ role: 'system', content: system }, { role: 'user', content: prompt }], { json: true, timeoutMs: 120000 });
@@ -124,7 +136,7 @@ r.post('/plan', mutedGuard, (req, res, next) => {
 
   const out = { phases };
   if (mode === 'schedule') {
-    out.title = String(plan.title || '').trim().slice(0, 30) || '导入计划';
+    out.title = String(plan.title || '').trim().slice(0, 30) || fileName || '导入计划';
   } else {
     out.topic = String(plan.topic || '').trim().slice(0, 30) || '导入学习计划';
     out.summary = String(plan.summary || '').trim();

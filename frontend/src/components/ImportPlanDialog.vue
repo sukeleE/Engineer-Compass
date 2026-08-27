@@ -70,7 +70,7 @@ async function confirm() {
 <template>
   <el-dialog :model-value="modelValue" :title="mode === 'study' ? '📄 导入学习计划' : mode === 'team' ? '📄 导入小组计划' : '📄 导入备赛计划'"
     width="760px" :close-on-click-modal="false" append-to-body @update:model-value="(v) => emit('update:modelValue', v)">
-    <p class="ip-tip">上传文档，AI 转成阶段任务，预览确认后保存</p>
+    <p class="ip-tip">上传文档，AI 只做格式划分（保留原文），预览确认后保存</p>
 
     <!-- ① 文件选择 -->
     <div v-if="!converting && !result" class="ip-pick">
@@ -84,7 +84,7 @@ async function confirm() {
     <!-- ② AI 转换中 -->
     <div v-else-if="converting" v-loading="true" class="ip-loading">
       <p>📄 正在阅读「{{ fileName }}」并生成计划…</p>
-      <p class="ip-hint">AI 转换需要 10-60 秒，请稍候</p>
+      <p class="ip-hint">AI 划分结构需要 10-60 秒，请稍候</p>
     </div>
 
     <!-- ③ 预览确认 -->
