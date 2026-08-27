@@ -42,11 +42,13 @@ const competitions = ref([]);
 const open = ref({});
 
 // 后端 list 返回 { ...row, plan: {phases:[...]} }，这里拍平为顶层 phases 供模板/保存使用
+// title：自编/导入计划无 comp_name（comp_id=null），取 plan.summary 作标签名兜底
 async function load() {
   loading.value = true;
   try {
     schedules.value = (await api.scheduleList()).map((s) => ({
       ...s,
+      title: (s.plan?.summary || '').replace(/（自编计划）$/, '') || s.comp_name || '',
       plan: undefined,
       phases: s.plan?.phases || [],
     }));
@@ -59,6 +61,12 @@ async function load() {
   if (schedules.value.length && !schedules.value.some((s) => s.id === activeSchedId.value)) {
     activeSchedId.value = schedules.value[0].id;
   }
+}
+
+// 导入/自编保存后：新计划排在标签栏最右端（横向滚动区外），先切到新标签再重拉，保证立即可见
+async function onCreated(r) {
+  if (r?.id) activeSchedId.value = r.id;
+  await load();
 }
 
 // 即时保存（勾选/新增/删除/改日期/改文本都触发）；返回是否成功（面板评星/链接乐观更新据此回滚）
@@ -251,7 +259,7 @@ function onChatDone(r) {
 
 async function remove(s) {
   try {
-    await ElMessageBox.confirm(`删除「${s.comp_name}」的备赛日程？`, '删除确认', { type: 'warning' });
+    await ElMessageBox.confirm(`删除「${s.title || s.comp_name}」的备赛日程？`, '删除确认', { type: 'warning' });
   } catch {
     return; // 取消
   }
@@ -294,10 +302,10 @@ onMounted(load);
     </div>
 
     <!-- 自编计划弹窗（手动编写，不经 AI） -->
-    <ManualPlanDialog v-model="manualDlg" mode="schedule" :competitions="competitions" @created="load" />
+    <ManualPlanDialog v-model="manualDlg" mode="schedule" :competitions="competitions" @created="onCreated" />
 
     <!-- 文件导入弹窗（AI 读文档转计划，预览确认后保存） -->
-    <ImportPlanDialog v-model="importDlg" mode="schedule" @created="load" />
+    <ImportPlanDialog v-model="importDlg" mode="schedule" @created="onCreated" />
 
     <!-- 空状态 -->
     <el-empty v-if="!loading && !schedules.length" description="还没有备赛日程">
@@ -313,13 +321,13 @@ onMounted(load);
         <el-tabs v-if="schedules.length" v-model="activeSchedId" class="s-tabs">
           <el-tab-pane v-for="s in schedules" :key="s.id" :name="s.id">
             <template #label>
-              <span class="s-tab-label"><span class="s-tab-name">{{ s.comp_name }}</span></span>
+              <span class="s-tab-label"><span class="s-tab-name">{{ s.title || '我的日程' }}</span></span>
             </template>
         <div class="s-card">
           <!-- 卡头 -->
           <div class="s-head">
             <div class="s-title">
-              <b>{{ s.comp_name }}</b>
+              <b>{{ s.title || s.comp_name }}</b>
               <el-tag v-if="s.is_custom" size="small" type="warning" style="margin-left:8px">手动修改过</el-tag>
               <span class="s-time">生成于 {{ s.create_time }}</span>
             </div>
