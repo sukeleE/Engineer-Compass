@@ -174,7 +174,7 @@ onMounted(load);
   <div class="mt-sec" v-loading="loading">
     <div class="mt-head">
       <h2>🏗️ 我的小组任务</h2>
-      <span class="mt-tip">所在小组完整备赛计划（含各部门进度），勾选权限与小组页一致</span>
+      <span class="mt-tip">小组完整备赛计划（含各部门进度）</span>
     </div>
 
     <div v-if="!teams.length" class="mt-empty">

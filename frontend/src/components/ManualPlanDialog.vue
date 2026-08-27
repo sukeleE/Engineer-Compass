@@ -85,7 +85,7 @@ async function submit() {
 <template>
   <el-dialog :model-value="modelValue" :title="mode === 'schedule' ? '✍️ 自编备赛计划' : '✍️ 自编学习计划'"
     width="720px" :close-on-click-modal="false" append-to-body @update:model-value="(v) => emit('update:modelValue', v)">
-    <p class="mp-tip">不依赖 AI，完全手动编写：填好标题和分阶段任务，随时可改可勾选。</p>
+    <p class="mp-tip">不依赖 AI：填标题 + 分阶段任务，随时可改</p>
 
     <!-- 标题区 -->
     <div v-if="mode === 'schedule'" class="mp-title">

@@ -7,6 +7,7 @@ import { api } from '../api.js';
 import { fmtDate } from '../utils/noteStatus.js';
 import auth from '../auth.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
+import ImportPlanDialog from './ImportPlanDialog.vue';
 import PlanChat from './PlanChat.vue';
 import TaskPanel from './task/TaskPanel.vue';
 
@@ -17,6 +18,7 @@ const detail = ref(null);
 const saving = ref(false);
 const loadingDetail = ref(false);
 const manualDlg = ref(false);
+const importDlg = ref(false);
 const chatCreate = ref(false); // AI 对话生成学习日程
 const chatEdit = ref(false); // AI 对话修改学习日程
 const genOpen = ref(false); // AI 生成区默认收起（移动端占屏），点击标题展开
@@ -290,14 +292,17 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
       <div class="gen-head" :class="{ open: genOpen }" @click="genOpen = !genOpen">
         <div>
           <h2>🤖 AI 学习日程 <span class="gen-fold-arrow">▾</span></h2>
-          <p class="gen-tip">告诉 AI 你想学的技能或知识点（不限于竞赛）——自动生成分阶段学习计划，并推荐 B站 / 知乎 / CSDN / 微信 / GitHub 等各平台的学习资料。</p>
+          <p class="gen-tip">告诉 AI 想学的技能——生成分阶段计划 + 各平台学习资料</p>
         </div>
-        <el-button type="primary" plain @click.stop="manualDlg = true">✍️ 自编计划</el-button>
+        <div class="gen-btns" @click.stop>
+          <el-button type="primary" plain @click="manualDlg = true">✍️ 自编计划</el-button>
+          <el-button plain @click="importDlg = true">📄 导入计划</el-button>
+        </div>
       </div>
       <template v-if="genOpen">
         <div class="gen-form">
           <el-input
-            v-model="form.topic" size="large" placeholder="学习主题，如：STM32 单片机 / 强化学习 / 数据结构与算法"
+            v-model="form.topic" size="large" placeholder="学习主题，如：STM32 / 强化学习"
             @keyup.enter="generate"
           />
           <el-select v-model="form.level" size="large" style="width: 160px">
@@ -313,13 +318,16 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
         <div v-if="generating" class="gen-loading">
           <span class="spinner"></span> AI 正在规划学习路径与资料检索关键词…
         </div>
-        <div class="gen-chat-tip">💬 AI 对话生成：AI 会先确认你的学习主题、水平、目标与时间投入，再产出计划</div>
+        <div class="gen-chat-tip">💬 对话：AI 先确认主题/水平/目标/时间再出计划</div>
       </template>
     </div>
 
     <!-- 自编计划弹窗（手动编写，不经 AI） -->
     <ManualPlanDialog v-model="manualDlg" mode="study"
       @created="onManualCreated" />
+
+    <!-- 文件导入弹窗（AI 读文档转计划，预览确认后保存） -->
+    <ImportPlanDialog v-model="importDlg" mode="study" @created="onManualCreated" />
 
     <!-- 对话式 AI：生成 / 修改学习日程（AI 先确认主题与投入，已勾选任务自动保留） -->
     <PlanChat v-model="chatCreate" mode="study" @done="(r) => onChatDone(r, false)" />
@@ -330,7 +338,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
       <!-- 左：日程列表 -->
       <aside class="study-list">
         <div class="list-title">📚 我的学习日程（{{ list.length }}）</div>
-        <div v-if="!list.length" class="list-empty">还没有学习日程<br>输入主题点「✨ AI 生成」即可创建</div>
+        <div v-if="!list.length" class="list-empty">还没有学习日程 — 输入主题点「✨ AI 生成」</div>
         <div
           v-for="s in list" :key="s.id"
           class="list-item" :class="{ active: s.id === detail?.id }"
@@ -353,7 +361,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
         <div v-if="!detail" class="detail-empty">
           <div class="de-icon">📖</div>
           <p>选择左侧学习日程查看详情</p>
-          <p class="de-sub">或输入主题生成你的第一份学习日程</p>
+          <p class="de-sub">或输入主题生成第一份学习日程</p>
         </div>
         <template v-else>
           <div class="detail-head">
@@ -450,7 +458,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 
           <!-- 推荐学习资料 -->
           <div class="res-block">
-            <h4 class="res-title">🎯 主题学习资料 <span class="res-sub">（全平台检索入口）</span></h4>
+            <h4 class="res-title">🎯 主题学习资料 <span class="res-sub">（全平台检索）</span></h4>
             <div class="plat-grid">
               <a
                 v-for="(m, i) in detailResources('topic')" :key="i"
@@ -466,7 +474,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
               </a>
             </div>
 
-            <h4 v-if="detailResources('detail').length" class="res-title">📌 AI 推荐细分方向 <span class="res-sub">（围绕你的主题拆出的具体关键词）</span></h4>
+            <h4 v-if="detailResources('detail').length" class="res-title">📌 AI 推荐细分方向 <span class="res-sub">（围绕主题的关键词）</span></h4>
             <div v-if="detailResources('detail').length" class="plat-grid">
               <a
                 v-for="(m, i) in detailResources('detail')" :key="i"
@@ -498,6 +506,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   .gen-head {
     display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
     cursor: pointer; user-select: none;
+    .gen-btns { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
     h2 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 6px; }
     .gen-fold-arrow {
       display: inline-block; font-size: 14px; color: #2563eb; transition: transform .2s;
@@ -583,7 +592,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
       &:hover .task-row { background: #f1f5f9; }
       .task-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px;
         &.done .t-text { color: #94a3b8; text-decoration: line-through; }
-        .t-text { font-size: 13.5px; cursor: text;
+        .t-text { font-size: 13.5px; cursor: text; min-width: 0; overflow-wrap: break-word; /* 长串断行防撑破 */
           &:hover { color: #2563eb; }
         }
         .t-edit { flex: 1; }

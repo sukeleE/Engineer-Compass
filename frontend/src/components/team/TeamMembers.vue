@@ -213,7 +213,7 @@ loadInvite();
 
     <!-- 成员自选角色弹窗（≤3） -->
     <el-dialog v-model="selfDlg" title="🎭 自选我的角色" width="420px" top="20vh">
-      <p class="self-note">选择你在小组中的角色（最多 3 个）。角色权限会叠加，角色也可由组长调整。</p>
+      <p class="self-note">选择你的角色（≤3 个），权限叠加，组长可调整</p>
       <el-select v-model="selfRoleIds" multiple collapse-tags collapse-tags-tooltip
         :multiple-limit="3" placeholder="选择角色（≤3）" style="width:100%">
         <el-option v-for="r in roles" :key="r.id" :value="r.id" :label="r.name" />
@@ -227,7 +227,7 @@ loadInvite();
     <!-- 角色 -->
     <div class="tm-sec">
       <div class="tm-sec-head">
-        <h4>🎭 自定义角色 <span class="tm-tip">高自由度：组长可创建任意角色并勾选权限，如「机械组组长」「资料管理员」</span></h4>
+        <h4>🎭 自定义角色 <span class="tm-tip">组长可创建任意角色并勾选权限</span></h4>
         <el-button v-if="perms.role" size="small" type="primary" plain @click="newRole">＋ 新建角色</el-button>
       </div>
 
@@ -263,7 +263,7 @@ loadInvite();
 
     <!-- AI 智能分组建议弹窗 -->
     <el-dialog v-model="aiDlg" title="🧠 AI 智能分组建议" width="560px" top="6vh">
-      <p class="ai-note">AI 根据成员昵称/当前角色与小组部门、关联竞赛给出建议分组，确认后应用（组长不会被分配）</p>
+      <p class="ai-note">AI 按成员信息与部门建议分组（组长除外）</p>
       <div v-for="a in aiSuggest" :key="a.user_id" class="ai-row">
         <span class="ai-name">{{ a.nickname }}</span>
         <span class="ai-from">{{ a.current_role === '无' ? '（无角色）' : a.current_role }}</span>

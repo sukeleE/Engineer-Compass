@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="tree-wrap">
     <div class="tree-toolbar">
-      <span class="hint">🖱️ 拖拽平移 · 滚轮缩放 · 点击节点可折叠分支</span>
+      <span class="hint">🖱️ 拖拽平移 · 滚轮缩放 · 点击折叠</span>
     </div>
     <div ref="chartRef" class="tech-tree"></div>
   </div>

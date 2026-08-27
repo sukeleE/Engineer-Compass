@@ -194,7 +194,7 @@ onMounted(() => {
       <b class="cal-ym">{{ calY }} 年 {{ calM + 1 }} 月</b>
       <el-button size="small" @click="calShift(1)">下月 ›</el-button>
       <el-button size="small" text @click="calGoToday">回到本月</el-button>
-      <span class="cal-hint">💡 点击日期查看当天完成的事与笔记</span>
+      <span class="cal-hint">💡 点击日期查看当天记录</span>
     </div>
     <div v-loading="calLoading" class="cal-box">
       <div class="cal-week">
@@ -275,13 +275,13 @@ onMounted(() => {
             {{ statusOf(calDlgNote.status).emoji }} 今日状态：{{ statusOf(calDlgNote.status).label }}
           </div>
           <div v-if="calDlgNote.content" class="dlg-body" v-html="calDlgNote.content"></div>
-          <div v-else class="dlg-empty">这天只记录了状态，没有文字内容</div>
+          <div v-else class="dlg-empty">只有状态，无文字记录</div>
         </div>
         <div v-else>
           <el-select v-model="dlgStatus" size="small" placeholder="今日学习状态" clearable class="dlg-status-sel">
             <el-option v-for="st in NOTE_STATUS" :key="st.key" :value="st.key" :label="`${st.emoji} ${st.label}`" />
           </el-select>
-          <RichEditor v-model="dlgContent" placeholder="记录今天学了什么、卡在哪、明天做什么…" />
+          <RichEditor v-model="dlgContent" placeholder="记录今天做了什么、卡在哪…" />
         </div>
       </div>
       <template #footer>

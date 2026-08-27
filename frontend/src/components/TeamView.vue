@@ -142,12 +142,12 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
           <el-form-item label="② 小组名称"><el-input v-model="newTeam.name" maxlength="30" placeholder="如：智能车竞速组" /></el-form-item>
           <el-form-item label="③ 小组简介"><el-input v-model="newTeam.desc" type="textarea" :rows="2" placeholder="选填" /></el-form-item>
           <el-alert v-if="newTeam.comp_id" type="success" :closable="false" class="ai-tip"
-            title="🧠 创建后将自动：AI 拆分部门（如机械组/电控组/软件组）→ 按部门生成备赛计划，组长可直接分配成员" />
+            title="🧠 创建后自动：AI 拆部门（机械/电控/软件）→ 生成备赛计划，组长可分配" />
           <div class="create-actions">
             <el-button type="success" plain @click="showChat = true">💬 AI 对话智能建组</el-button>
             <el-button type="primary" :loading="loading" @click="create()">🏗️ 直接创建（你将成为组长）</el-button>
           </div>
-          <div class="create-tip">💬 AI 对话：AI 先询问分组方式与备赛周期，确认后再生成部门与计划；直接创建则走一键 AI（或手动建组）</div>
+          <div class="create-tip">💬 对话：AI 先问分组与周期再生成；直接创建走一键 AI</div>
         </el-form>
       </el-dialog>
 

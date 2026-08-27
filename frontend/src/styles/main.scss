@@ -75,6 +75,18 @@ html, body {
   }
 }
 
+// ============ 长字符串换行兜底 ============
+// 无空格长串（URL / base64 / 外文长词）默认不内部断行 → 撑破容器或竖排。
+// 只覆盖「用户生成内容」语义容器，不碰按钮/标签/导航等 nowrap 组件；
+// flex 场景还需配合子项 min-width:0（组件内已逐个补），否则容器仍被长词撑开。
+// 表格单元格用 anywhere：参与列宽 min-content 计算，长 URL 不撑破表格。
+p, li, blockquote, dd {
+  overflow-wrap: break-word;
+}
+td, th {
+  overflow-wrap: anywhere;
+}
+
 // 赛道颜色工具
 .type-color {
   &.电子机器人 { color: var(--c-电子机器人); }

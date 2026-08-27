@@ -44,7 +44,7 @@ onMounted(() => load());
 
 <template>
   <div class="tp2" v-loading="loading">
-    <div class="tp2-tip">📡 小组内共享的备赛计划与学习日程（来自「我的备赛日程」「学习日程」页）— 便于组长统筹对齐</div>
+    <div class="tp2-tip">📡 组内共享的备赛计划与学习日程（来自「备赛日程」「学习日程」页）</div>
 
     <div v-if="!rows.length" class="tp2-empty">暂无成员计划数据</div>
 
@@ -65,7 +65,7 @@ onMounted(() => load());
         <PlanTiles :items="schedTiles(m.schedules)" />
       </div>
       <div v-else-if="m.schedTotal" class="mp-none mp-done">🎉 该成员备赛计划已全部完成</div>
-      <div v-else class="mp-none">暂无备赛计划（成员可在「我的备赛日程」生成）</div>
+      <div v-else class="mp-none">暂无备赛计划（成员可在「备赛日程」生成）</div>
 
       <!-- 学习日程（已完成的不显示；紧凑标签，点击展开详细进度） -->
       <div v-if="m.studies.length" class="mp-sec">
@@ -73,7 +73,7 @@ onMounted(() => load());
         <PlanTiles :items="studyTiles(m.studies)" />
       </div>
       <div v-else-if="m.studyTotal" class="mp-none mp-done">🎉 该成员学习日程已全部完成</div>
-      <div v-else class="mp-none">暂无学习日程（成员可在「学习日程」页生成）</div>
+      <div v-else class="mp-none">暂无学习日程（成员可在「学习日程」生成）</div>
     </div>
   </div>
 </template>

@@ -103,7 +103,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   <div class="auth-page">
     <div class="auth-card">
       <h2>🏗️ 登录</h2>
-      <p class="auth-sub">邮箱验证码登录 · 日程/计划/小组数据随账号保存</p>
+      <p class="auth-sub">邮箱验证码登录 · 数据随账号保存</p>
 
       <el-tabs v-model="tab" stretch>
         <!-- Tab1 邮箱验证码（推荐） -->
@@ -127,7 +127,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
               登录 / 注册
             </el-button>
           </el-form>
-          <p class="email-tip">💡 未注册的邮箱会自动创建账号，并把本机已生成的备赛/学习计划关联到该账号；同一账号可在任何设备登录查看。</p>
+          <p class="email-tip">💡 未注册邮箱将自动创建账号，数据任意设备可查</p>
         </el-tab-pane>
 
         <!-- Tab2 邮箱 + 密码 -->

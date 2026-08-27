@@ -155,7 +155,7 @@ const taskText = (t) => (typeof t === 'string' ? t : t?.text || '');
       <!-- 输入区 -->
       <div v-else class="pc-input">
         <el-input
-          v-model="input" placeholder="回复 AI 的问题，如：分 3 组，机械/电控/软件，备赛到 11 月…"
+          v-model="input" placeholder="如：分 3 组：机械/电控/软件，备赛到 11 月"
           :disabled="sending" @keyup.enter="send"
         />
         <el-button type="primary" :loading="sending" @click="send">发送</el-button>

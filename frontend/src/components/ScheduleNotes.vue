@@ -122,7 +122,7 @@ onMounted(() => { loadMonth().then(applyDate); });
     <div v-if="props.open" class="note-panel">
       <div class="note-head">
         <b>📝 日程笔记</b>
-        <div class="note-sub">{{ date }} · 每天记录一点，备赛更清晰</div>
+        <div class="note-sub">{{ date }} · 今日记录</div>
         <div class="note-actions">
           <el-button link size="small" @click="emit('close')">收起</el-button>
         </div>
@@ -149,7 +149,7 @@ onMounted(() => { loadMonth().then(applyDate); });
             </div>
             <el-button text size="small" type="danger" title="删除该笔记" @click.stop="deleteNote(n)">🗑</el-button>
           </div>
-          <el-empty v-if="!history.length" description="这个月还没有笔记，点上方「写笔记」开始记录" :image-size="50" />
+          <el-empty v-if="!history.length" description="本月还没有笔记" :image-size="50" />
         </div>
       </div>
 
@@ -163,7 +163,7 @@ onMounted(() => { loadMonth().then(applyDate); });
             {{ statusOf(activeNote.status).emoji }} 今日状态：{{ statusOf(activeNote.status).label }}
           </div>
           <div v-if="activeNote.content" class="dn-body" v-html="activeNote.content"></div>
-          <div v-else class="dn-empty">这天只记录了状态，没有文字内容</div>
+          <div v-else class="dn-empty">只有状态，无文字记录</div>
         </template>
         <!-- 编写 / 编辑模式 -->
         <template v-else>
@@ -179,7 +179,7 @@ onMounted(() => { loadMonth().then(applyDate); });
               <el-option v-for="s in schedules" :key="s.id" :value="s.id" :label="s.comp_name" />
             </el-select>
           </div>
-          <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…（支持插图 / 粘贴视频链接）" />
+          <RichEditor v-model="content" placeholder="今天学了什么？卡在哪？明天做什么…" />
         </template>
         <template #footer>
           <template v-if="dlgMode === 'view' && activeNote">

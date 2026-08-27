@@ -137,7 +137,7 @@ function lab(full, short) { return isNarrow.value ? short : full; }
             </a>
             <div v-else class="official-missing">
               <span class="ob-icon">🏛️</span>
-              <span>官网暂未收录 — 可在「🧠 AI 收录」页粘贴官方资料补充</span>
+              <span>官网未收录 — 可去「AI 收录」补充</span>
             </div>
             <el-descriptions :column="isNarrow ? 1 : 2" border>
               <el-descriptions-item label="全称">{{ comp.name }}</el-descriptions-item>
@@ -244,7 +244,7 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 
               <!-- 知识点（按子赛项分组，联动技术栈） -->
               <div v-if="knowledgeGroups.length" class="media-block">
-                <h4 class="media-title">📚 相关知识点视频 <span class="media-sub">（按备赛阶段/子赛项分组，源自技术栈）</span></h4>
+                <h4 class="media-title">📚 相关知识点视频 <span class="media-sub">（按阶段/子赛项分组）</span></h4>
                 <el-collapse>
                   <el-collapse-item v-for="g in knowledgeGroups" :key="g.processName" :title="g.processName">
                     <div v-for="nd in g.nodes" :key="nd.name" class="kn-row">
@@ -270,7 +270,7 @@ function lab(full, short) { return isNarrow.value ? short : full; }
             <template v-if="!joined">
               <div class="join-intro">
                 <p>确认要参加 <b>{{ comp.name }}</b> 吗？</p>
-                <p class="join-tip">💬 对话生成：AI 先确认你的基础、备赛周期与每周投入，再产出个性化日程；⚡ 一键生成：直接结合当前日期自动生成。</p>
+                <p class="join-tip">💬 对话：AI 先确认基础与周期再出日程；⚡ 一键：按当前日期直接生成</p>
               </div>
               <div class="join-actions">
                 <el-button type="primary" size="large" @click="showChat = true">💬 AI 对话生成备赛日程</el-button>

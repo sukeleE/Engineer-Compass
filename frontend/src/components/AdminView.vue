@@ -134,7 +134,7 @@ onMounted(loadPending);
   <main class="admin-page">
     <div class="page-head">
       <h2>🧠 AI 收录管理端</h2>
-      <p class="sub">未知竞赛知识增长引擎：用户问库外竞赛 → AI 提炼资料 → 待审核 → 人工采纳转正</p>
+      <p class="sub">库外竞赛 AI 收录 → 人工审核转正</p>
     </div>
 
     <el-tabs v-model="tab">
@@ -180,7 +180,7 @@ onMounted(loadPending);
       <el-tab-pane label="AI 收录" name="ingest">
         <div class="ingest">
           <div class="ingest-step">
-            <h4>① 粘贴资料（官方通知 / 官网简介 / 往届公告，≥20 字）</h4>
+            <h4>① 粘贴官方资料（通知 / 简介 / 公告，≥20 字）</h4>
             <el-input
               v-model="material" type="textarea" :rows="5"
               placeholder="例：关于举办2026年全国大学生嵌入式芯片与系统设计竞赛的通知：本届大赛由中国电子学会主办……报名时间2026年3月1日至4月15日……"
@@ -191,7 +191,7 @@ onMounted(loadPending);
           </div>
 
           <div class="ingest-step" v-if="card.name || extracting">
-            <h4>② 核对并补全信息（AI 提取结果可编辑）</h4>
+            <h4>② 核对补全（AI 提取可编辑）</h4>
             <el-form label-width="110px" label-position="left" class="card-form">
               <div class="form-row">
                 <el-form-item label="竞赛名称 *"><el-input v-model="card.name" /></el-form-item>
@@ -222,7 +222,7 @@ onMounted(loadPending);
                 <el-form-item label="适合专业"><el-input v-model="card.suitable_major" /></el-form-item>
               </div>
               <el-form-item label="来源链接 *">
-                <el-input v-model="card.source_url" placeholder="https://xxx.edu.cn/notice/… （官方来源，必填）" />
+                <el-input v-model="card.source_url" placeholder="官方来源链接（必填）" />
               </el-form-item>
               <el-form-item label="简介">
                 <el-input v-model="card.intro" type="textarea" :rows="3" />
@@ -238,7 +238,7 @@ onMounted(loadPending);
             </div>
             <el-alert
               v-if="submitted" type="success" :closable="false" style="margin-top:10px"
-              title="已入库待审核！切换到「待审核」列表可采纳转正"
+              title="已入库待审核，可采纳转正"
             />
           </div>
         </div>
