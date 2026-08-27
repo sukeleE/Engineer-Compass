@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
+import ImportPlanDialog from './ImportPlanDialog.vue';
 // 日程笔记面板已提升到全局 ToolDock（此页不再挂载）
 import CalendarView from './CalendarView.vue';
 import StudyView from './StudyView.vue';
@@ -30,9 +31,12 @@ mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
 function lab(full, short) { return isNarrow.value ? short : full; }
 
 const schedules = ref([]);
+// 多竞赛横向标签切换（仿小组任务）：当前选中日程 id；默认第一个，被删除后重置
+const activeSchedId = ref(null);
 const loading = ref(false);
 const savingId = ref(null);
 const manualDlg = ref(false);
+const importDlg = ref(false);
 const competitions = ref([]);
 // 任务面板展开映射：`s${日程id}|${阶段i}|${任务j}` → true（行点击切换；拆分后索引位移，全量收起）
 const open = ref({});
@@ -50,6 +54,10 @@ async function load() {
     ElMessage.error(`加载日程失败：${e.message}`);
   } finally {
     loading.value = false;
+  }
+  // 默认选中第一个；当前选中被删除后重置
+  if (schedules.value.length && !schedules.value.some((s) => s.id === activeSchedId.value)) {
+    activeSchedId.value = schedules.value[0].id;
   }
 }
 
@@ -280,12 +288,16 @@ onMounted(load);
       <h2>📋 我的备赛日程</h2>
       <div class="head-right">
         <el-button size="small" type="primary" plain @click="openManual">✍️ 自编计划</el-button>
+        <el-button size="small" plain @click="importDlg = true">📄 导入计划</el-button>
         <el-button size="small" :loading="loading" @click="load">刷新</el-button>
       </div>
     </div>
 
     <!-- 自编计划弹窗（手动编写，不经 AI） -->
     <ManualPlanDialog v-model="manualDlg" mode="schedule" :competitions="competitions" @created="load" />
+
+    <!-- 文件导入弹窗（AI 读文档转计划，预览确认后保存） -->
+    <ImportPlanDialog v-model="importDlg" mode="schedule" @created="load" />
 
     <!-- 空状态 -->
     <el-empty v-if="!loading && !schedules.length" description="还没有备赛日程">
@@ -297,7 +309,13 @@ onMounted(load);
     <!-- ========== 任务清单 ========== -->
     <div class="s-wrap">
       <div v-loading="loading" class="s-list">
-        <div v-for="s in schedules" :key="s.id" class="s-card">
+        <!-- 多竞赛横向标签切换（仿小组任务）：一次只展示一个竞赛日程 -->
+        <el-tabs v-if="schedules.length" v-model="activeSchedId" class="s-tabs">
+          <el-tab-pane v-for="s in schedules" :key="s.id" :name="s.id">
+            <template #label>
+              <span class="s-tab-label"><span class="s-tab-name">{{ s.comp_name }}</span></span>
+            </template>
+        <div class="s-card">
           <!-- 卡头 -->
           <div class="s-head">
             <div class="s-title">
@@ -428,6 +446,8 @@ onMounted(load);
             </div>
           </div>
         </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </div>
     </el-tab-pane>
@@ -467,6 +487,18 @@ onMounted(load);
 
 // 任务清单：卡片流（笔记已独立为浮窗，不再占右侧栏位）
 .s-list { display: flex; flex-direction: column; gap: 16px; }
+
+// 多竞赛横向标签切换（仿小组任务 .mt-tabs）：标签行横向滚动、隐藏滚动条、长名省略
+.s-tabs {
+  margin-top: 12px;
+  :deep(.el-tabs__header) { margin-bottom: 0; }
+  :deep(.el-tabs__nav-wrap) { overflow-x: auto; overflow-y: hidden; }
+  :deep(.el-tabs__nav-wrap::-webkit-scrollbar) { display: none; }
+  :deep(.el-tabs__item) { font-size: 13.5px; padding: 0 14px; }
+  .s-tab-label { display: inline-flex; align-items: center; gap: 6px;
+    .s-tab-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+}
 
 .s-card {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
@@ -514,7 +546,7 @@ onMounted(load);
         font-size: 12px; color: #fff; flex-shrink: 0; cursor: pointer;
         &.on { background: #16a34a; border-color: #16a34a; }
       }
-      .t-text { flex: 1; cursor: text;
+      .t-text { flex: 1; min-width: 0; cursor: text; overflow-wrap: break-word; /* 长串不断行会撑破任务行 */
         &:hover { color: #2563eb; }
       }
       .t-edit { flex: 1; }

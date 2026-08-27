@@ -9,6 +9,7 @@ import { fmtDate } from '../../utils/noteStatus.js';
 import TeamPlans from './TeamPlans.vue';
 import PlanChat from '../PlanChat.vue';
 import TaskPanel from '../task/TaskPanel.vue';
+import ImportPlanDialog from '../ImportPlanDialog.vue';
 
 const props = defineProps({ teamId: Number, me: Object, roles: Array, perms: Object });
 
@@ -22,6 +23,7 @@ const comps = ref([]);
 const genCompId = ref(null);
 const loading = ref(false);
 const genLoading = ref(false);
+const importDlg = ref(false);
 // 任务面板展开映射：`${计划id}|${阶段pi}|${任务idx}`（拆分后索引位移，全量收起）
 const open = ref({});
 
@@ -234,7 +236,7 @@ onMounted(() => { load(); loadComps(); });
 <template>
   <div class="tpv">
     <el-alert type="info" :closable="false" class="tpv-tip" show-icon
-      title="小组备赛计划：AI 按小组部门拆分任务 → 组长分配 → 各部门并行跟进勾选；「计划同步」为成员个人计划汇总" />
+      title="小组计划：AI 按部门拆任务 → 组长分配 → 并行跟进；「计划同步」为个人计划汇总" />
 
     <!-- 生成区（组长） -->
     <div v-if="canEdit" class="gen-row">
@@ -243,7 +245,8 @@ onMounted(() => { load(); loadComps(); });
       </el-select>
       <el-button type="success" plain @click="openGenChat">💬 AI 对话生成</el-button>
       <el-button :loading="genLoading" @click="generate">⚡ 一键生成</el-button>
-      <span class="gen-tip">💬 对话生成：AI 先确认分组方式与计划周期再出计划；一键生成：直接按现有部门拆分（AI 将结合部门 {{ deptOptions.join('、') }}）</span>
+      <el-button type="primary" plain @click="importDlg = true">📄 导入计划</el-button>
+      <span class="gen-tip">💬 对话：AI 先确认分组与周期；一键：按现有部门拆分</span>
     </div>
 
     <div v-loading="loading" style="min-height: 60px">
@@ -376,6 +379,9 @@ onMounted(() => { load(); loadComps(); });
       @done="() => { genChat = false; ElMessage.success('🎉 小组计划已生成'); load(); }" />
     <PlanChat v-model="editChat" mode="team-edit" :team-id="teamId" :plan-id="editChatPlanId"
       @done="() => { editChat = false; ElMessage.success('✅ 计划已按对话修改'); load(); }" />
+
+    <!-- 文档导入：AI 转阶段任务 → 预览确认 → 保存为小组计划（任务归「通用」部门） -->
+    <ImportPlanDialog v-model="importDlg" mode="team" :team-id="teamId" @created="load" />
   </div>
 </template>
 

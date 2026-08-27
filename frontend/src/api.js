@@ -173,6 +173,19 @@ export const api = {
   },
   resourceDownload: (id) => `/api/resource/${id}/download`,
   resourceDelete: (id) => req(`/resource/${id}`, { method: 'DELETE' }),
+  // 资源分享（引用功能）：POST 幂等生成/查询公开下载链接，DELETE 撤销（token 清空后所有引用失效）
+  resourceShare: (id) => req(`/resource/${id}/share`, { method: 'POST' }),
+  resourceUnshare: (id) => req(`/resource/${id}/share`, { method: 'DELETE' }),
+  // 小组资料：从「我的资源」引用（不复制文件，生成分享 token 后建引用行）
+  teamFileRef: (teamId, rid) => req(`/team/${teamId}/file/ref`, { method: 'POST', body: JSON.stringify({ resource_id: rid }) }),
+  // 计划导入：上传 .docx/.pdf/.xlsx/.md → AI 转成固定格式计划（不落库，前端确认后走 scheduleManual/studyManual）
+  planImport: (file, mode) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('mode', mode);
+    const token = localStorage.getItem('ec_token');
+    return req('/import/plan', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
+  },
   // 消息中心（评论/点赞/收藏通知）
   notifications: () => req('/notifications'),
   notificationsUnread: () => req('/notifications/unread-count'),
