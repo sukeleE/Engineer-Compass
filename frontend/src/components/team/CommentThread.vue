@@ -4,13 +4,14 @@ import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
+import { fmtShort } from '../../utils/time.js';
 
 const props = defineProps({ teamId: Number, type: String, target: Object });
 const open = ref(false);
 const text = ref('');
 const sending = ref(false);
 
-const fmt = (t) => t?.replace('T', ' ').slice(5, 16) || '';
+const fmt = (t) => fmtShort(t) || '';
 
 async function send() {
   if (!text.value.trim()) return;

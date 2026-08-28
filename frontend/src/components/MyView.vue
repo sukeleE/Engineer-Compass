@@ -10,6 +10,7 @@ import auth, { clearAuth, patchUser } from '../auth.js';
 import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import AuthView from './AuthView.vue';
 import DmDialog from './DmDialog.vue'; // 公共私聊弹窗（3s 轮询，关闭即停）
+import { fmtDateTime } from '../utils/time.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -597,7 +598,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="mp-ex">{{ excerpt(p.content) || '（纯附件帖）' }}</div>
                 <div class="mp-meta">
-                  <span class="mp-time">{{ p.create_time?.slice(0, 16) }}</span>
+                  <span class="mp-time">{{ fmtDateTime(p.create_time) }}</span>
                   <span class="mp-acts">👍 {{ cnt(p.like_count) }} · ⭐ {{ cnt(p.fav_count) }} · 💬 {{ cnt(p.comment_count) }}</span>
                 </div>
               </div>
@@ -621,7 +622,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="mp-ex">{{ excerpt(p.content) || '（纯附件帖）' }}</div>
                 <div class="mp-meta">
-                  <span class="mp-time">{{ p.create_time?.slice(0, 16) }}</span>
+                  <span class="mp-time">{{ fmtDateTime(p.create_time) }}</span>
                   <span class="mp-acts">👍 {{ cnt(p.like_count) }} · ⭐ {{ cnt(p.fav_count) }} · 💬 {{ cnt(p.comment_count) }}</span>
                 </div>
               </div>

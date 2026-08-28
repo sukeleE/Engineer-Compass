@@ -5,6 +5,7 @@ import { ref, computed, watch, nextTick, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
+import { fmtShort } from '../utils/time.js';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -64,7 +65,7 @@ onUnmounted(() => { if (dmTimer) clearInterval(dmTimer); });
     <div ref="dmListEl" class="dm-list">
       <div v-for="m in dmMsgs" :key="m.id" :class="['dm-bubble', Number(m.from_id) === Number(auth.user?.id) ? 'mine' : 'other']">
         <div class="dm-text">{{ m.content }}</div>
-        <div class="dm-time">{{ m.create_time?.slice(5, 16) }}</div>
+        <div class="dm-time">{{ fmtShort(m.create_time) }}</div>
       </div>
       <el-empty v-if="!dmMsgs.length" description="还没有消息，说点什么吧" :image-size="50" />
     </div>

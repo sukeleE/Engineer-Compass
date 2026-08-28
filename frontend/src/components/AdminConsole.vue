@@ -4,6 +4,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
+import { fmtDateTime, fmtDateTimeS } from '../utils/time.js';
 
 const tab = ref('users');
 
@@ -264,6 +265,8 @@ const fmtUp = (s) => {
   return `${d ? `${d} 天 ` : ''}${h} 小时 ${m} 分`;
 };
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
+// el-table 时间列 formatter：UTC 串 → 本地 'YYYY-MM-DD HH:MM'（DB CURRENT_TIMESTAMP 是 UTC）
+const fmtT = (_r, _c, v) => fmtDateTime(v);
 
 onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisits(); loadAnns(); loadResources(); loadStatus(); });
 </script>
@@ -294,7 +297,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             </template>
           </el-table-column>
           <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="create_time" label="注册时间" width="160" />
+          <el-table-column prop="create_time" label="注册时间" width="160" :formatter="fmtT" />
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="STATUS_LABELS[row.status][1]">{{ STATUS_LABELS[row.status][0] }}</el-tag>
@@ -359,7 +362,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             <el-table-column label="点赞" width="70">
               <template #default="{ row }">{{ row.like_count }}</template>
             </el-table-column>
-            <el-table-column prop="create_time" label="发布时间" width="160" />
+            <el-table-column prop="create_time" label="发布时间" width="160" :formatter="fmtT" />
             <el-table-column label="操作" width="130" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click="viewPostComments(row)">看评论</el-button>
@@ -385,7 +388,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             <el-table-column label="作者" width="130">
               <template #default="{ row }"><b>{{ row.nickname || row.username }}</b></template>
             </el-table-column>
-            <el-table-column prop="create_time" label="时间" width="160" />
+            <el-table-column prop="create_time" label="时间" width="160" :formatter="fmtT" />
             <el-table-column label="操作" width="90" fixed="right">
               <template #default="{ row }">
                 <el-button link type="danger" size="small" @click="delComment(row)">删除</el-button>
@@ -409,7 +412,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <span class="count">共 {{ logs.total }} 条记录</span>
         </div>
         <el-table :data="logs.list" v-loading="logs.loading" stripe>
-          <el-table-column prop="create_time" label="时间" width="165" />
+          <el-table-column prop="create_time" label="时间" width="165" :formatter="fmtT" />
           <el-table-column label="用户" width="120">
             <template #default="{ row }">
               <b>{{ row.user_nickname || row.username }}</b>
@@ -438,7 +441,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <span class="count">共 {{ visits.total }} 次访问</span>
         </div>
         <el-table :data="visits.list" v-loading="visits.loading" stripe>
-          <el-table-column prop="create_time" label="时间" width="165" />
+          <el-table-column prop="create_time" label="时间" width="165" :formatter="fmtT" />
           <el-table-column label="访问者" width="140">
             <template #default="{ row }">
               <template v-if="row.user_id != null">
@@ -472,7 +475,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           </el-table-column>
           <el-table-column prop="content" label="内容" min-width="240" show-overflow-tooltip />
           <el-table-column prop="admin_name" label="发布人" width="110" />
-          <el-table-column prop="create_time" label="发布时间" width="165" />
+          <el-table-column prop="create_time" label="发布时间" width="165" :formatter="fmtT" />
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="openAnnDlg(row)">编辑</el-button>
@@ -508,7 +511,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             <template #default="{ row }">{{ fmtBytes(row.file_size) }}</template>
           </el-table-column>
           <el-table-column prop="file_type" label="类型" width="150" show-overflow-tooltip />
-          <el-table-column prop="create_time" label="上传时间" width="165" />
+          <el-table-column prop="create_time" label="上传时间" width="165" :formatter="fmtT" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
               <el-button link type="danger" size="small" @click="delResource(row)">删除</el-button>
@@ -552,7 +555,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             </div>
             <el-progress v-if="stat.disk" :percentage="pct(stat.disk.total - stat.disk.free, stat.disk.total)"
               :stroke-width="10" :color="pct(stat.disk.total - stat.disk.free, stat.disk.total) > 85 ? '#ef4444' : '#10b981'" />
-            <div class="sp-row" style="margin-top:10px"><span>数据更新时间</span><b>{{ stat.time }}</b></div>
+            <div class="sp-row" style="margin-top:10px"><span>数据更新时间</span><b>{{ fmtDateTimeS(stat.time) }}</b></div>
           </div>
         </div>
       </el-tab-pane>
@@ -567,7 +570,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             <el-tag size="small">@{{ detail.user.username }}</el-tag>
             <el-tag size="small" :type="STATUS_LABELS[detail.user.status][1]">{{ STATUS_LABELS[detail.user.status][0] }}</el-tag>
             <el-tag v-if="detail.user.is_admin" size="small" type="primary">管理员</el-tag>
-            <span class="cell-sub">{{ detail.user.email }} · 注册于 {{ detail.user.create_time }}</span>
+            <span class="cell-sub">{{ detail.user.email }} · 注册于 {{ fmtDateTime(detail.user.create_time) }}</span>
           </div>
           <div class="ud-stats">
             <div><b>{{ detail.stats.posts }}</b><span>发帖</span></div>
@@ -581,7 +584,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
               <el-table-column label="大小" width="90">
                 <template #default="{ row }">{{ fmtBytes(row.file_size) }}</template>
               </el-table-column>
-              <el-table-column prop="create_time" label="上传时间" width="155" />
+              <el-table-column prop="create_time" label="上传时间" width="155" :formatter="fmtT" />
               <el-table-column label="操作" width="70">
                 <template #default="{ row }">
                   <el-button link type="primary" size="small" tag="a"
@@ -594,7 +597,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <div class="ud-logs">
             <div class="ud-logs-title">最近操作日志（最多 20 条）</div>
             <el-table :data="detail.logs" size="small" max-height="300" stripe>
-              <el-table-column prop="create_time" label="时间" width="155" />
+              <el-table-column prop="create_time" label="时间" width="155" :formatter="fmtT" />
               <el-table-column label="动作" width="105">
                 <template #default="{ row }"><el-tag size="small">{{ actionLabel(row.action) }}</el-tag></template>
               </el-table-column>

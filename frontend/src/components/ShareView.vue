@@ -12,6 +12,7 @@ import RichEditor from './team/RichEditor.vue';
 import DocPicker from './team/DocPicker.vue';
 import AttachmentList, { normAtts } from './team/AttachmentList.vue';
 import ResourcePicker from './ResourcePicker.vue';
+import { fmtDateTime, fmtShort } from '../utils/time.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -301,7 +302,7 @@ async function delPost(p) {
             <span class="pc-author u-link" @click.stop="toProfile(p.author_id)">
               <img v-if="p.avatar" :src="p.avatar" alt="" class="pc-ava" />{{ p.nickname }}
             </span>
-            <span class="pc-time">{{ p.create_time?.slice(0, 16) }}</span>
+            <span class="pc-time">{{ fmtDateTime(p.create_time) }}</span>
             <span class="pc-actions">
               <button class="act" :class="{ on: p.is_liked }" title="点赞" @click.stop="toggleLike(p, $event)">👍 {{ cnt(p.like_count) }}</button>
               <button class="act" :class="{ on: p.is_faved }" title="收藏" @click.stop="toggleFav(p, $event)">⭐ {{ cnt(p.fav_count) }}</button>
@@ -369,7 +370,7 @@ async function delPost(p) {
           <span class="u-link pd-author" @click="toProfile(cur.author_id)">
             <img v-if="cur.avatar" :src="cur.avatar" alt="" class="pc-ava" />{{ cur.nickname }}
           </span>
-          <span class="pd-time">{{ cur.create_time?.slice(0, 16) }}</span>
+          <span class="pd-time">{{ fmtDateTime(cur.create_time) }}</span>
           <el-tag v-for="t in cur.tags" :key="t" size="small" effect="plain">#{{ t }}</el-tag>
           <span v-if="isMine(cur)" class="pd-own">
             <el-button size="small" text type="primary" :loading="feishuBusy" @click="feishuEdit(cur)">📄 飞书编辑</el-button>
@@ -408,7 +409,7 @@ async function delPost(p) {
                 <span class="u-link c-author" @click="toProfile(c.user_id)">
                   <img v-if="c.avatar" :src="c.avatar" alt="" class="pc-ava" />{{ c.nickname }}
                 </span>
-                <span class="c-time">{{ c.create_time?.slice(5, 16) }}</span>
+                <span class="c-time">{{ fmtShort(c.create_time) }}</span>
                 <el-button v-if="Number(c.user_id) === Number(auth.user?.id) || auth.user?.is_admin"
                   size="small" text type="danger" class="c-del" @click="delComment(c)">删除</el-button>
               </div>

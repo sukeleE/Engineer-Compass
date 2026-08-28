@@ -5,6 +5,7 @@ import { ref, watch, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
+import { toLocal } from '../utils/time.js';
 
 // 纯面板：由 ToolDock 控制开关；面板打开期间 3s 快轮询未读计数（红点徽标轮询在 ToolDock）
 const props = defineProps({ open: Boolean });
@@ -62,15 +63,16 @@ async function readAll() {
   ElMessage.success('已全部标记为已读');
 }
 
-// 时间：今天 HH:MM / 昨天 / MM-DD
+// 时间：今天 HH:MM / 昨天 / MM-DD（DB UTC 串补 Z 转本地，否则差 8 小时）
 function fmtTime(t) {
   if (!t) return '';
-  const d = new Date(String(t).replace(' ', 'T'));
+  const d = toLocal(t);
+  if (!d) return '';
   const now = new Date();
   const same = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   if (same(d, now)) return d.toTimeString().slice(0, 5);
   if (same(d, new Date(now.getTime() - 86400000))) return '昨天';
-  return String(t).slice(5, 10);
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // 各 tab 未读数徽标

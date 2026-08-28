@@ -8,6 +8,7 @@ import auth from '../../auth.js';
 import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
 import ResourcePicker from '../ResourcePicker.vue';
+import { fmtShort } from '../../utils/time.js';
 
 const router = useRouter();
 // 点击作者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -104,7 +105,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         <div class="ci-head">
           <b class="u-link" @click="toProfile(m)">{{ m.nickname }}</b>
           <el-tag v-for="rn in roleNamesOf(m.user_id)" :key="rn" size="small" effect="plain" style="margin-left:2px">{{ rn }}</el-tag>
-          <span class="ci-time">{{ m.create_time?.slice(5, 16) }}</span>
+          <span class="ci-time">{{ fmtShort(m.create_time) }}</span>
           <span class="ci-ops">
             <el-button v-if="canMod(m)" size="small" text type="primary" title="编辑消息" @click="startEdit(m)">✏️</el-button>
             <el-button v-if="canMod(m)" size="small" text type="danger" title="删除消息" @click="remove(m)">🗑</el-button>

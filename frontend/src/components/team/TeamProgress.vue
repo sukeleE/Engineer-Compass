@@ -8,6 +8,7 @@ import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
 import RichEditor from './RichEditor.vue';
+import { fmtDateOnly, fmtShort } from '../../utils/time.js';
 import AttachmentList, { normAtts } from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
 import ResourcePicker from '../ResourcePicker.vue';
@@ -341,7 +342,7 @@ reload().catch((e) => ElMessage.error(e.message));
         <div class="tc-meta">
           <span v-if="t.assignee_name">👤 {{ t.assignee_name }}</span>
           <span v-if="t.deadline">⏰ {{ t.deadline }}</span>
-          <span class="tc-date">创建 {{ t.create_time?.slice(0, 10) }}</span>
+          <span class="tc-date">创建 {{ fmtDateOnly(t.create_time) }}</span>
         </div>
         <div class="tc-progress">
           <el-progress :percentage="t.progress || 0" :stroke-width="8" :status="t.status === 'done' ? 'success' : undefined" style="flex:1" />
@@ -369,7 +370,7 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-button size="small" text class="banner-close" @click="lastLog = null">✕</el-button>
       </div>
       <el-timeline v-if="logs.length">
-        <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="l.create_time?.slice(5, 16)">
+        <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="fmtShort(l.create_time)">
           <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
           <div class="log-head">
             <span class="log-avatar u-link" v-if="l.avatar" @click="toProfile(l)"><img :src="l.avatar" alt="" /></span>

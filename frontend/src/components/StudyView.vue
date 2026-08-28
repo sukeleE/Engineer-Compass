@@ -10,6 +10,7 @@ import { downloadPlanMd, exportPlanToFeishu } from '../utils/planExport.js';
 import ManualPlanDialog from './ManualPlanDialog.vue';
 import ImportPlanDialog from './ImportPlanDialog.vue';
 import PlanChat from './PlanChat.vue';
+import { fmtDateOnly } from '../utils/time.js';
 import TaskPanel from './task/TaskPanel.vue';
 
 const form = ref({ topic: '', level: '零基础', goal: '', hours: 10 });
@@ -364,7 +365,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
             <b class="li-topic">{{ s.topic }}</b>
             <el-tag size="small" type="info" effect="plain">{{ s.phaseCount }} 阶段</el-tag>
           </div>
-          <div class="li-meta">{{ s.create_time?.slice(0, 10) }}<template v-if="s.level"> · {{ s.level }}</template></div>
+          <div class="li-meta">{{ fmtDateOnly(s.create_time) }}<template v-if="s.level"> · {{ s.level }}</template></div>
           <div class="li-progress">
             <el-progress :percentage="s.total ? Math.round((s.done / s.total) * 100) : 0" :stroke-width="6" :show-text="false" />
             <span>{{ s.done }}/{{ s.total }}</span>
