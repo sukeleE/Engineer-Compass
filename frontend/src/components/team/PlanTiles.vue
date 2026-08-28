@@ -45,13 +45,13 @@ const pct = (d, t) => (t ? Math.round((d / t) * 100) : 0);
   width: fit-content; max-width: 100%;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
   padding: 8px 12px; cursor: pointer; transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 8px rgba(37, 99, 235, .08); }
-  &.expanded { border-color: #2563eb; }
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 8%, transparent); }
+  &.expanded { border-color: var(--primary); }
   .pt-name { display: flex; align-items: center; gap: 6px; font-size: 13px;
     b { font-weight: 600; min-width: 0; }
     .pt-caret { color: var(--text-2); font-size: 10px; }
   }
-  .pt-level { font-size: 11px; color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 0 6px; margin-left: 6px; }
+  .pt-level { font-size: 11px; color: var(--primary-dark); background: var(--primary-tint); border-radius: 4px; padding: 0 6px; margin-left: 6px; }
   .pt-bar { width: 100%; margin-top: 6px; }
   .pt-detail { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px;
     .pt-stat { font-size: 12px; color: var(--text-2); margin-bottom: 6px; }

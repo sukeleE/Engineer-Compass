@@ -282,7 +282,7 @@ onMounted(load);
     // 行：方框勾选 + 文本区域点击展开面板；面板占满整行换行显示
     .task-row { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px;
       border-radius: 8px; padding: 2px 6px; cursor: pointer;
-      &:hover { background: #f1f5f9; }
+      &:hover { background: var(--surface-2); }
     }
     .mt-cb { margin: 0; margin-top: 2px; flex-shrink: 0; }
     .mt-task-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere;

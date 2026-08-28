@@ -526,7 +526,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 
 // 生成区
 .gen-card {
-  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+  background: linear-gradient(135deg, var(--primary-tint), var(--surface-3));
   border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px;
   .gen-head {
     display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
@@ -534,19 +534,19 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
     .gen-btns { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
     h2 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 6px; }
     .gen-fold-arrow {
-      display: inline-block; font-size: 14px; color: #2563eb; transition: transform .2s;
+      display: inline-block; font-size: 14px; color: var(--primary); transition: transform .2s;
     }
     &.open .gen-fold-arrow { transform: rotate(180deg); }
-    &:hover h2 { color: #2563eb; }
+    &:hover h2 { color: var(--primary); }
   }
   .gen-tip { margin: 0 0 14px; color: var(--text-2); font-size: 13px; }
   .gen-head:not(.open) .gen-tip { margin-bottom: 0; } // 收起态去掉底部空隙
   .gen-form { display: flex; gap: 10px; flex-wrap: wrap;
     .el-input { flex: 1; min-width: 220px; }
   }
-  .gen-chat-tip { margin-top: 10px; color: #64748b; font-size: 12.5px; }
-  .gen-loading { margin-top: 12px; color: #2563eb; font-size: 13px; display: flex; align-items: center; gap: 8px;
-    .spinner { width: 14px; height: 14px; border: 2px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: spin .8s linear infinite; }
+  .gen-chat-tip { margin-top: 10px; color: var(--text-2); font-size: 12.5px; }
+  .gen-loading { margin-top: 12px; color: var(--primary); font-size: 13px; display: flex; align-items: center; gap: 8px;
+    .spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--primary) 30%, white); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   }
 }
@@ -573,8 +573,8 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   .list-item {
     border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
     cursor: pointer; transition: all .2s;
-    &:hover { border-color: #93c5fd; background: #f8fafc; }
-    &.active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 2px 8px rgba(37, 99, 235, .12); }
+    &:hover { border-color: #93c5fd; background: var(--surface-3); }
+    &.active { border-color: var(--primary); background: var(--primary-tint); box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 12%, transparent); }
     .li-top { display: flex; justify-content: space-between; align-items: center; gap: 6px;
       .li-topic { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     }
@@ -604,7 +604,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
 }
 
 .phase {
-  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
   .phase-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .phase-name { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
     .name-edit { width: 180px; }
@@ -614,11 +614,11 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   .phase-date { margin-top: 2px; color: var(--text-2); font-size: 13px; }
   .task-list { list-style: none; margin: 8px 0; padding: 0;
     li { line-height: 1.9; cursor: pointer; border-radius: 6px;
-      &:hover .task-row { background: #f1f5f9; }
+      &:hover .task-row { background: var(--surface-2); }
       .task-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px;
         &.done .t-text { color: #94a3b8; text-decoration: line-through; }
         .t-text { font-size: 13.5px; cursor: text; min-width: 0; overflow-wrap: break-word; /* 长串断行防撑破 */
-          &:hover { color: #2563eb; }
+          &:hover { color: var(--primary); }
         }
         .t-edit { flex: 1; }
         .star-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0; }
@@ -627,7 +627,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
         }
         .t-del {
           color: #cbd5e1; font-size: 12px; padding: 0 4px; border-radius: 4px; cursor: pointer;
-          &:hover { color: #ef4444; background: #fee2e2; }
+          &:hover { color: #ef4444; background: var(--danger-tint); }
         }
       }
       // 面板内行距不受 li 的 1.9 行高影响
@@ -639,7 +639,7 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
     .meta-edit-btn { padding: 0 4px; }
   }
   .meta-add-btn { color: #94a3b8; padding: 0 4px; }
-  .phase-week { margin-top: 4px; color: #1d4ed8; font-size: 13px; }
+  .phase-week { margin-top: 4px; color: var(--primary-dark); font-size: 13px; }
 }
 
 // 推荐资料（与 CompDialog 学习资源同款卡片）
@@ -652,9 +652,9 @@ onMounted(() => loadList().catch((e) => ElMessage.error(`加载学习日程失�
   display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 8px;
   .plat-card {
     display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text);
-    background: #f8fafc; border: 1px solid var(--border); border-top: 3px solid #64748b;
+    background: var(--surface-3); border: 1px solid var(--border); border-top: 3px solid var(--border);
     border-radius: 8px; padding: 8px 10px; transition: all .2s;
-    &:hover { background: #f1f5f9; transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+    &:hover { background: var(--surface-2); transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); }
     .p-icon { font-size: 18px; }
     .p-info { flex: 1; min-width: 0; b { display: block; font-size: 13px; }
       .p-kw { font-size: 11.5px; color: var(--text-2); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

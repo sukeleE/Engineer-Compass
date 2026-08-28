@@ -216,7 +216,7 @@ async function applySplit() {
 <style lang="scss" scoped>
 .tp-panel {
   display: flex; flex-direction: column; gap: 12px;
-  background: #f8fafc; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px 14px; margin-top: 6px; width: 100%;
 }
 .tp-sec { display: flex; flex-direction: column; gap: 8px; }
@@ -245,7 +245,7 @@ async function applySplit() {
 }
 .tp-link-list { display: flex; flex-direction: column; gap: 4px; }
 .tp-link { display: flex; align-items: center; gap: 4px;
-  .tp-link-a { font-size: 12.5px; color: #2563eb; text-decoration: none; word-break: break-all;
+  .tp-link-a { font-size: 12.5px; color: var(--primary); text-decoration: none; word-break: break-all;
     &:hover { text-decoration: underline; }
   }
 }
@@ -261,9 +261,9 @@ async function applySplit() {
 .tp-res { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; }
 .tp-res-a {
   display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text);
-  background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 8px rgba(37, 99, 235, .08); }
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 8%, transparent); }
   .tp-res-icon {
     width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff;

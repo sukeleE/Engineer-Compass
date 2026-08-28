@@ -273,8 +273,8 @@ onMounted(loadPending);
   .p-meta { display: flex; gap: 14px; color: var(--text-2); font-size: 12.5px; margin-top: 5px; flex-wrap: wrap; }
   .p-src {
     margin-top: 5px; font-size: 12.5px; color: var(--text-2);
-    a { color: #1d4ed8; word-break: break-all; }
-    &.warn { color: #b45309; }
+    a { color: var(--primary-dark); word-break: break-all; }
+    &.warn { color: var(--badge-fg); }
   }
   .p-actions { display: flex; gap: 6px; }
 }

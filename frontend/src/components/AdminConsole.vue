@@ -640,13 +640,13 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
   @media (max-width: 768px) { grid-template-columns: repeat(2, 1fr); }
 }
 .stat-card {
-  background: #fff; border: 1px solid var(--border, #e2e8f0); border-radius: 12px;
+  background: var(--card-bg); border: 1px solid var(--border, #e2e8f0); border-radius: 12px;
   padding: 16px; display: flex; flex-direction: column; gap: 4px;
-  b { font-size: 26px; color: #2563eb; }
+  b { font-size: 26px; color: var(--primary); }
   span { font-size: 12.5px; color: var(--text-2, #64748b); }
 }
 .stat-panel {
-  grid-column: span 2; background: #fff; border: 1px solid var(--border, #e2e8f0);
+  grid-column: span 2; background: var(--card-bg); border: 1px solid var(--border, #e2e8f0);
   border-radius: 12px; padding: 14px 16px;
   @media (max-width: 768px) { grid-column: span 2; }
   .sp-row {
@@ -665,9 +665,9 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
 .ud-stats {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px;
   div {
-    background: #f8fafc; border: 1px solid var(--border, #e2e8f0); border-radius: 10px;
+    background: var(--surface-3); border: 1px solid var(--border, #e2e8f0); border-radius: 10px;
     padding: 12px; display: flex; flex-direction: column; gap: 2px; text-align: center;
-    b { font-size: 20px; color: #2563eb; }
+    b { font-size: 20px; color: var(--primary); }
     span { font-size: 12px; color: var(--text-2, #64748b); }
   }
 }

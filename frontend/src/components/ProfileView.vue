@@ -118,7 +118,7 @@ onMounted(load);
   display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px;
   .pv-avatar {
-    width: 72px; height: 72px; border-radius: 50%; background: #2563eb; color: #fff;
+    width: 72px; height: 72px; border-radius: 50%; background: var(--primary); color: #fff;
     display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0; overflow: hidden;
     img { width: 100%; height: 100%; object-fit: cover; }
   }
@@ -128,7 +128,7 @@ onMounted(load);
     .pv-username { color: var(--text-2); font-size: 13px; }
   }
   .pv-meta { color: var(--text-2); font-size: 12.5px; margin-top: 4px; }
-  .pv-manage { display: inline-block; margin-top: 8px; font-size: 12.5px; color: #2563eb; }
+  .pv-manage { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--primary); }
 }
 
 .pv-sec { margin-top: 18px;
@@ -140,7 +140,7 @@ onMounted(load);
 .team-card {
   display: block; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 14px; text-decoration: none; color: inherit; transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px rgba(37, 99, 235, .1); }
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 10%, transparent); }
   .tc-top { display: flex; align-items: center; gap: 6px; b { font-size: 14.5px; } }
   .tc-desc { color: var(--text-2); font-size: 12.5px; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tc-meta { display: flex; align-items: center; flex-wrap: wrap; margin-top: 6px;

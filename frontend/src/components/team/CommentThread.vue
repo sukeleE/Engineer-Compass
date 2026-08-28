@@ -64,13 +64,13 @@ const canDel = (c) => c.user_id === auth.user.id;
 .ct { margin-top: 6px;
   .ct-bar { .el-button { padding: 2px 6px; } }
   .ct-panel {
-    background: #f8fafc; border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 4px;
+    background: var(--surface-3); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 4px;
     .ct-empty { color: #94a3b8; font-size: 12px; padding: 4px 0; }
     .ct-item {
-      position: relative; padding: 5px 0; border-bottom: 1px solid #f1f5f9; font-size: 12.5px;
-      b { color: #475569; margin-right: 6px; }
+      position: relative; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12.5px;
+      b { color: var(--text-2); margin-right: 6px; }
       .ct-time { color: #94a3b8; font-size: 11px; }
-      p { margin: 2px 0 0; color: #334155; line-height: 1.6; word-break: break-word; padding-right: 34px; }
+      p { margin: 2px 0 0; color: var(--text); line-height: 1.6; word-break: break-word; padding-right: 34px; }
       .ct-del { position: absolute; right: 0; top: 2px; padding: 0 4px; }
       &:last-child { border-bottom: none; }
     }

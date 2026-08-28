@@ -302,18 +302,18 @@ loadInvite();
 .member-row {
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px;
   padding: 8px 12px; margin-bottom: 8px;
-  &.me { background: #eff6ff; border-color: #bfdbfe; }
+  &.me { background: var(--primary-tint); border-color: color-mix(in srgb, var(--primary) 30%, white); }
   .m-avatar {
-    width: 32px; height: 32px; border-radius: 50%; background: #2563eb; color: #fff;
+    width: 32px; height: 32px; border-radius: 50%; background: var(--primary); color: #fff;
     display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
     cursor: pointer; overflow: hidden; transition: box-shadow .15s;
-    &:hover { box-shadow: 0 0 0 2px #bfdbfe; }
+    &:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, white); }
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .m-info { flex: 1; min-width: 0; b { font-size: 13.5px; } .m-user { color: var(--text-2); font-size: 12px; margin-left: 6px; } }
-  .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+  .u-link { cursor: pointer; &:hover { color: var(--primary); } }
 }
-.role-form { background: #f8fafc; border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;
+.role-form { background: var(--surface-3); border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;
   .rf-row { display: flex; gap: 8px; align-items: center; }
   .rf-perms { margin-top: 10px; }
 }
@@ -333,7 +333,7 @@ loadInvite();
   }
 }
 .invite-row { display: flex; align-items: center; gap: 10px;
-  .invite-code { font-family: monospace; font-size: 15px; letter-spacing: 2px; color: #1d4ed8; background: #eff6ff; border: 1px dashed #bfdbfe; border-radius: 8px; padding: 5px 12px; }
+  .invite-code { font-family: monospace; font-size: 15px; letter-spacing: 2px; color: var(--primary-dark); background: var(--primary-tint); border: 1px dashed color-mix(in srgb, var(--primary) 30%, white); border-radius: 8px; padding: 5px 12px; }
 }
 .owner-actions { margin-top: 12px; }
 .self-note { color: #94a3b8; font-size: 12.5px; margin: 0 0 12px; }
@@ -342,6 +342,6 @@ loadInvite();
   padding: 8px 12px; margin-bottom: 8px;
   .ai-name { font-size: 13.5px; font-weight: 600; flex: 1; }
   .ai-from { color: #94a3b8; font-size: 12.5px; text-decoration: line-through; }
-  .ai-arrow { font-style: normal; color: #2563eb; }
+  .ai-arrow { font-style: normal; color: var(--primary); }
 }
 </style>

@@ -8,9 +8,10 @@ import auth from '../auth.js';
 import ScheduleNotes from './ScheduleNotes.vue';
 import AIChatBox from './AIChatBox.vue';
 import MessageCenter from './MessageCenter.vue';
+import GhostUsers from './GhostUsers.vue'; // 怪奇小队（仅幽灵用户可见）
 
 const dockOpen = ref(false);   // 工具列表展开/收起
-const activeTool = ref(null);  // 当前打开的面板：'notes' | 'ai' | 'msg' | null（单值天然互斥）
+const activeTool = ref(null);  // 当前打开的面板：'notes' | 'ai' | 'msg' | 'ghost' | null（单值天然互斥）
 const unread = ref(0);         // 消息中心未读总数
 const schedules = ref([]);     // 日程笔记「关联备赛」选择数据源
 
@@ -68,13 +69,17 @@ onBeforeUnmount(() => clearInterval(unreadTimer));
         🔔<span class="tool-name">消息中心</span>
         <span v-if="unread > 0" class="dock-badge">{{ unread > 99 ? '99+' : unread }}</span>
       </button>
+      <button v-if="auth.user?.is_ghost" class="dock-tool" :class="{ on: activeTool === 'ghost' }" title="怪奇小队" @click="pick('ghost')">
+        👻<span class="tool-name">怪奇小队</span>
+      </button>
     </div>
   </transition>
 
-  <!-- 三个工具面板（activeTool 唯一值控制，天然互斥） -->
+  <!-- 工具面板（activeTool 唯一值控制，天然互斥） -->
   <ScheduleNotes :open="activeTool === 'notes'" :schedules="schedules" @close="onClosePanel" />
   <AIChatBox :open="activeTool === 'ai'" @close="onClosePanel" />
   <MessageCenter :open="activeTool === 'msg'" @close="onClosePanel" />
+  <GhostUsers :open="activeTool === 'ghost'" @close="onClosePanel" />
 </template>
 
 <style lang="scss" scoped>
@@ -105,11 +110,11 @@ onBeforeUnmount(() => clearInterval(unreadTimer));
 .dock-tool {
   position: relative; width: 48px; height: 48px; border-radius: 50%;
   border: 1px solid var(--border); cursor: pointer; font-size: 22px;
-  background: #fff; color: #333;
+  background: var(--card-bg); color: #333;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
   transition: transform .15s;
   &:hover { transform: scale(1.1); }
-  &.on { background: #eff6ff; border-color: #2563eb; }
+  &.on { background: var(--primary-tint); border-color: var(--primary); }
   .tool-name {
     position: absolute; right: 56px; top: 50%; transform: translateY(-50%);
     background: rgba(15, 23, 42, .85); color: #fff;

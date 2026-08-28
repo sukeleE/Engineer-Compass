@@ -22,8 +22,9 @@ function genUsername(mail) {
 }
 
 // 返回给前端的 user 形状（统一含 email / avatar，avatar 未设置为 null）
-const userCard = (u) => ({
-  id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin,
+// 导出供 ghost.js 复用（enter/exit 后返回最新 userCard）
+export const userCard = (u) => ({
+  id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin, is_ghost: !!u.is_ghost,
   email: u.email || '', avatar: u.avatar || null,
 });
 
@@ -120,7 +121,7 @@ r.post('/register', (req, res) => {
   req.user = { id: r2.lastInsertRowid, username: name };
   logAudit(req, 'register', mail);
   res.status(201).json({
-    token, user: { id: r2.lastInsertRowid, username: name, nickname: (nickname || '').trim() || name, is_admin: 0, email: mail, avatar: null },
+    token, user: { id: r2.lastInsertRowid, username: name, nickname: (nickname || '').trim() || name, is_admin: false, is_ghost: false, email: mail, avatar: null },
   });
 });
 

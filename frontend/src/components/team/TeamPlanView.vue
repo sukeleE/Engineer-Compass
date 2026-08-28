@@ -450,12 +450,12 @@ onMounted(() => { load(); loadComps(); });
     .pb-ops { flex-shrink: 0; }
   }
   .pb-desc { margin-bottom: 10px; font-size: 13px; line-height: 1.8; color: var(--text-2);
-    background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; overflow-wrap: anywhere;
+    background: var(--surface-3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; overflow-wrap: anywhere;
     :deep(p) { margin: 6px 0; }
     :deep(ul), :deep(ol) { margin: 6px 0; padding-left: 20px; }
     :deep(h1), :deep(h2), :deep(h3) { margin: 10px 0 6px; font-size: 15px; }
-    :deep(pre) { background: #f1f5f9; border-radius: 8px; padding: 8px 12px; overflow-x: auto; }
-    :deep(a) { color: #2563eb; }
+    :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 8px 12px; overflow-x: auto; }
+    :deep(a) { color: var(--primary); }
   }
   .pb-stats { margin-bottom: 10px;
     .pb-bar { margin-bottom: 6px; }
@@ -466,14 +466,14 @@ onMounted(() => { load(); loadComps(); });
   // 阶段标题（与个人日程页「我的小组任务」同款样式：阶段名 + 灰色小字日期）
   .ph-name { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
   .ph-date { color: #94a3b8; font-size: 12px; margin-left: 8px; }
-  .ph-check { background: #f8fafc; border: 1px dashed var(--border); border-radius: 8px;
+  .ph-check { background: var(--surface-3); border: 1px dashed var(--border); border-radius: 8px;
     padding: 6px 10px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
   .dept-group { margin-bottom: 8px;
     .dg-head { margin-bottom: 4px; }
     // 行：方框勾选 + 文本区域点击展开面板；面板占满整行换行显示
     .task-row { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px;
       border-radius: 8px; padding: 2px 6px; cursor: pointer; margin-bottom: 2px;
-      &:hover { background: #f1f5f9; }
+      &:hover { background: var(--surface-2); }
     }
     .task-cb { margin: 0; margin-top: 2px; flex-shrink: 0; }
     .task-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere;

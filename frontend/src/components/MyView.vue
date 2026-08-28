@@ -2,13 +2,14 @@
 // 「我的」个人中心：账号信息 + 数据概览（备赛/学习计划、小组）+ 快捷入口 + 退出登录
 // 四个标签：概览 / 我的帖子 / 我的收藏 / 好友私聊（好友申请、删除、私信轮询）
 // 未登录时内嵌 AuthView 完成登录
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth, { clearAuth, patchUser } from '../auth.js';
 import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import AuthView from './AuthView.vue';
+import DmDialog from './DmDialog.vue'; // 公共私聊弹窗（3s 轮询，关闭即停）
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -257,39 +258,10 @@ async function doSearch(silent = false) {
   try { searchRes.value = await api.friendSearch(q); } catch (e) { ElMessage.error(e.message); }
   finally { searching.value = false; }
 }
-// 私聊：弹窗打开时 3s 轮询拉新消息（GET 顺带把对方发来的标已读），关闭即停
+// 私聊弹窗：仅保留状态，消息逻辑在 DmDialog.vue（3s 轮询拉新，GET 顺带标已读，关闭即停）
 const dmDlg = ref(false);
 const dmFriend = ref(null);
-const dmMsgs = ref([]);
-const dmText = ref('');
-const dmSending = ref(false);
-const dmListEl = ref(null);
-let dmTimer = null;
-async function loadDm() {
-  if (!dmFriend.value) return;
-  try {
-    dmMsgs.value = await api.dmList(dmFriend.value.id);
-    await loadFriends(); // 顺带刷新好友未读徽标
-    nextTick(scrollDm);
-  } catch (e) { ElMessage.error(e.message); }
-}
-function scrollDm() {
-  const el = dmListEl.value;
-  if (el) el.scrollTop = el.scrollHeight;
-}
-async function sendDm() {
-  const content = dmText.value.trim();
-  if (!content) return ElMessage.warning('输入私信内容');
-  if (!dmFriend.value) return;
-  dmSending.value = true;
-  try {
-    await api.dmSend(dmFriend.value.id, content);
-    dmText.value = '';
-    await loadDm();
-  } catch (e) { ElMessage.error(e.message); }
-  finally { dmSending.value = false; }
-}
-function openDm(f) { dmFriend.value = f; dmDlg.value = true; loadDm(); }
+function openDm(f) { dmFriend.value = f; dmDlg.value = true; }
 
 // ================= 我的资源（≤128MB 个人文件库，配额 1GB） =================
 const MAX_SIZE = 128 * 1024 * 1024;
@@ -378,12 +350,6 @@ watch(tab, (t) => {
   else if (t === 'friends' && !friendsLoaded.value) { friendsLoaded.value = true; loadFriends(); }
   else if (t === 'resources' && !resLoaded.value) { resLoaded.value = true; loadResources(); }
 });
-// 私聊弹窗开关 → 轮询启停
-watch(dmDlg, (open) => {
-  if (dmTimer) { clearInterval(dmTimer); dmTimer = null; }
-  if (open) dmTimer = setInterval(loadDm, 3000);
-});
-
 // 深链：/me?tab=friends&dm=好友id → 切到好友标签并自动打开与该好友的私聊（消息中心跳转用）
 const route = useRoute();
 function deepLink() {
@@ -456,7 +422,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', feishuListener);
   if (mailTimer) clearInterval(mailTimer);
-  if (dmTimer) clearInterval(dmTimer);
 });
 </script>
 
@@ -680,7 +645,7 @@ onBeforeUnmount(() => {
               <span class="res-used">已用 {{ fmtBytes(resUsed) }} / {{ fmtBytes(resQuota) }}</span>
               <el-progress :percentage="resQuota ? Math.min(100, Math.round(resUsed / resQuota * 100)) : 0"
                 :stroke-width="6" :show-text="false"
-                :color="resQuota && resUsed / resQuota > 0.85 ? '#ef4444' : '#2563eb'" />
+                :color="resQuota && resUsed / resQuota > 0.85 ? '#ef4444' : 'var(--primary)'" />
             </div>
           </section>
           <div v-loading="resLoading">
@@ -795,21 +760,8 @@ onBeforeUnmount(() => {
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 私聊弹窗（轮询拉新，关闭即停） -->
-    <el-dialog v-model="dmDlg" :title="dmFriend ? `💬 私聊 · ${dmFriend.nickname}` : '私聊'" width="480px" top="6vh"
-      destroy-on-close append-to-body>
-      <div ref="dmListEl" class="dm-list">
-        <div v-for="m in dmMsgs" :key="m.id" :class="['dm-bubble', Number(m.from_id) === Number(auth.user?.id) ? 'mine' : 'other']">
-          <div class="dm-text">{{ m.content }}</div>
-          <div class="dm-time">{{ m.create_time?.slice(5, 16) }}</div>
-        </div>
-        <el-empty v-if="!dmMsgs.length" description="还没有消息，说点什么吧" :image-size="50" />
-      </div>
-      <div class="dm-input">
-        <el-input v-model="dmText" maxlength="2000" show-word-limit placeholder="输入私信，Enter 发送" @keyup.enter="sendDm" />
-        <el-button type="primary" :loading="dmSending" @click="sendDm">发送</el-button>
-      </div>
-    </el-dialog>
+    <!-- 私聊弹窗（DmDialog 内 3s 轮询拉新，关闭即停；@refresh 兜住好友未读徽标） -->
+    <DmDialog :open="dmDlg" :user="dmFriend" @close="dmDlg = false" @refresh="loadFriends" />
   </main>
 </template>
 
@@ -818,9 +770,9 @@ onBeforeUnmount(() => {
 
 .me-card {
   display: flex; align-items: center; gap: 18px;
-  background: linear-gradient(135deg, #1e3a8a, #2563eb);
+  background: linear-gradient(135deg, #1e3a8a, var(--primary));
   color: #fff; border-radius: 14px; padding: 22px 24px;
-  box-shadow: 0 6px 20px rgba(37, 99, 235, .25);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--primary) 25%, transparent);
 
   .me-avatar {
     width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; position: relative;
@@ -845,7 +797,7 @@ onBeforeUnmount(() => {
     .me-id { margin: 2px 0 0; font-size: 13px; opacity: .75; }
     .me-mail { margin: 4px 0 0; font-size: 12.5px; opacity: .9;
       .mail-bind { color: #fff; text-decoration: underline; cursor: pointer; margin-left: 8px;
-        &:hover { color: #bfdbfe; }
+        &:hover { color: color-mix(in srgb, var(--primary) 30%, white); }
       }
     }
   }
@@ -861,7 +813,7 @@ onBeforeUnmount(() => {
   padding: 16px 18px; text-decoration: none; color: var(--text);
   transition: transform .15s, box-shadow .15s;
   &:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(30, 41, 59, .1); }
-  .sc-num { font-size: 26px; color: #2563eb; }
+  .sc-num { font-size: 26px; color: var(--primary); }
   .sc-label { font-size: 13px; color: var(--text-2); }
   .sc-sub { font-size: 12px; color: #94a3b8; }
 }
@@ -879,7 +831,7 @@ onBeforeUnmount(() => {
 .res-quota { margin-top: 12px;
   .res-used { font-size: 12.5px; color: var(--text-2); display: block; margin-bottom: 6px; }
 }
-.res-dl { font-size: 13px; color: #2563eb; text-decoration: none; margin-right: 10px;
+.res-dl { font-size: 13px; color: var(--primary); text-decoration: none; margin-right: 10px;
   &:hover { text-decoration: underline; }
 }
 .team-list { display: flex; flex-direction: column; gap: 8px; }
@@ -887,7 +839,7 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
   transition: background .15s;
-  &:hover { background: #f1f5f9; }
+  &:hover { background: var(--surface-2); }
   .ti-info { flex: 1; min-width: 0; b { display: block; font-size: 14px; }
     .ti-desc { font-size: 12px; color: var(--text-2); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   }
@@ -895,10 +847,10 @@ onBeforeUnmount(() => {
 }
 .quick-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .quick-btn {
-  text-decoration: none; font-size: 13px; color: #2563eb;
-  border: 1px solid #2563eb55; background: #2563eb0d; border-radius: 999px;
+  text-decoration: none; font-size: 13px; color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 33%, transparent); background: color-mix(in srgb, var(--primary) 5%, transparent); border-radius: 999px;
   padding: 7px 16px; transition: all .15s;
-  &:hover { background: #2563eb; color: #fff; }
+  &:hover { background: var(--primary); color: #fff; }
 }
 
 // 反馈区块
@@ -923,8 +875,8 @@ onBeforeUnmount(() => {
 .mp-card {
   display: flex; gap: 12px; background: var(--card-bg); border: 1px solid var(--border);
   border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px rgba(37, 99, 235, .08); }
-  .mp-thumb { width: 96px; height: 68px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); background: #f1f5f9; }
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 8%, transparent); }
+  .mp-thumb { width: 96px; height: 68px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); background: var(--surface-2); }
   .mp-main { flex: 1; min-width: 0; }
   .mp-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     b { font-size: 15px; }
@@ -976,12 +928,12 @@ onBeforeUnmount(() => {
 .fr-ava {
   width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: #2563eb22; color: #2563eb; font-size: 15px; font-weight: 600;
+  background: var(--primary)22; color: var(--primary); font-size: 15px; font-weight: 600;
   &.big { width: 40px; height: 40px; }
 }
 /* 好友列表头像可点击进主页（搜索/申请列表不受影响） */
 .fr-friend .fr-ava { cursor: pointer; transition: box-shadow .15s;
-  &:hover { box-shadow: 0 0 0 2px #2563eb66; }
+  &:hover { box-shadow: 0 0 0 2px var(--primary)66; }
 }
 .fr-uinfo { flex: 1; min-width: 0;
   b { display: block; font-size: 14px; }
@@ -989,18 +941,4 @@ onBeforeUnmount(() => {
   .fr-last { display: block; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
 .fr-empty2 { color: #94a3b8; font-size: 12.5px; padding: 8px 0; }
-
-// —— 私聊弹窗 ——
-.dm-list {
-  height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
-  padding: 6px 2px; margin-bottom: 12px;
-}
-.dm-bubble {
-  max-width: 74%; padding: 8px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.7;
-  overflow-wrap: anywhere; position: relative;
-  .dm-time { font-size: 10.5px; opacity: .7; margin-top: 3px; }
-  &.mine { align-self: flex-end; background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
-  &.other { align-self: flex-start; background: #f1f5f9; border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-}
-.dm-input { display: flex; gap: 8px; .el-input { flex: 1; } }
 </style>

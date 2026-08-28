@@ -86,7 +86,7 @@ async function doImport() {
 </template>
 
 <style lang="scss" scoped>
-.dp-tip { font-size: 12.5px; color: #64748b; background: #f1f5f9; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.dp-tip { font-size: 12.5px; color: var(--text-2); background: var(--surface-2); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
 .dp-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.dp-path { font-size: 12.5px; color: #64748b; }
+.dp-path { font-size: 12.5px; color: var(--text-2); }
 </style>

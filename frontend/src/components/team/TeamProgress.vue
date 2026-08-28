@@ -405,21 +405,21 @@ reload().catch((e) => ElMessage.error(e.message));
 // 嵌入式查看：飞书文档徽标（时间线条目顶部）
 .rp-feishu-link {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-  font-size: 12.5px; color: #64748b; background: #eff6ff; border: 1px solid #bfdbfe;
+  font-size: 12.5px; color: var(--text-2); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
   border-radius: 8px; padding: 6px 12px; margin: 4px 0 8px;
-  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  a { color: var(--primary); font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
 }
 // 编写留窗状态条：飞书打开后提示回站同步
 .rp-feishu-open {
-  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  font-size: 12.5px; color: var(--success-fg); background: var(--success-tint); border: 1px solid var(--success-border);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
 }
 // 直跳横幅：时间线顶部（最近一次飞书编写的同步/导入入口）
 .rp-banner {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 12.5px; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe;
+  font-size: 12.5px; color: var(--primary-dark); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 10px;
-  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  a { color: var(--primary); font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
   .banner-close { margin-left: auto; }
 }
 .rp-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
@@ -437,15 +437,15 @@ reload().catch((e) => ElMessage.error(e.message));
 .log-rich { line-height: 1.8; font-size: 13.5px;
   :deep(img) { max-width: 100%; max-height: 320px; border-radius: 8px; cursor: zoom-in; }
   :deep(video) { max-width: 100%; max-height: 320px; border-radius: 8px; }
-  :deep(a) { color: #2563eb; }
+  :deep(a) { color: var(--primary); }
 }
 .tp-tasks {
   .tp-tools { display: flex; justify-content: space-between; align-items: center; h4 { margin: 0 0 10px; } }
-  .task-new { display: flex; gap: 8px; flex-wrap: wrap; background: #f8fafc; border: 1px dashed var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+  .task-new { display: flex; gap: 8px; flex-wrap: wrap; background: var(--surface-3); border: 1px dashed var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
   .tp-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; }
   .task-card {
     border: 1px solid var(--border); border-left: 3px solid #94a3b8; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
-    &.done { border-left-color: #16a34a; background: #f0fdf4; }
+    &.done { border-left-color: #16a34a; background: var(--success-tint); }
     &.doing { border-left-color: #f59e0b; }
     .tc-top { display: flex; justify-content: space-between; align-items: center; b { font-size: 14px; } }
     .tc-desc { color: var(--text-2); font-size: 13px; margin: 4px 0;
@@ -468,11 +468,11 @@ reload().catch((e) => ElMessage.error(e.message));
   .log-avatar {
     width: 26px; height: 26px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    background: #2563eb1a; border: 1px solid #2563eb33;
+    background: var(--primary)1a; border: 1px solid var(--primary)33;
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .log-author { font-size: 13.5px; font-weight: 600; }
-  .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+  .u-link { cursor: pointer; &:hover { color: var(--primary); } }
   .log-actions { margin-left: auto; display: flex; gap: 2px; }
 }
 .log-rich {

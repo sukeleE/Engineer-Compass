@@ -14,6 +14,22 @@
   --border: #e2e8f0;
   --text: #1e293b;
   --text-2: #64748b;
+  // 主题色变量化（组件内浅色/主蓝字面量已替换为这些变量，默认值=原色 → 普通模式零变化；
+  // 幽灵模式覆盖变量即整套换肤）
+  --primary: #2563eb;            // 主强调蓝（按钮/激活态/链接/气泡/时间轴高亮）
+  --primary-dark: #1d4ed8;       // 深端（渐变、hover）
+  --primary-tint: #eff6ff;       // 淡蓝底（今日高亮等）
+  --surface-2: #f1f5f9;          // 次级表面（气泡/拖拽占位/hover 底）
+  --surface-3: #f8fafc;          // 页面底色浅一级（面板内底）
+  --badge-fg: #b45309;           // 徽章黄褐字（官方/管理员/提示）
+  --badge-tint: #fef3c7;         // 徽章浅黄底
+  --badge-border: #fde68a;       // 徽章浅黄边
+  --ai-fg: #6d28d9;              // AI 收录徽章紫字
+  --ai-tint: #ede9fe;            // AI 徽章浅紫底
+  --success-fg: #166534;         // 成功提示深绿字
+  --success-tint: #f0fdf4;       // 成功提示浅绿底
+  --success-border: #bbf7d0;     // 成功提示浅绿边
+  --danger-tint: #fee2e2;        // 危险 hover 浅红底
 }
 
 * { box-sizing: border-box; }
@@ -51,7 +67,7 @@ html, body {
     min-width: 0; /* 允许收缩：否则 min-width:auto 被链接总宽撑住，容器比屏幕还宽 */
     max-width: 100%;
     gap: 8px;
-    background: #fff;
+    background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 4px;
@@ -65,9 +81,9 @@ html, body {
       padding: 7px 18px;
       border-radius: 999px;
       transition: all .2s;
-      &:hover { color: var(--text); background: #f1f5f9; }
+      &:hover { color: var(--text); background: var(--surface-2); }
       &.router-link-active {
-        background: #2563eb;
+        background: var(--primary);
         color: #fff;
         font-weight: 600;
       }
@@ -153,4 +169,96 @@ td, th {
   }
   .nav a { padding: 5px 10px; font-size: 12px; flex-shrink: 0; min-width: calc(2em + 20px); }
   /* 窄屏隐藏 emoji 的规则在 App.vue scoped（.nav a .ic/.nav-admin .ic），此处不写避免特异性混淆 */
+}
+
+// ============ 幽灵模式（秘密通道「水手冰淇淋」）：红黑暗色主题 ============
+// 组件浅色/主蓝字面量已全部变量化（var(--card-bg)/--surface-*/--primary 系列，默认值=原色，
+// 普通模式零变化）。幽灵模式下只需覆盖 CSS 变量即整套换肤；Element Plus 组件（卡片/弹窗/
+// 输入框/表格/消息/下拉/按钮）统一吃 --el-* 变量一并变暗；主色蓝→红 → 红黑黑暗风。
+html.ghost-mode {
+  // —— 页面骨架 ——
+  --bg: #0b0b0e;          // 页面底 近黑
+  --card-bg: #16161b;     // 卡片 深灰黑
+  --surface-3: #101015;   // 面板内底
+  --surface-2: #1d1d24;   // 气泡/hover 底
+  --border: #2b2b33;      // 边框
+  --text: #e7e7ec;        // 主文字 亮灰白
+  --text-2: #8b8b96;      // 次文字
+  // —— 主强调色 蓝→红 ——
+  --primary: #dc2626;
+  --primary-dark: #991b1b;
+  --primary-tint: #2a1212;
+  // 徽章/AI 标签暗色适配
+  --badge-fg: #f0b90b;
+  --badge-tint: #3a2a10;
+  --badge-border: #4a3a18;
+  --ai-fg: #f87171;
+  --ai-tint: #2a1212;
+  // 成功提示块（暗绿底亮绿字）
+  --success-fg: #4ade80;
+  --success-tint: #12231a;
+  --success-border: #1e3a2a;
+  --danger-tint: #301010;
+  // EP warning 色 → 亮金（el-tag type="warning"：组长/👑 角色标签、金边提示）
+  --el-color-warning: #f0b90b;
+  --el-color-warning-light-3: #f3c63c;
+  --el-color-warning-light-5: #f6d468;
+  --el-color-warning-light-7: #f9e294;
+  --el-color-warning-light-8: #fbe9ab;
+  --el-color-warning-light-9: #3a2a10;
+  --el-color-warning-dark-2: #c9970a;
+  // EP success/danger/info 标签暗色底（el-tag 各 type、plain 按钮、链接 hover）
+  --el-color-success-light-8: #1e3a2a;
+  --el-color-success-light-9: #12231a;
+  --el-color-danger-light-8: #3a1a1a;
+  --el-color-danger-light-9: #301010;
+  --el-color-info-light-8: #2a2a33;
+  --el-color-info-light-9: #202028;
+
+  // —— Element Plus 暗色底/字 ——
+  --el-bg-color: #16161b;
+  --el-bg-color-overlay: #1c1c22;
+  --el-fill-color-blank: #16161b;
+  --el-fill-color: #1d1d24;
+  --el-fill-color-light: #202028;
+  --el-fill-color-lighter: #23232b;
+  --el-fill-color-dark: #191920;
+  --el-fill-color-darker: #17171d;
+  --el-border-color: #2b2b33;
+  --el-border-color-light: #26262e;
+  --el-border-color-lighter: #222229;
+  --el-border-color-extra-light: #1e1e25;
+  --el-border-color-dark: #33333c;
+  --el-border-color-darker: #3a3a44;
+  --el-text-color-primary: #e7e7ec;
+  --el-text-color-regular: #c9c9d0;
+  --el-text-color-secondary: #8b8b96;
+  --el-text-color-placeholder: #6b6b76;
+  --el-text-color-disabled: #4a4a54;
+  // v-loading 白雾遮罩 → 暗色遮罩
+  --el-mask-color: rgba(0, 0, 0, .75);
+  --el-mask-color-extra-light: rgba(0, 0, 0, .3);
+
+  // —— EP 主色 → 红（primary 按钮/输入框 focus 边框/进度条）——
+  --el-color-primary: #dc2626;
+  --el-color-primary-light-3: #e05555;
+  --el-color-primary-light-5: #e87878;
+  --el-color-primary-light-7: #f0a8a8;
+  --el-color-primary-light-8: #f5c0c0;
+  --el-color-primary-light-9: #2a1212;
+  --el-color-primary-dark-2: #b91c1c;
+
+  // —— 卡片 / 表格 ——
+  --el-card-bg-color: #16161b;
+  --el-card-border-color: #2b2b33;
+  --el-table-bg-color: #16161b;
+  --el-table-tr-bg-color: #16161b;
+  --el-table-header-bg-color: #1d1d24;
+  --el-table-border-color: #2b2b33;
+  --el-table-row-hover-bg-color: #1d1d24;
+
+  // 滚动条暗色
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #33333c; border-radius: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
 }

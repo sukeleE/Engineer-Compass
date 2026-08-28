@@ -128,7 +128,7 @@ async function submit() {
   .mp-or { color: #94a3b8; font-size: 12px; }
 }
 .mp-phase {
-  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #f8fafc;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface-3);
   .mp-ph-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
     .mp-idx { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
   }

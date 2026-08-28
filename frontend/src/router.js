@@ -22,6 +22,23 @@ export default createRouter({
     { path: '/study', redirect: '/schedule?tab=study' },
     { path: '/team', name: 'team', component: TeamView },
     { path: '/share', name: 'share', component: ShareView },
+    // 秘密分享（幽灵模式专属，仅 is_ghost 可进；前端守卫 + 后端 share 过滤双重校验）
+    {
+      path: '/ghost-share', name: 'ghost-share', component: ShareView, props: { ghost: true },
+      beforeEnter: async (_to, _from, next) => {
+        if (!auth.token) return next('/login?redirect=/ghost-share');
+        if (!auth.user?.is_ghost) {
+          // 缓存可能过期（幽灵权限刚被授予/撤销），拉取最新状态再判断
+          try {
+            const { user } = await api.me();
+            patchUser(user);
+            if (user.is_ghost) return next();
+          } catch { /* 网络失败按原缓存判断 */ }
+          return next('/');
+        }
+        next();
+      },
+    },
     { path: '/me', name: 'me', component: MyView },
     // 用户公开主页（只读）：小组内点击成员头像/昵称进入
     { path: '/user/:id', name: 'user-profile', component: ProfileView },

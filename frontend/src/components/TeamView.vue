@@ -201,7 +201,7 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
 .team-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
   h2 { margin: 0; font-size: 20px; }
   .head-sub { margin: 4px 0 0; color: var(--text-2); font-size: 13px;
-    .admin-tag { background: #fef3c7; color: #92400e; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-left: 4px; }
+    .admin-tag { background: var(--badge-tint); color: var(--badge-fg); border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-left: 4px; }
   }
   .head-actions { display: flex; gap: 8px; }
 }

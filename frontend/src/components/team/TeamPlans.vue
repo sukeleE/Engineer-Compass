@@ -83,10 +83,10 @@ onMounted(() => load());
 .tp2-empty { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
 .member-plan {
   border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;
-  &.owner { border-color: #fcd34d; background: #fffbeb; }
+  &.owner { border-color: var(--badge-border); background: var(--badge-tint); }
   .mp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
     b { font-size: 14.5px; }
-    .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+    .u-link { cursor: pointer; &:hover { color: var(--primary); } }
     .mp-count { margin-left: auto; color: var(--text-2); font-size: 12px; }
   }
   .mp-sec { margin-top: 8px;

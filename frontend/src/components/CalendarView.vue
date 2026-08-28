@@ -391,15 +391,15 @@ onMounted(() => {
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-cell {
   min-height: 80px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px;
-  cursor: pointer; transition: all .15s; background: #fff; overflow: hidden;
-  &:hover { border-color: #2563eb; box-shadow: 0 1px 6px rgba(37, 99, 235, .18); }
+  cursor: pointer; transition: all .15s; background: var(--card-bg); overflow: hidden;
+  &:hover { border-color: var(--primary); box-shadow: 0 1px 6px color-mix(in srgb, var(--primary) 18%, transparent); }
   &.blank { visibility: hidden; }
-  &.today { border-color: #2563eb; background: #eff6ff; }
+  &.today { border-color: var(--primary); background: var(--primary-tint); }
   &.hasnote { border-color: #f59e0b; }
-  &.today.hasnote { border-color: #2563eb; background: #eff6ff; }
+  &.today.hasnote { border-color: var(--primary); background: var(--primary-tint); }
 
-  .cal-day { font-size: 12.5px; font-weight: 700; color: #475569; }
-  .today & .cal-day { color: #2563eb; }
+  .cal-day { font-size: 12.5px; font-weight: 700; color: var(--text-2); }
+  .today & .cal-day { color: var(--primary); }
   .cal-emojis {
     display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-top: 5px; min-height: 20px;
     .cal-emoji { font-size: 15px; line-height: 1; }
@@ -435,7 +435,7 @@ onMounted(() => {
     .dp-sec-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-2); }
     .dp-item {
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px;
       padding: 6px 10px; margin-bottom: 6px; font-size: 12.5px;
       b { flex: 1; min-width: 0; }
       .dp-badge { color: #16a34a; font-weight: 700; white-space: nowrap; }
@@ -450,13 +450,13 @@ onMounted(() => {
 // 嵌入式查看：飞书文档徽标（查看模式顶部）
 .dlg-feishu-link {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-  font-size: 12.5px; color: #64748b; background: #eff6ff; border: 1px solid #bfdbfe;
+  font-size: 12.5px; color: var(--text-2); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 10px;
-  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  a { color: var(--primary); font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
 }
 // 编写留窗状态条：飞书打开后提示回站同步
 .dlg-feishu-open {
-  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  font-size: 12.5px; color: var(--success-fg); background: var(--success-tint); border: 1px solid var(--success-border);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
 }
 .dlg-items { margin-bottom: 14px;
@@ -466,7 +466,7 @@ onMounted(() => {
       display: flex; gap: 8px; align-items: baseline; font-size: 13px;
       padding: 4px 10px; border-left: 3px solid var(--border); margin-bottom: 4px;
       b { color: var(--text-2); font-weight: 600; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
-      .di-task { color: #1e293b; }
+      .di-task { color: var(--text); }
     }
   }
   .di-none { color: #94a3b8; font-size: 13px; padding: 6px 0; }
@@ -481,11 +481,11 @@ onMounted(() => {
     font-size: 13px; font-weight: 600; margin-bottom: 10px;
   }
   .dlg-body {
-    line-height: 1.8; font-size: 14px; color: #1e293b; overflow-y: auto; max-height: 32vh;
+    line-height: 1.8; font-size: 14px; color: var(--text); overflow-y: auto; max-height: 32vh;
     :deep(img) { max-width: 100%; border-radius: 6px; }
     :deep(video) { max-width: 100%; border-radius: 6px; }
     :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 6px; border: none; }
-    :deep(a) { color: #2563eb; }
+    :deep(a) { color: var(--primary); }
   }
   .dlg-empty { color: #94a3b8; font-size: 13px; padding: 10px 0; }
 }

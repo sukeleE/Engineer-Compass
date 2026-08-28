@@ -1,12 +1,16 @@
 <script setup>
 // 主页面：横向时间轴（12月网格）+ 筛选 + 搜索 + 详情弹窗
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import gsap from 'gsap';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
+import auth, { patchUser } from '../auth.js';
 import { store } from '../store.js';
 import CompDialog from './CompDialog.vue';
 import AdminView from './AdminView.vue'; // AI 收录（集成在本页 tab 内）
+
+const router = useRouter();
 
 // 页面 tab：timeline 竞赛时间轴 | ingest AI 收录
 const viewTab = ref('timeline');
@@ -146,9 +150,32 @@ function openComp(c) {
   dialogOpen.value = true;
 }
 
+// 秘密通道：搜索框输入暗号「水手冰淇淋」→ 激活幽灵模式（需登录，落库持久化）
+async function enterGhost() {
+  if (!auth.user?.id) {
+    ElMessage.warning('请先登录，再输入暗号进入秘密通道');
+    router.push('/login?redirect=/');
+    return;
+  }
+  if (auth.user.is_ghost) {
+    ElMessage.success('👻 你已在幽灵模式中，欢迎回来');
+    router.push('/ghost-share');
+    return;
+  }
+  try {
+    const res = await api.ghostEnter();
+    patchUser(res.user); // 局部合并，勿用 setAuth（会覆盖 token）；App.vue watch 自动切反色
+    ElMessage.success('👻 幽灵模式已激活，欢迎来到怪奇世界');
+    router.push('/ghost-share');
+  } catch (e) {
+    ElMessage.error(e.message);
+  }
+}
+
 async function doSearch() {
   const q = searchQ.value.trim();
   if (!q) return;
+  if (q === '水手冰淇淋') { searchQ.value = ''; enterGhost(); return; } // 暗号拦截，不走竞赛搜索
   searching.value = true;
   try {
     const res = await api.search(q);
@@ -328,23 +355,23 @@ onMounted(load);
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
-    border: 1px solid var(--border); background: #fff; color: var(--text-2);
+    border: 1px solid var(--border); background: var(--card-bg); color: var(--text-2);
     border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px;
     transition: all .2s;
     .dot { width: 8px; height: 8px; border-radius: 50%; }
     &:hover { border-color: #94a3b8; }
-    &.active { background: #eff6ff; border-width: 2px; font-weight: 600; }
-    &.chip-more { border-style: dashed; color: #2563eb; font-weight: 500; }
+    &.active { background: var(--primary-tint); border-width: 2px; font-weight: 600; }
+    &.chip-more { border-style: dashed; color: var(--primary); font-weight: 500; }
   }
   .right { display: flex; gap: 8px; align-items: center; }
 }
 
 .search-results {
-  background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
   padding: 6px; margin-bottom: 12px; max-height: 220px; overflow-y: auto;
   .sr-item {
     display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer;
-    &:hover { background: #f1f5f9; }
+    &:hover { background: var(--surface-2); }
     b { flex: 1; }
   }
 }
@@ -363,7 +390,7 @@ onMounted(load);
   min-height: 90px;
   .placeholder { color: #cbd5e1; text-align: center; font-size: 18px; padding-top: 20px; }
 }
-.month-head.last, .month-col.last { background: #f1f5f9; border-radius: 8px; }
+.month-head.last, .month-col.last { background: var(--surface-2); border-radius: 8px; }
 
 .t-card {
   background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid;
@@ -374,8 +401,8 @@ onMounted(load);
   .t-name { font-weight: 600; font-size: 13px; line-height: 1.35; }
   .t-meta { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
   .t-badge {
-    font-size: 10px; color: #b45309; background: #fef3c7; border-radius: 4px; padding: 1px 5px;
-    &.ai { color: #6d28d9; background: #ede9fe; }
+    font-size: 10px; color: var(--badge-fg); background: var(--badge-tint); border-radius: 4px; padding: 1px 5px;
+    &.ai { color: var(--ai-fg); background: var(--ai-tint); }
   }
   .t-stars { color: #f59e0b; font-size: 11px; i { color: #e2e8f0; font-style: normal; } }
 }
@@ -394,7 +421,7 @@ onMounted(load);
     .tm-ctrl {
       display: flex; align-items: center; gap: 8px;
       .tm-arrow {
-        border: 1px solid var(--border); background: #fff; border-radius: 10px;
+        border: 1px solid var(--border); background: var(--card-bg); border-radius: 10px;
         font-size: 18px; line-height: 1; padding: 8px 14px; cursor: pointer;
       }
       .tm-title {
@@ -402,23 +429,23 @@ onMounted(load);
         .tm-count { color: var(--text-2); font-size: 12px; font-weight: 400; margin-left: 6px; }
       }
       .tm-pending {
-        border: 1px solid var(--border); background: #fff; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--card-bg); border-radius: 999px;
         font-size: 13px; padding: 7px 14px; cursor: pointer; color: var(--text-2);
-        &.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+        &.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
       }
       .tm-today {
-        border: none; background: #eff6ff; color: #2563eb; border-radius: 999px;
+        border: none; background: var(--primary-tint); color: var(--primary); border-radius: 999px;
         font-size: 13px; padding: 7px 14px; cursor: pointer;
       }
       .tm-caret { font-size: 10px; color: var(--text-2); margin-left: 3px; }
     }
     .tm-picker {
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
-      background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 8px;
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px;
       .tm-pm {
-        border: 1px solid var(--border); background: #fff; border-radius: 8px;
+        border: 1px solid var(--border); background: var(--card-bg); border-radius: 8px;
         padding: 8px 0; font-size: 13px; cursor: pointer; color: var(--text-2);
-        &.active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+        &.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
       }
     }
     .tm-empty {

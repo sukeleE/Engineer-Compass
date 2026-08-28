@@ -180,9 +180,9 @@ function confirmFeishu() {
 </template>
 
 <style lang="scss" scoped>
-.rp-tip { font-size: 12.5px; color: #64748b; background: #f1f5f9; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.rp-tip { font-size: 12.5px; color: var(--text-2); background: var(--surface-2); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
 .rp-feishu-empty { display: flex; align-items: center; flex-wrap: wrap; }
 .rp-pg { margin-top: 10px; justify-content: flex-end; }
 .rp-fnav { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.rp-fpath { font-size: 12.5px; color: #64748b; }
+.rp-fpath { font-size: 12.5px; color: var(--text-2); }
 </style>

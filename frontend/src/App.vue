@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import ToolDock from './components/ToolDock.vue';
 import ImageViewer from './components/ImageViewer.vue';
 import auth from './auth.js';
@@ -11,6 +11,12 @@ const announceHidden = ref(false);
 onMounted(async () => {
   try { announce.value = await api.announcementLatest(); } catch { /* 横幅拉取失败不影响页面 */ }
 });
+
+// 幽灵模式（秘密通道「水手冰淇淋」）：is_ghost → html class，全站反色由 main.scss 驱动
+// is_ghost 持久化在 localStorage（ec_user），刷新后挂载即恢复；激活/退出经 patchUser 触发 watch
+const applyGhostClass = (v) => document.documentElement.classList.toggle('ghost-mode', !!v);
+watch(() => auth.user?.is_ghost, applyGhostClass);
+onMounted(() => applyGhostClass(auth.user?.is_ghost));
 </script>
 
 <template>
@@ -32,6 +38,7 @@ onMounted(async () => {
         <router-link to="/schedule"><span class="ic">📅</span><span class="txt">日程规划</span></router-link>
         <router-link to="/team"><span class="ic">🏗️</span><span class="txt">项目小组</span></router-link>
         <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
+        <router-link v-if="auth.user?.is_ghost" to="/ghost-share"><span class="ic">👻</span><span class="txt">秘密分享</span></router-link>
       </nav>
       <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页） -->
       <div class="header-user">
@@ -59,7 +66,7 @@ onMounted(async () => {
 /* 公告横幅：蓝底白字，非吸顶（与 header 一起随页面滚动） */
 .announce-bar {
   display: flex; align-items: center; gap: 8px;
-  background: linear-gradient(90deg, #1d4ed8, #2563eb);
+  background: linear-gradient(90deg, var(--primary-dark), var(--primary));
   color: #fff; font-size: 13px;
   padding: 7px 16px 7px 20px;
   .ann-icon { font-size: 15px; flex-shrink: 0; }
@@ -71,18 +78,18 @@ onMounted(async () => {
   .ann-close {
     border: none; background: transparent; color: #dbeafe; cursor: pointer;
     font-size: 14px; padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
-    &:hover { background: #ffffff22; color: #fff; }
+    &:hover { background: var(--card-bg)22; color: #fff; }
   }
 }
 
 .nav-me {
   display: flex; align-items: center; gap: 6px;
   border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px 3px 3px;
-  &.logged { border-color: #2563eb55; background: #2563eb0d; }
+  &.logged { border-color: color-mix(in srgb, var(--primary) 33%, transparent); background: color-mix(in srgb, var(--primary) 5%, transparent); }
   .me-avatar {
     width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
     align-items: center; justify-content: center; overflow: hidden;
-    background: #2563eb; color: #fff; font-size: 12px; flex-shrink: 0;
+    background: var(--primary); color: #fff; font-size: 12px; flex-shrink: 0;
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

@@ -174,10 +174,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   .code-row { display: flex; gap: 8px; width: 100%; }
   .email-tip { margin: 12px 0 0; font-size: 12px; color: #94a3b8; line-height: 1.7; }
   .auth-switch { margin-top: 14px; text-align: center; font-size: 13px; color: var(--text-2);
-    a { color: #2563eb; cursor: pointer; }
+    a { color: var(--primary); cursor: pointer; }
   }
   .auth-back { margin-top: 10px; text-align: center; font-size: 12.5px;
-    a { color: #94a3b8; text-decoration: none; &:hover { color: #2563eb; } }
+    a { color: #94a3b8; text-decoration: none; &:hover { color: var(--primary); } }
   }
 }
 </style>

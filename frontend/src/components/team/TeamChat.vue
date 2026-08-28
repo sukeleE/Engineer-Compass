@@ -142,10 +142,10 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
 .chat-list { max-height: 480px; overflow-y: auto; padding: 4px 2px; }
 .chat-empty { color: #94a3b8; text-align: center; padding: 50px 0; font-size: 13px; }
 .chat-item {
-  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: #f8fafc;
-  &.mine { background: #eff6ff; border-color: #bfdbfe; }
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; background: var(--surface-3);
+  &.mine { background: var(--primary-tint); border-color: color-mix(in srgb, var(--primary) 30%, white); }
   .ci-head { display: flex; align-items: center; gap: 8px; b { font-size: 13px; }
-    .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+    .u-link { cursor: pointer; &:hover { color: var(--primary); } }
     .ci-time { color: #94a3b8; font-size: 11.5px; }
     .ci-ops { margin-left: auto; display: flex; align-items: center; gap: 2px; }
   }

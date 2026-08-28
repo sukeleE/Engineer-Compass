@@ -15,6 +15,8 @@ import ResourcePicker from './ResourcePicker.vue';
 
 const router = useRouter();
 const route = useRoute();
+// ghost 模式（/ghost-share 秘密分享页）：只显示幽灵帖、发帖恒为幽灵帖；普通分享页幽灵用户发帖默认也发幽灵帖
+const props = defineProps({ ghost: { type: Boolean, default: false } });
 const toProfile = (uid) => router.push(uid === auth.user?.id ? '/me' : `/user/${uid}`);
 
 // —— 列表状态：排序视图 + 标签子板块 + 分页 ——
@@ -40,7 +42,7 @@ const sortLabel = (s) => (isNarrow.value ? s.short : s.full);
 async function load() {
   loading.value = true;
   try {
-    const data = await api.sharePosts({ sort: sort.value, tag: tag.value, page: page.value, size });
+    const data = await api.sharePosts({ sort: sort.value, tag: tag.value, page: page.value, size, ...(props.ghost ? { ghost: 1 } : {}) });
     rows.value = data.rows;
     total.value = data.total;
   } catch (e) {
@@ -77,7 +79,7 @@ function onRichClick(e) {
 // —— 发帖 / 编辑弹窗 ——
 const postDlg = ref(false);
 const editingId = ref(null);
-const form = ref({ title: '', content: '', atts: [], tags: [] });
+const form = ref({ title: '', content: '', atts: [], tags: [], isGhost: true }); // isGhost：幽灵用户发帖默认「仅怪奇可见」
 const fileInput = ref(null);
 const MAX_ATT_TOTAL = 25 * 1024 * 1024;
 const attPick = (e) => {
@@ -105,7 +107,7 @@ const onResourcePick = (r) => {
 function openNew() {
   if (needLogin()) return;
   editingId.value = null;
-  form.value = { title: '', content: '', atts: [], tags: [] };
+  form.value = { title: '', content: '', atts: [], tags: [], isGhost: true };
   feishuOpened.value = false;
   postDlg.value = true;
 }
@@ -115,7 +117,7 @@ function openEdit(p) {
   feishuOpened.value = false;
   let atts = [];
   try { atts = typeof p.attachments === 'string' ? JSON.parse(p.attachments) : p.attachments || []; } catch {}
-  form.value = { title: p.title, content: p.content, atts, tags: [...(p.tags || [])] };
+  form.value = { title: p.title, content: p.content, atts, tags: [...(p.tags || [])], isGhost: true };
   postDlg.value = true;
 }
 async function submit() {
@@ -127,8 +129,10 @@ async function submit() {
       await api.shareUpdate(editingId.value, { title: form.value.title, content: form.value.content, attachments: form.value.atts, tags: form.value.tags });
       ElMessage.success('帖子已更新');
     } else {
-      await api.shareCreate({ title: form.value.title, content: form.value.content, attachments: form.value.atts, tags: form.value.tags });
-      ElMessage.success('🚀 开楼成功');
+      // 幽灵帖归属：秘密分享页恒为幽灵帖；普通页幽灵用户由「仅怪奇可见」勾选决定；普通用户恒普通帖
+      const isGhost = props.ghost ? 1 : (auth.user?.is_ghost ? (form.value.isGhost ? 1 : 0) : 0);
+      await api.shareCreate({ title: form.value.title, content: form.value.content, attachments: form.value.atts, tags: form.value.tags, is_ghost: isGhost });
+      ElMessage.success(props.ghost ? '👻 秘密帖子发布成功' : '🚀 开楼成功');
     }
     postDlg.value = false;
     await load(); await loadTags();
@@ -263,10 +267,10 @@ async function delPost(p) {
     <!-- 头部：标题 + 开楼按钮 -->
     <div class="sp-head">
       <div>
-        <h2>📤 资源分享</h2>
-        <p class="sp-sub">贴吧式交流区：分享资料/经验/作品，图文视频音频文件</p>
+        <h2>{{ props.ghost ? '👻 秘密分享' : '📤 资源分享' }}</h2>
+        <p class="sp-sub">{{ props.ghost ? '怪奇小队专属领地：幽灵帖仅幽灵可见，普通世界完全无痕' : '贴吧式交流区：分享资料/经验/作品，图文视频音频文件' }}</p>
       </div>
-      <el-button type="primary" size="large" @click="openNew">📝 开楼发帖</el-button>
+      <el-button type="primary" size="large" @click="openNew">{{ props.ghost ? '👻 开幽灵帖' : '📝 开楼发帖' }}</el-button>
     </div>
 
     <!-- 排序子板块 + 标签子板块 -->
@@ -307,7 +311,7 @@ async function delPost(p) {
         </div>
       </div>
 
-      <el-empty v-if="!loading && !rows.length" :description="tag ? `「${tag}」子板块还没有帖子，来开第一楼` : '还没有帖子，点「开楼发帖」分享第一个资源'" />
+      <el-empty v-if="!loading && !rows.length" :description="tag ? `「${tag}」子板块还没有帖子，来开第一楼` : (props.ghost ? '还没有秘密帖子，来开第一座幽灵楼' : '还没有帖子，点「开楼发帖」分享第一个资源')" />
     </div>
 
     <el-pagination v-if="total > size" class="sp-pager" background layout="prev, pager, next" :total="total"
@@ -342,6 +346,10 @@ async function delPost(p) {
         placeholder="索引标签（≤5 个，自建即成为子板块）" class="sh-tags">
         <el-option v-for="t in tagList" :key="t.name" :value="t.name" :label="`#${t.name}`" />
       </el-select>
+      <!-- 幽灵用户发帖归属（秘密分享页恒为幽灵帖，无需勾选） -->
+      <el-checkbox v-if="!props.ghost && auth.user?.is_ghost" v-model="form.isGhost" class="sh-ghost-chk">
+        👻 仅怪奇可见（幽灵帖，普通用户看不到）
+      </el-checkbox>
       <template #footer>
         <el-button @click="postDlg = false">取消</el-button>
         <el-button type="primary" @click="submit">{{ editingId ? '保存修改' : '发布' }}</el-button>
@@ -423,6 +431,7 @@ async function delPost(p) {
 
 .sp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
   h2 { margin: 0; font-size: 22px; }
+  .sh-ghost-chk { margin: 8px 0 2px; font-size: 13px; color: var(--primary); }
   .sp-sub { color: var(--text-2); font-size: 13px; margin: 4px 0 0; }
 }
 
@@ -430,12 +439,12 @@ async function delPost(p) {
   .sp-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px;
     .sp-tag-label { font-size: 13px; color: var(--text-2); }
     .chip {
-      border: 1px solid var(--border); background: #fff; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--card-bg); border-radius: 999px;
       padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--text-2);
       transition: all .15s;
       i { font-style: normal; font-size: 11px; color: #94a3b8; margin-left: 3px; }
-      &:hover { border-color: #93c5fd; color: #2563eb; }
-      &.active { background: #2563eb; border-color: #2563eb; color: #fff; i { color: #dbeafe; } }
+      &:hover { border-color: #93c5fd; color: var(--primary); }
+      &.active { background: var(--primary); border-color: var(--primary); color: #fff; i { color: #dbeafe; } }
     }
   }
 }
@@ -444,10 +453,10 @@ async function delPost(p) {
 .post-card {
   display: flex; gap: 12px; background: var(--card-bg); border: 1px solid var(--border);
   border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px rgba(37, 99, 235, .08); }
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 8%, transparent); }
   .pc-thumb {
     width: 110px; height: 78px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
-    border: 1px solid var(--border); background: #f1f5f9;
+    border: 1px solid var(--border); background: var(--surface-2);
   }
   .pc-main { flex: 1; min-width: 0; }
   .pc-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
@@ -461,14 +470,14 @@ async function delPost(p) {
   .pc-meta { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-2);
     flex-wrap: wrap;
     .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
-    .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+    .u-link { cursor: pointer; &:hover { color: var(--primary); } }
     .pc-actions { margin-left: auto; display: flex; gap: 4px; align-items: center;
       .act {
-        border: 1px solid var(--border); background: #fff; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--card-bg); border-radius: 999px;
         padding: 3px 10px; font-size: 12px; cursor: pointer; color: var(--text-2); line-height: 1.6;
         transition: all .15s;
-        &:hover { border-color: #93c5fd; color: #2563eb; }
-        &.on { background: #eff6ff; border-color: #2563eb; color: #2563eb; font-weight: 600; }
+        &:hover { border-color: #93c5fd; color: var(--primary); }
+        &.on { background: var(--primary-tint); border-color: var(--primary); color: var(--primary); font-weight: 600; }
         &.plain { cursor: default; &:hover { border-color: var(--border); color: var(--text-2); } }
       }
     }
@@ -496,24 +505,24 @@ async function delPost(p) {
 .pd-title { margin: 0 0 8px; font-size: 19px; }
 .pd-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
   color: var(--text-2); font-size: 12.5px;
-  .pd-author { cursor: pointer; &:hover { color: #2563eb; } font-weight: 600; color: var(--text); }
+  .pd-author { cursor: pointer; &:hover { color: var(--primary); } font-weight: 600; color: var(--text); }
   .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
   .pd-own { margin-left: auto; display: flex; gap: 2px; }
 }
 // 编写留窗状态条：飞书打开后提示回站同步
 .pd-feishu-open {
-  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  font-size: 12.5px; color: var(--success-fg); background: var(--success-tint); border: 1px solid var(--success-border);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
 }
 .pd-feishu { margin-bottom: 10px;
-  a { display: inline-block; font-size: 12.5px; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe;
-    border-radius: 8px; padding: 5px 12px; text-decoration: none; &:hover { background: #dbeafe; } }
+  a { display: inline-block; font-size: 12.5px; color: var(--primary); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
+    border-radius: 8px; padding: 5px 12px; text-decoration: none; &:hover { background: var(--primary-tint); } }
 }
 .pd-body { line-height: 1.9; font-size: 14px; overflow-wrap: anywhere; /* 长串/URL 强制断行，防竖排 */
   :deep(img) { max-width: 100%; border-radius: 8px; cursor: zoom-in; }
   :deep(video) { max-width: 100%; border-radius: 8px; }
   :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
-  :deep(a) { color: #2563eb; }
+  :deep(a) { color: var(--primary); }
 }
 .pd-empty { color: #94a3b8; font-size: 13px; padding: 10px 0; }
 .pd-acts { display: flex; gap: 10px; margin: 14px 0; }
@@ -521,9 +530,9 @@ async function delPost(p) {
 .pd-comments { border-top: 1px solid var(--border); padding-top: 12px;
   .pd-c-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   .c-list { display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto; }
-  .c-item { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
+  .c-item { background: var(--surface-3); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
     .c-top { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2);
-      .c-author { font-weight: 600; color: var(--text); cursor: pointer; &:hover { color: #2563eb; } }
+      .c-author { font-weight: 600; color: var(--text); cursor: pointer; &:hover { color: var(--primary); } }
       .pc-ava { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-right: 3px; vertical-align: middle; }
       .c-del { margin-left: auto; }
     }

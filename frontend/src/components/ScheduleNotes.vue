@@ -313,13 +313,13 @@ onMounted(() => { loadMonth().then(applyDate); });
 // 嵌入式查看：飞书文档徽标（查看模式顶部）
 .dn-feishu-link {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-  font-size: 12.5px; color: #64748b; background: #eff6ff; border: 1px solid #bfdbfe;
+  font-size: 12.5px; color: var(--text-2); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 12px;
-  a { color: #2563eb; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  a { color: var(--primary); font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
 }
 // 编写留窗状态条：飞书打开后提示回站同步
 .dn-feishu-open {
-  font-size: 12.5px; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0;
+  font-size: 12.5px; color: var(--success-fg); background: var(--success-tint); border: 1px solid var(--success-border);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
 }
 
@@ -327,7 +327,7 @@ onMounted(() => { loadMonth().then(applyDate); });
 .note-panel {
   position: fixed; right: 22px; bottom: 86px; z-index: 1000;
   width: 420px; height: 640px; max-height: calc(100vh - 120px);
-  background: #fff; border-radius: 14px;
+  background: var(--card-bg); border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .2); border: 1px solid var(--border, #e2e8f0);
   display: flex; flex-direction: column; overflow: hidden;
   @media (max-width: 768px) {
@@ -336,24 +336,24 @@ onMounted(() => { loadMonth().then(applyDate); });
 }
 
 .note-head {
-  padding: 12px 16px; background: #2563eb; color: #fff; position: relative; flex-shrink: 0;
+  padding: 12px 16px; background: var(--primary); color: #fff; position: relative; flex-shrink: 0;
   b { font-size: 15px; }
   .note-sub { font-size: 12.5px; opacity: .85; margin-top: 3px; }
   .note-actions { position: absolute; top: 8px; right: 8px; :deep(.el-button) { color: #dbeafe; } }
 }
 
-.note-body { flex: 1; overflow-y: auto; padding: 12px 14px; background: #f8fafc; }
+.note-body { flex: 1; overflow-y: auto; padding: 12px 14px; background: var(--surface-3); }
 
 // 写笔记主按钮：颜色写死，不依赖 Element Plus 主题变量层（线上偶发缺失 → 白字透明不可见）
 .note-write {
   width: 100%; margin-bottom: 12px;
-  --el-button-bg-color: #2563eb;
-  --el-button-border-color: #2563eb;
+  --el-button-bg-color: var(--primary);
+  --el-button-border-color: var(--primary);
   --el-button-text-color: #fff;
-  --el-button-hover-bg-color: #1d4ed8;
-  --el-button-hover-border-color: #1d4ed8;
+  --el-button-hover-bg-color: var(--primary-dark);
+  --el-button-hover-border-color: var(--primary-dark);
   --el-button-active-bg-color: #1e40af;
-  background: #2563eb; border-color: #2563eb; color: #fff;
+  background: var(--primary); border-color: var(--primary); color: #fff;
 }
 
 .note-list-head { margin: 0 0 8px; font-size: 12.5px; color: var(--text-2, #64748b); font-weight: 600; }
@@ -362,12 +362,12 @@ onMounted(() => { loadMonth().then(applyDate); });
 
 .note-item {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
-  border: 1px solid var(--border, #e2e8f0); cursor: pointer; background: #fff;
+  border: 1px solid var(--border, #e2e8f0); cursor: pointer; background: var(--card-bg);
   transition: all .15s;
-  &:hover { border-color: #93c5fd; background: #eff6ff; }
-  &.cur { border-color: #2563eb; background: #eff6ff; }
+  &:hover { border-color: #93c5fd; background: var(--primary-tint); }
+  &.cur { border-color: var(--primary); background: var(--primary-tint); }
 
-  .note-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; flex-shrink: 0; }
+  .note-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-2); flex-shrink: 0; }
   .note-item-main { flex: 1; min-width: 0; }
   .note-item-top { font-size: 12.5px; font-weight: 600; }
   .note-item-ex {
@@ -389,7 +389,7 @@ onMounted(() => { loadMonth().then(applyDate); });
   :deep(img) { max-width: 100%; border-radius: 8px; }
   :deep(video) { max-width: 100%; border-radius: 8px; }
   :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
-  :deep(a) { color: #2563eb; }
+  :deep(a) { color: var(--primary); }
 }
 .dn-empty { color: #94a3b8; font-size: 13px; text-align: center; padding: 40px 0; }
 </style>

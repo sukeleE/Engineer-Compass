@@ -60,6 +60,11 @@ function normTags(raw) {
   return out;
 }
 
+// 幽灵帖可见性：普通用户对幽灵帖一律 404（防 ID 探测，与"帖子不存在"同语义）
+function ghostVisible(req, p) {
+  return !p?.is_ghost || req.user?.is_ghost || req.user?.is_admin;
+}
+
 // 帖子的标签 + 作者信息 + 计数（列表/详情共用拼装）
 function decorate(row) {
   const tags = db.prepare(
@@ -79,10 +84,20 @@ r.get('/posts', optionalAuth, (req, res) => {
   const scope = String(req.query.scope || '');
   if (scope && !req.user) return res.status(401).json({ error: '请先登录' });
 
+  // 幽灵帖隔离（服务端强制）：scope 查看自己数据时全量；否则——
+  // 管理员：ghost=1 只看幽灵帖，否则全看；幽灵用户：ghost=1 只看幽灵帖，否则只普通帖；普通用户：永远只普通帖
+  const ghostOnly = req.query.ghost === '1';
+  let ghostCond = '';
+  if (!scope) {
+    if (req.user?.is_admin) ghostCond = ghostOnly ? 'AND p.is_ghost = 1' : '';
+    else if (req.user?.is_ghost) ghostCond = ghostOnly ? 'AND p.is_ghost = 1' : 'AND p.is_ghost = 0';
+    else ghostCond = 'AND p.is_ghost = 0';
+  }
   const where = [
     tag ? 'AND p.id IN (SELECT pt.post_id FROM share_post_tag pt JOIN share_tag t ON t.id = pt.tag_id WHERE t.name = ?)' : '',
     scope === 'mine' ? 'AND p.user_id = ?' : '',
     scope === 'favs' ? 'AND p.id IN (SELECT post_id FROM share_fav WHERE user_id = ?)' : '',
+    ghostCond,
   ].filter(Boolean).join(' ');
   const orderBy = {
     hot: `(SELECT COUNT(*) FROM share_like l WHERE l.post_id = p.id) DESC,
@@ -114,7 +129,7 @@ r.get('/posts', optionalAuth, (req, res) => {
 r.get('/posts/:id', optionalAuth, (req, res) => {
   const me = uid(req);
   const p = db.prepare(
-    `SELECT p.id, p.title, p.content, p.attachments, p.create_time, p.update_time,
+    `SELECT p.id, p.title, p.content, p.attachments, p.is_ghost, p.create_time, p.update_time,
             u.id AS author_id, u.nickname, u.avatar,
             (SELECT COUNT(*) FROM share_like l WHERE l.post_id = p.id) AS like_count,
             (SELECT COUNT(*) FROM share_fav f WHERE f.post_id = p.id) AS fav_count,
@@ -123,7 +138,7 @@ r.get('/posts/:id', optionalAuth, (req, res) => {
             EXISTS(SELECT 1 FROM share_fav f WHERE f.post_id = p.id AND f.user_id = ?) AS is_faved
      FROM share_post p JOIN user u ON u.id = p.user_id WHERE p.id = ?`
   ).get(me, me, Number(req.params.id));
-  if (!p) return res.status(404).json({ error: '帖子不存在' });
+  if (!p || !ghostVisible(req, p)) return res.status(404).json({ error: '帖子不存在' });
   const comments = db.prepare(
     `SELECT c.id, c.content, c.create_time, u.id AS user_id, u.nickname, u.avatar
      FROM share_comment c JOIN user u ON u.id = c.user_id
@@ -133,11 +148,14 @@ r.get('/posts/:id', optionalAuth, (req, res) => {
 });
 
 // GET /api/share/tags — 子板块标签（按帖子数降序）
-r.get('/tags', (req, res) => {
+// 幽灵帖隔离：普通用户只统计普通帖（COUNT(sp.id) 排除幽灵帖），幽灵专属标签整体隐藏（HAVING）
+r.get('/tags', optionalAuth, (req, res) => {
+  const all = req.user?.is_ghost || req.user?.is_admin;
   const rows = db.prepare(
-    `SELECT t.name, COUNT(pt.post_id) AS count
+    `SELECT t.name, ${all ? 'COUNT(pt.post_id)' : 'COUNT(sp.id)'} AS count
      FROM share_tag t LEFT JOIN share_post_tag pt ON pt.tag_id = t.id
-     GROUP BY t.id ORDER BY count DESC, t.id`
+     ${all ? '' : 'LEFT JOIN share_post sp ON sp.id = pt.post_id AND sp.is_ghost = 0'}
+     GROUP BY t.id ${all ? '' : 'HAVING COUNT(sp.id) > 0'} ORDER BY count DESC, t.id`
   ).all();
   res.json(rows);
 });
@@ -153,8 +171,10 @@ r.post('/posts', authRequired, mutedGuard, (req, res) => {
   if (tags === null) return res.status(400).json({ error: '标签最多 5 个，每个 ≤12 字' });
   if (!content && !atts.length) return res.status(400).json({ error: '写点内容或附上资源' });
 
-  const info = db.prepare('INSERT INTO share_post (user_id, title, content, attachments) VALUES (?, ?, ?, ?)')
-    .run(uid(req), title, content, JSON.stringify(atts));
+  // 幽灵帖归属：幽灵用户默认发「仅怪奇可见」（显式传 0 才发普通帖）；普通用户强制普通帖
+  const isGhost = req.user?.is_ghost ? (req.body?.is_ghost === 0 ? 0 : 1) : 0;
+  const info = db.prepare('INSERT INTO share_post (user_id, title, content, attachments, is_ghost) VALUES (?, ?, ?, ?, ?)')
+    .run(uid(req), title, content, JSON.stringify(atts), isGhost);
   const postId = Number(info.lastInsertRowid);
   if (tags.length) {
     const insTag = db.prepare('INSERT OR IGNORE INTO share_tag (name) VALUES (?)');
@@ -212,8 +232,8 @@ r.delete('/posts/:id', authRequired, (req, res) => {
 r.post('/posts/:id/like', authRequired, (req, res) => {
   const postId = Number(req.params.id);
   const me = uid(req);
-  const exists = db.prepare('SELECT 1 FROM share_post WHERE id = ?').get(postId);
-  if (!exists) return res.status(404).json({ error: '帖子不存在' });
+  const exists = db.prepare('SELECT is_ghost FROM share_post WHERE id = ?').get(postId);
+  if (!exists || !ghostVisible(req, exists)) return res.status(404).json({ error: '帖子不存在' });
   const had = db.prepare('SELECT 1 FROM share_like WHERE post_id = ? AND user_id = ?').get(postId, me);
   if (had) {
     db.prepare('DELETE FROM share_like WHERE post_id = ? AND user_id = ?').run(postId, me);
@@ -230,8 +250,8 @@ r.post('/posts/:id/like', authRequired, (req, res) => {
 r.post('/posts/:id/fav', authRequired, (req, res) => {
   const postId = Number(req.params.id);
   const me = uid(req);
-  const exists = db.prepare('SELECT 1 FROM share_post WHERE id = ?').get(postId);
-  if (!exists) return res.status(404).json({ error: '帖子不存在' });
+  const exists = db.prepare('SELECT is_ghost FROM share_post WHERE id = ?').get(postId);
+  if (!exists || !ghostVisible(req, exists)) return res.status(404).json({ error: '帖子不存在' });
   const had = db.prepare('SELECT 1 FROM share_fav WHERE post_id = ? AND user_id = ?').get(postId, me);
   if (had) {
     db.prepare('DELETE FROM share_fav WHERE post_id = ? AND user_id = ?').run(postId, me);
@@ -249,8 +269,8 @@ r.post('/posts/:id/comments', authRequired, mutedGuard, (req, res) => {
   const content = String(req.body?.content || '').trim();
   if (!content || content.length > 1000) return res.status(400).json({ error: '评论 1-1000 字' });
   const postId = Number(req.params.id);
-  const exists = db.prepare('SELECT 1 FROM share_post WHERE id = ?').get(postId);
-  if (!exists) return res.status(404).json({ error: '帖子不存在' });
+  const exists = db.prepare('SELECT is_ghost FROM share_post WHERE id = ?').get(postId);
+  if (!exists || !ghostVisible(req, exists)) return res.status(404).json({ error: '帖子不存在' });
   const me = uid(req);
   const info = db.prepare('INSERT INTO share_comment (post_id, user_id, content) VALUES (?, ?, ?)')
     .run(postId, me, content);

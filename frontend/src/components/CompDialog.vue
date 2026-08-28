@@ -37,7 +37,7 @@ const PLATFORM_META = {
   github: { name: 'GitHub', icon: '🐙', color: '#181717' },
   tencent: { name: '腾讯视频', icon: '🎬', color: '#ff7218' },
   robomaster: { name: 'RoboMaster', icon: '🤖', color: '#b08d00' },
-  official: { name: '官网', icon: '🏛️', color: '#2563eb' },
+  official: { name: '官网', icon: '🏛️', color: 'var(--primary)' },
 };
 const metaOf = (p) => PLATFORM_META[p] || { name: p, icon: '🔗', color: '#64748b' };
 
@@ -343,9 +343,9 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 .comp-dialog { min-height: 320px; }
 
 .ai-notice {
-  background: #fef3c7; color: #92400e; border: 1px solid #fde68a;
+  background: var(--badge-tint); color: var(--badge-fg); border: 1px solid var(--badge-border);
   border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
-  a { color: #92400e; word-break: break-all; }
+  a { color: var(--badge-fg); word-break: break-all; }
 }
 
 .timeline-text { white-space: normal; }
@@ -353,11 +353,11 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 // 官网横幅
 .official-banner {
   display: flex; align-items: center; gap: 12px; text-decoration: none;
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, .25);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 25%, transparent);
   transition: transform .2s, box-shadow .2s;
-  &:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(37, 99, 235, .35); }
+  &:hover { transform: translateY(-2px); box-shadow: 0 8px 20px color-mix(in srgb, var(--primary) 35%, transparent); }
   .ob-icon { font-size: 24px; }
   .ob-text { flex: 1; min-width: 0;
     b { display: block; font-size: 15px; }
@@ -371,12 +371,12 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 }
 .official-missing {
   display: flex; align-items: center; gap: 8px;
-  background: #f1f5f9; border: 1px dashed #cbd5e1; color: #94a3b8;
+  background: var(--surface-2); border: 1px dashed #cbd5e1; color: #94a3b8;
   border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px;
 }
 
 .phase {
-  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
   .phase-name { font-weight: 600; margin-bottom: 4px; }
   .phase-desc { color: var(--text-2); font-size: 13px; line-height: 1.6; white-space: normal; }
   .phase-check { margin-top: 6px; color: #047857; font-size: 13px; }
@@ -399,9 +399,9 @@ function lab(full, short) { return isNarrow.value ? short : full; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 8px;
   .plat-card {
     display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text);
-    background: #f8fafc; border: 1px solid var(--border); border-top: 3px solid #64748b;
+    background: var(--surface-3); border: 1px solid var(--border); border-top: 3px solid var(--border);
     border-radius: 8px; padding: 8px 10px; position: relative; transition: all .2s;
-    &:hover { background: #f1f5f9; transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+    &:hover { background: var(--surface-2); transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); }
     .p-icon { font-size: 18px; }
     .p-info { flex: 1; min-width: 0; b { display: block; font-size: 13px; }
       .p-kw { font-size: 11.5px; color: var(--text-2); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -421,12 +421,12 @@ function lab(full, short) { return isNarrow.value ? short : full; }
   .kn-links { display: flex; gap: 6px; flex-wrap: wrap;
     .kn-chip {
       font-size: 12px; text-decoration: none; border: 1px solid; border-radius: 999px;
-      padding: 2px 10px; background: #fff; transition: all .2s;
-      &:hover { background: #f1f5f9; }
+      padding: 2px 10px; background: var(--card-bg); transition: all .2s;
+      &:hover { background: var(--surface-2); }
     }
   }
 }
 .plan-head { display: flex; justify-content: space-between; align-items: center; h3 { margin: 0 0 10px; } }
-.phase-week { margin-top: 4px; color: #1d4ed8; font-size: 13px; }
+.phase-week { margin-top: 4px; color: var(--primary-dark); font-size: 13px; }
 .phase-date { margin-top: 4px; color: var(--text-2); font-size: 13px; }
 </style>

@@ -162,6 +162,10 @@ export const api = {
   dmList: (uid) => req(`/friends/dm/${uid}`),
   dmSend: (uid, content) => req(`/friends/dm/${uid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   dmRead: (uid) => req(`/friends/dm/${uid}/read`, { method: 'POST' }),
+  // 幽灵模式（秘密通道「水手冰淇淋」）：激活/退出/怪奇小队名单
+  ghostEnter: () => req('/ghost/enter', { method: 'POST' }),
+  ghostExit: () => req('/ghost/exit', { method: 'POST' }),
+  ghostUsers: () => req('/ghost/users'),
   // 个人资源库（≤128MB multipart；下载走 ?token= 直连）
   resourceList: (params) => req(`/resource${qs(params)}`),
   // ⚠️ req() 的 opts spread 会整体覆盖 headers（连 Authorization 一起丢），必须显式带 token；不设 Content-Type 由浏览器补 boundary

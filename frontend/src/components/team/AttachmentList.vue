@@ -48,7 +48,7 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
   .att-imgs { display: flex; flex-wrap: wrap; gap: 8px;
     .att-thumb {
       position: relative; width: 160px; height: 110px; border-radius: 8px; overflow: hidden;
-      border: 1px solid var(--border); cursor: zoom-in; background: #f1f5f9;
+      border: 1px solid var(--border); cursor: zoom-in; background: var(--surface-2);
       img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.2s ease; }
       &:hover img { transform: scale(1.08); }
       .att-zoom {
@@ -63,10 +63,10 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
   .att-audio { width: 100%; max-width: 320px; }
   .att-file {
     display: inline-block; max-width: 100%; vertical-align: middle;
-    font-size: 13px; color: #2563eb; text-decoration: none; background: #eff6ff;
-    border: 1px solid #bfdbfe; border-radius: 8px; padding: 5px 10px;
+    font-size: 13px; color: var(--primary); text-decoration: none; background: var(--primary-tint);
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, white); border-radius: 8px; padding: 5px 10px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* 文件名不换行：过长省略 + title 全名 */
-    &:hover { background: #dbeafe; }
+    &:hover { background: var(--primary-tint); }
     .att-size { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
   }
 }

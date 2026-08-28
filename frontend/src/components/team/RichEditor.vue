@@ -21,10 +21,10 @@ const onInput = (e) => emit('update:modelValue', e.target.value);
 
 <style lang="scss" scoped>
 .rich-editor {
-  border: 1px solid var(--border, #e2e8f0); border-radius: 8px; overflow: hidden; background: #fff;
+  border: 1px solid var(--border, #e2e8f0); border-radius: 8px; overflow: hidden; background: var(--card-bg);
   display: flex; flex-direction: column;
   .re-hint {
-    padding: 6px 12px; font-size: 12px; color: #64748b; background: #f8fafc;
+    padding: 6px 12px; font-size: 12px; color: var(--text-2); background: var(--surface-3);
     border-bottom: 1px solid var(--border, #e2e8f0);
   }
   .re-body {

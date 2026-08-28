@@ -225,7 +225,7 @@ watch(() => props.open, (v) => {
 .m-panel {
   position: fixed; right: 22px; bottom: 140px; z-index: 1000;
   width: 420px; height: 640px; max-height: calc(100vh - 120px);
-  background: #fff; border-radius: 14px;
+  background: var(--card-bg); border-radius: 14px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .2); border: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
   @media (max-width: 768px) {
@@ -234,7 +234,7 @@ watch(() => props.open, (v) => {
 }
 
 .m-head {
-  padding: 12px 16px; background: #2563eb; color: #fff; position: relative;
+  padding: 12px 16px; background: var(--primary); color: #fff; position: relative;
   b { font-size: 15px; }
   .m-actions { position: absolute; top: 8px; right: 8px; :deep(.el-button) { color: #dbeafe; } }
 }
@@ -252,38 +252,38 @@ watch(() => props.open, (v) => {
   }
 }
 
-.m-scroll { height: 100%; overflow-y: auto; background: #f8fafc; }
+.m-scroll { height: 100%; overflow-y: auto; background: var(--surface-3); }
 .m-section { padding: 10px 16px 4px; font-size: 12px; color: #94a3b8; }
 
 // 消息条目（小红书风格：头像 + 昵称 + 动作 + 摘要；未读浅蓝底 + 左侧蓝条）
 .n-item {
   display: flex; gap: 10px; padding: 10px 14px; cursor: pointer; align-items: flex-start;
-  border-bottom: 1px solid #eef2f7; background: #fff;
-  &:hover { background: #f8fafc; }
-  &.unread { background: #eff6ff; border-left: 3px solid #2563eb; }
+  border-bottom: 1px solid var(--border); background: var(--card-bg);
+  &:hover { background: var(--surface-3); }
+  &.unread { background: var(--primary-tint); border-left: 3px solid var(--primary); }
   .av {
     width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    background: #e2e8f0; color: #475569; font-size: 15px; overflow: hidden;
+    background: var(--surface-2); color: var(--text-2); font-size: 15px; overflow: hidden;
     img { width: 100%; height: 100%; object-fit: cover; }
   }
   .av-link { cursor: pointer; transition: box-shadow .15s;
-    &:hover { box-shadow: 0 0 0 2px #2563eb66; }
+    &:hover { box-shadow: 0 0 0 2px var(--primary)66; }
   }
   .n-body { flex: 1; min-width: 0; }
   .n-line1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-    .n-who { font-size: 13.5px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .n-who { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .n-time { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
   }
-  .n-act { font-size: 12.5px; color: #64748b; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .n-act { font-size: 12.5px; color: var(--text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     .n-unread { font-style: normal; color: #ef4444; font-weight: 600; }
   }
   .n-txt {
-    font-size: 12.5px; color: #374151; margin-top: 4px; background: #f1f5f9;
+    font-size: 12.5px; color: var(--text-2); margin-top: 4px; background: var(--surface-2);
     border-radius: 6px; padding: 5px 8px; line-height: 1.5;
     overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   }
-  .n-post { font-size: 12px; color: #2563eb; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .n-post { font-size: 12px; color: var(--primary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 .chat-enter-active, .chat-leave-active { transition: all .25s ease; }

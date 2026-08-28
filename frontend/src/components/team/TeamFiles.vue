@@ -139,21 +139,21 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
 .file-row {
   display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 10px;
   padding: 9px 12px; margin-bottom: 8px; transition: all .2s;
-  &:hover { background: #f8fafc; }
+  &:hover { background: var(--surface-3); }
   &.isimg { align-items: flex-start; }
   .f-icon { font-size: 20px; }
   .f-preview {
     width: 180px; height: 135px; object-fit: cover; border-radius: 8px; cursor: zoom-in;
-    border: 1px solid var(--border); background: #f1f5f9; flex-shrink: 0;
+    border: 1px solid var(--border); background: var(--surface-2); flex-shrink: 0;
     transition: transform .2s;
     &:hover { transform: scale(1.03); }
   }
   .f-info { flex: 1; min-width: 0; b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 文件名不换行：过长省略 + title 全名 */
     .f-meta { color: var(--text-2); font-size: 12px;
-      .u-link { cursor: pointer; &:hover { color: #2563eb; } }
+      .u-link { cursor: pointer; &:hover { color: var(--primary); } }
     }
   }
-  .f-dl { color: #2563eb; font-size: 13px; text-decoration: none; &:hover { text-decoration: underline; } }
+  .f-dl { color: var(--primary); font-size: 13px; text-decoration: none; &:hover { text-decoration: underline; } }
   .f-dead { color: #f43f5e; font-size: 12.5px; }
 }
 </style>

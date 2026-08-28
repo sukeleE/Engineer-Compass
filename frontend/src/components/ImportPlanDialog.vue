@@ -169,17 +169,17 @@ async function confirm() {
     .ip-tag { margin-left: 6px; }
   }
   .ip-phase {
-    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; background: #f8fafc;
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; background: var(--surface-3);
     .ip-ph-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
       .ip-idx { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
       b { font-size: 14px; }
       .ip-date { font-size: 12.5px; color: #94a3b8; }
-      .ip-wh { margin-left: auto; font-size: 12px; color: #2563eb; background: #2563eb14; border-radius: 999px; padding: 1px 10px; white-space: nowrap; }
+      .ip-wh { margin-left: auto; font-size: 12px; color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); border-radius: 999px; padding: 1px 10px; white-space: nowrap; }
     }
     .ip-tasks { margin: 0; padding-left: 20px;
       li { font-size: 13.5px; line-height: 1.9; color: var(--text); }
     }
-    .ip-check { margin: 8px 0 0; font-size: 12.5px; color: #b45309; }
+    .ip-check { margin: 8px 0 0; font-size: 12.5px; color: var(--badge-fg); }
   }
   .ip-count { font-size: 12.5px; color: #94a3b8; }
 }

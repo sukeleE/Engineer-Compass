@@ -541,7 +541,7 @@ onMounted(load);
 
   .phase-block {
     margin-top: 12px; border: 1px solid var(--border); border-radius: 8px;
-    background: #f8fafc; padding: 10px 12px;
+    background: var(--surface-3); padding: 10px 12px;
 
     .ph-head {
       display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
@@ -559,7 +559,7 @@ onMounted(load);
     .task {
       display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
       cursor: pointer; user-select: none; font-size: 13px;
-      &:hover { background: #eef2f7; }
+      &:hover { background: var(--surface-2); }
       &.done .t-text { color: #94a3b8; text-decoration: line-through; }
 
       .cb {
@@ -569,7 +569,7 @@ onMounted(load);
         &.on { background: #16a34a; border-color: #16a34a; }
       }
       .t-text { flex: 1; min-width: 0; cursor: text; overflow-wrap: break-word; /* 长串不断行会撑破任务行 */
-        &:hover { color: #2563eb; }
+        &:hover { color: var(--primary); }
       }
       .t-edit { flex: 1; }
       .star-badge { color: #f59e0b; font-size: 12px; font-weight: 600; flex-shrink: 0; }
@@ -578,7 +578,7 @@ onMounted(load);
       }
       .t-del {
         color: #cbd5e1; font-size: 12px; padding: 0 4px; border-radius: 4px;
-        &:hover { color: #ef4444; background: #fee2e2; }
+        &:hover { color: #ef4444; background: var(--danger-tint); }
       }
     }
 
@@ -592,7 +592,7 @@ onMounted(load);
       .meta-edit-btn { padding: 0 4px; }
     }
     .meta-add-btn { color: #94a3b8; padding: 0 4px; }
-    .week { color: #1d4ed8; }
+    .week { color: var(--primary-dark); }
   }
 
   .phase-empty {

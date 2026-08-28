@@ -153,7 +153,7 @@ onMounted(() => reload().catch((e) => ElMessage.error(e.message)));
 <style lang="scss" scoped>
 .tdv-tools { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .tdv-empty { color: #94a3b8; font-size: 13px; padding: 12px 0; }
-.dev-new { display: flex; gap: 8px; background: #f8fafc; border: 1px dashed var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.dev-new { display: flex; gap: 8px; background: var(--surface-3); border: 1px dashed var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
 .dev-row {
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px;
   padding: 8px 12px; margin-bottom: 8px;

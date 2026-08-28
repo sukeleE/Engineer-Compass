@@ -166,12 +166,12 @@ const taskText = (t) => (typeof t === 'string' ? t : t?.text || '');
 
 <style lang="scss" scoped>
 .pc-hint {
-  background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+  background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white); color: var(--primary-dark);
   border-radius: 8px; padding: 8px 12px; font-size: 12.5px; margin-bottom: 10px; line-height: 1.6;
 }
 .pc-body {
   height: 380px; overflow-y: auto; padding: 4px 6px 4px 0; display: flex; flex-direction: column; gap: 10px;
-  border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fafbfc;
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface-3);
 
   .msg { display: flex;
     &.user { justify-content: flex-end; }
@@ -179,8 +179,8 @@ const taskText = (t) => (typeof t === 'string' ? t : t?.text || '');
       max-width: 82%; padding: 9px 13px; border-radius: 12px; font-size: 13.5px; line-height: 1.7;
       white-space: pre-wrap; word-break: break-word;
     }
-    &.assistant .bubble { background: #fff; border: 1px solid var(--border); border-top-left-radius: 3px; }
-    &.user .bubble { background: #2563eb; color: #fff; border-top-right-radius: 3px; }
+    &.assistant .bubble { background: var(--card-bg); border: 1px solid var(--border); border-top-left-radius: 3px; }
+    &.user .bubble { background: var(--primary); color: #fff; border-top-right-radius: 3px; }
     .typing { display: flex; gap: 4px; align-items: center;
       span { width: 6px; height: 6px; border-radius: 50%; background: #93c5fd; animation: blink 1s infinite;
         &:nth-child(2) { animation-delay: .2s; } &:nth-child(3) { animation-delay: .4s; } }
@@ -190,18 +190,18 @@ const taskText = (t) => (typeof t === 'string' ? t : t?.text || '');
   @keyframes blink { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 }
 .pc-input { display: flex; gap: 8px; margin-top: 10px; }
-.pc-result { margin-top: 10px; border: 1px solid #86efac; background: #f0fdf4; border-radius: 10px; padding: 12px;
+.pc-result { margin-top: 10px; border: 1px solid var(--success-border); background: var(--success-tint); border-radius: 10px; padding: 12px;
 
-  .res-head { font-weight: 600; font-size: 14px; color: #166534; margin-bottom: 8px; }
+  .res-head { font-weight: 600; font-size: 14px; color: var(--success-fg); margin-bottom: 8px; }
   .dept-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .res-topic { font-size: 13px; color: #14532d; margin-bottom: 6px;
     .res-summary { color: var(--text-2); }
   }
   .phase-preview { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto;
-    .rp-phase { background: #fff; border: 1px solid #d1fae5; border-radius: 8px; padding: 8px 10px;
+    .rp-phase { background: var(--card-bg); border: 1px solid var(--success-border); border-radius: 8px; padding: 8px 10px;
       .rp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px;
         .rp-date { color: var(--text-2); font-size: 12px; }
-        .rp-week { color: #1d4ed8; font-size: 12px; }
+        .rp-week { color: var(--primary-dark); font-size: 12px; }
       }
       ul { margin: 6px 0 0; padding-left: 18px; color: var(--text); font-size: 12.5px; line-height: 1.8;
         .rp-dept { margin-left: 6px; }

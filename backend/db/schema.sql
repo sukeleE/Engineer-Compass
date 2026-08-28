@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS user (
   email         TEXT,                          -- 邮箱（登录/绑定；唯一索引允许多 NULL）
   avatar        TEXT,                          -- 头像（128px JPEG 压缩 dataURL，~10-20KB）
   is_admin      INTEGER DEFAULT 0,             -- 系统管理员（可进管理端）
+  is_ghost      INTEGER DEFAULT 0,             -- 幽灵模式（秘密通道「水手冰淇淋」激活，仅幽灵可见内容）
   create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -292,6 +293,7 @@ CREATE TABLE IF NOT EXISTS share_post (
   title       TEXT NOT NULL,                 -- 标题（1-60 字）
   content     TEXT DEFAULT '',               -- 富文本 HTML
   attachments TEXT DEFAULT '[]',             -- [{name,size,mime,data}] base64
+  is_ghost    INTEGER DEFAULT 0,             -- 1=幽灵帖（仅幽灵用户可见，普通用户完全隔离）
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
