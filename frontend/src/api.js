@@ -31,6 +31,18 @@ function qs(params = {}) {
 
 const AI_TIMEOUT = 90000; // AI 生成/提炼可能较慢
 
+// 报销整理请求头：登录态带 Authorization；已认领（传 code）追加 X-Claim-Token
+// ⚠️ claim token 只进请求头、绝不进 URL/query（后端 access_log 记录 originalUrl）
+const expenseAuth = (code = null) => {
+  const h = {};
+  const t = localStorage.getItem('ec_token');
+  if (t) h.Authorization = `Bearer ${t}`;
+  const ct = code ? localStorage.getItem(`expense_claim_${code}`) : null;
+  if (ct) h['X-Claim-Token'] = ct;
+  return h;
+};
+const expenseJsonHeaders = (code = null) => ({ 'Content-Type': 'application/json', ...expenseAuth(code) });
+
 export const api = {
   // 竞赛
   competitions: (params) => req(`/competition${qs(params)}`),
@@ -238,4 +250,40 @@ export const api = {
   feishuDocCreate: (body) => req('/feishu/doc/create', { method: 'POST', body: JSON.stringify(body) }),
   // 文档读取：blocks 分页 + 转换可能较慢，120s 超时（与 AI 接口一致，默认 30s 会误杀大文档）
   feishuDocContent: (documentId, format = 'markdown') => req(`/feishu/doc/content?document_id=${documentId}&format=${format}`, {}, 120000),
+  // ==================== 报销整理（/expense）====================
+  // 成员免登录：邀请码 code 即钥匙，打开 /expense?code=xxx 只读；认领后写操作带 X-Claim-Token
+  // claim token 存 localStorage（expense_claim_{code}），冲突 409 需负责人重置（expenseMemberReset）
+  expenseClaimTok: (code) => localStorage.getItem(`expense_claim_${code}`),
+  expenseSaveClaim: (code, token) => localStorage.setItem(`expense_claim_${code}`, token),
+  expenseClearClaim: (code) => localStorage.removeItem(`expense_claim_${code}`),
+  expenseOpen: (code) => req(`/expense/o/${encodeURIComponent(code)}`),
+  expenseClaim: (code, name) => req(`/expense/o/${encodeURIComponent(code)}/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  expenseRowCreate: (code, team_id, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ team_id, category, data, owner_name }) }),
+  // 全项目统一支付行（项目级区块，不属任何队伍）：project_pay 标记走服务端专属分支（仅负责人，范围强制=全体成员）
+  expenseRowProjCreate: (code, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ project_pay: true, category, data, owner_name }) }),
+  expenseRowUpdate: (code, rid, body) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}`, { method: 'PUT', headers: expenseJsonHeaders(code), body: JSON.stringify(body) }),
+  expenseRowDelete: (code, rid) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}`, { method: 'DELETE', headers: expenseJsonHeaders(code) }),
+  // 附件上传：FormData 不设 Content-Type（浏览器补 boundary），手动带认领头（同 resourceUpload 注释）
+  expenseAttUpload: (code, rid, slot, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return req(`/expense/o/${encodeURIComponent(code)}/row/${rid}/file?slot=${encodeURIComponent(slot)}`, { method: 'POST', body: fd, headers: expenseAuth(code) }, 300000);
+  },
+  expenseAttDelete: (code, rid, fid) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}/file/${fid}`, { method: 'DELETE', headers: expenseJsonHeaders(code) }),
+  // 下载/导出：GET 开放（code 即钥匙），返回裸 URL 供 <a href>/window.open 直连
+  expenseFileUrl: (code, fid, dl = false) => `/api/expense/o/${encodeURIComponent(code)}/file/${fid}/download${dl ? '?dl=1' : ''}`,
+  expenseZipUrl: (code, teamId) => `/api/expense/o/${encodeURIComponent(code)}/export/zip?team_id=${teamId}`,
+  expenseXlsxUrl: (code) => `/api/expense/o/${encodeURIComponent(code)}/export/xlsx`,
+  // 负责人管理（登录态；队伍/成员用各自 id 路由）
+  expenseCreate: (name, event) => req('/expense', { method: 'POST', body: JSON.stringify({ name, event }) }),
+  expenseList: () => req('/expense'),
+  expensePatch: (id, body) => req(`/expense/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  expenseDelete: (id) => req(`/expense/${id}`, { method: 'DELETE' }),
+  expenseTeamCreate: (id, name) => req(`/expense/${id}/team`, { method: 'POST', body: JSON.stringify({ name }) }),
+  expenseTeamRename: (tid, name) => req(`/expense/team/${tid}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  expenseTeamDelete: (tid) => req(`/expense/team/${tid}`, { method: 'DELETE' }),
+  expenseMemberCreate: (id, tid, name) => req(`/expense/${id}/team/${tid}/member`, { method: 'POST', body: JSON.stringify({ name }) }),
+  expenseMemberPatch: (mid, body) => req(`/expense/member/${mid}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  expenseMemberDelete: (mid) => req(`/expense/member/${mid}`, { method: 'DELETE' }),
+  expenseMemberReset: (mid) => req(`/expense/member/${mid}/reset-claim`, { method: 'POST' }),
 };

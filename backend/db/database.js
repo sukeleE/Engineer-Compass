@@ -68,5 +68,54 @@ db.prepare(
   'INSERT OR IGNORE INTO team_member_role (team_id, user_id, role_id) SELECT team_id, user_id, role_id FROM team_member WHERE role_id IS NOT NULL'
 ).run();
 
+// 报销行表 v2：team_id 放开可空（NULL = 全项目统一支付行，不属任何队伍）。SQLite 不能原地去 NOT NULL
+// → 关 FK 后建 v2 拷数据 → drop 旧表 → rename；索引随 DROP 消失，这里重建（新库 schema.sql 已含新定义，跳过）
+const erCols = db.prepare('PRAGMA table_info(expense_row)').all();
+if (erCols.length && erCols.some((c) => c.name === 'team_id' && c.notnull === 1)) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec(`BEGIN;
+    CREATE TABLE expense_row_v2 (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+      team_id     INTEGER REFERENCES expense_team(id) ON DELETE CASCADE,
+      category    TEXT NOT NULL, owner_name TEXT NOT NULL, data TEXT NOT NULL,
+      create_time TEXT DEFAULT (datetime('now','localtime')),
+      update_time TEXT DEFAULT (datetime('now','localtime'))
+    );
+    INSERT INTO expense_row_v2 (id, project_id, team_id, category, owner_name, data, create_time, update_time)
+      SELECT id, project_id, team_id, category, owner_name, data, create_time, update_time FROM expense_row;
+    DROP TABLE expense_row;
+    ALTER TABLE expense_row_v2 RENAME TO expense_row;
+    COMMIT;`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_expense_row_p ON expense_row(project_id);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_expense_row_team ON expense_row(team_id);');
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
+// 报销附件表 v3：去掉 UNIQUE(row_id, slot) —— 统一支付行（team_id 空=全项目统一支付区/⑥零散票据，或
+// 统一支付范围非空）每槽可存多份附件（同槽多份独立管理、只增不替，配额兜底）；"单人行每槽一份、重传=替换"
+// 改为路由层约束。SQLite 不能原地去约束 → 关 FK 重建（同 v2 手法）；新库 schema.sql 已无该约束（无 autoindex）则跳过
+const attAuto = db.prepare("PRAGMA index_list('expense_attach')").all();
+if (attAuto.some((x) => x.origin === 'u')) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec(`BEGIN;
+    CREATE TABLE expense_attach_v3 (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+      row_id      INTEGER NOT NULL REFERENCES expense_row(id) ON DELETE CASCADE,
+      slot        TEXT NOT NULL,
+      orig_name   TEXT NOT NULL, store_name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+      create_time TEXT DEFAULT (datetime('now','localtime'))
+    );
+    INSERT INTO expense_attach_v3 (id, project_id, row_id, slot, orig_name, store_name, mime, size, create_time)
+      SELECT id, project_id, row_id, slot, orig_name, store_name, mime, size, create_time FROM expense_attach;
+    DROP TABLE expense_attach;
+    ALTER TABLE expense_attach_v3 RENAME TO expense_attach;
+    COMMIT;`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_expense_attach_p ON expense_attach(project_id);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_expense_attach_r ON expense_attach(row_id);');
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
 export default db;
 export { DB_PATH };

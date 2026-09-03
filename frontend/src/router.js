@@ -5,6 +5,7 @@ import ScheduleView from './components/ScheduleView.vue';
 import StudyView from './components/StudyView.vue';
 import TeamView from './components/TeamView.vue';
 import ShareView from './components/ShareView.vue';
+import ExpenseView from './components/ExpenseView.vue';
 import MyView from './components/MyView.vue';
 import ProfileView from './components/ProfileView.vue';
 import AuthView from './components/AuthView.vue';
@@ -22,6 +23,8 @@ export default createRouter({
     { path: '/study', redirect: '/schedule?tab=study' },
     { path: '/team', name: 'team', component: TeamView },
     { path: '/share', name: 'share', component: ShareView },
+    // 报销整理：队长/负责人建项目发邀请码，队员免登录认领填报（可带 ?code=xxx 直达项目）
+    { path: '/expense', name: 'expense', component: ExpenseView },
     // 秘密分享（幽灵模式专属，仅 is_ghost 可进；前端守卫 + 后端 share 过滤双重校验）
     {
       path: '/ghost-share', name: 'ghost-share', component: ShareView, props: { ghost: true },

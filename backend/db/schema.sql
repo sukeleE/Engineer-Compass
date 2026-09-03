@@ -455,3 +455,76 @@ CREATE TABLE IF NOT EXISTS feishu_doc_map (
   create_time TEXT DEFAULT (datetime('now','localtime')),
   UNIQUE(biz_type, biz_id)
 );
+
+-- 表39 报销整理·报销项目（费用报销整理模块）：负责人=本站登录用户
+-- owner 存 TEXT（与 daily_note.user_id 同坑：写入/比较必须 String(req.user.id)）；
+-- code 邀请码 8 位 A-Z2-9：匿名访客凭链接+邀请码只读全量，成员凭 claim token 录入
+CREATE TABLE IF NOT EXISTS expense_project (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner       TEXT NOT NULL,                -- 负责人 user_id（TEXT）
+  name        TEXT NOT NULL,                -- 项目名称（如：电赛报销整理）
+  event       TEXT DEFAULT '',              -- 竞赛/活动名称（选填）
+  code        TEXT NOT NULL,                -- 邀请码（genInviteCode 唯一循环）
+  status      TEXT DEFAULT 'open',          -- open 填报中 / closed 已截止（成员写操作 403）
+  create_time TEXT DEFAULT (datetime('now','localtime')),
+  update_time TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_code ON expense_project(code);
+CREATE INDEX IF NOT EXISTS idx_expense_owner ON expense_project(owner);
+
+-- 表40 报销整理·参赛队伍（一项目多队，队员名单按队管理）
+CREATE TABLE IF NOT EXISTS expense_team (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,                -- 队伍名（≤30 字）
+  ord         INTEGER DEFAULT 0             -- 展示序号
+);
+CREATE INDEX IF NOT EXISTS idx_expense_team_p ON expense_team(project_id);
+
+-- 表41 报销整理·队员名单（负责人预录；claim_token 首认领即得 32 位 hex，负责人可重置=清空，旧 token 立即失效）
+-- 姓名项目内唯一（UNIQUE(project_id, name)），重名队员需在名单中区分
+CREATE TABLE IF NOT EXISTS expense_member (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+  team_id     INTEGER NOT NULL REFERENCES expense_team(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,                -- 姓名（≤20 字）
+  claim_token TEXT,                         -- 认领 token；NULL=未认领
+  claim_at    TEXT,                         -- 认领时间
+  ord         INTEGER DEFAULT 0,
+  UNIQUE(project_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_expense_member_p ON expense_member(project_id);
+CREATE INDEX IF NOT EXISTS idx_expense_member_t ON expense_member(team_id);
+
+-- 表42 报销整理·费用行（data JSON 存分类字段，键见 lib/expenseMeta.js，与前端 utils/expenseMeta.js 同步）
+-- owner_name=归属成员姓名：成员写入强制=本人认领名（创建即注入，payload 无法伪装）；owner 自由填
+-- team_id 可空：NULL = 全项目统一支付行（项目级区块录入，不属任何队伍，仅负责人；见 routes/expense.js project_pay）
+CREATE TABLE IF NOT EXISTS expense_row (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+  team_id     INTEGER REFERENCES expense_team(id) ON DELETE CASCADE,
+  category    TEXT NOT NULL,                -- reg/train/hotel/mail/prop（白名单，创建后不可改）
+  owner_name  TEXT NOT NULL,                -- 归属成员姓名（导出/权限都读它）
+  data        TEXT NOT NULL,                -- 字段 JSON（白名单归一后落库）
+  create_time TEXT DEFAULT (datetime('now','localtime')),
+  update_time TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_expense_row_p ON expense_row(project_id);
+CREATE INDEX IF NOT EXISTS idx_expense_row_team ON expense_row(team_id);
+
+-- 表43 报销整理·附件（文件落盘 backend/uploads/expense/{code}/{rowId}/{slot}/，DB 只存元数据）
+-- 单人常规记录每槽一份（重传=替换，路由层约束）；统一支付行（team_id 空=全项目统一支付区/⑥零散票据，
+-- 或 统一支付范围非空）每槽可多份：同槽多份独立管理、只增不替（故无 UNIQUE(row_id, slot)）
+CREATE TABLE IF NOT EXISTS expense_attach (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
+  row_id      INTEGER NOT NULL REFERENCES expense_row(id) ON DELETE CASCADE,
+  slot        TEXT NOT NULL,                -- 槽位 ASCII 键（invoice/invoiceCheck/…见 lib/expenseMeta.js）
+  orig_name   TEXT NOT NULL,                -- 原始文件名（下载 Content-Disposition 用）
+  store_name  TEXT NOT NULL,                -- 磁盘文件名（仅 basename，防路径穿越）
+  mime        TEXT DEFAULT '',              -- 按扩展名映射后的规范 mime（不信任客户端）
+  size        INTEGER NOT NULL,             -- 字节
+  create_time TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_expense_attach_p ON expense_attach(project_id);
+CREATE INDEX IF NOT EXISTS idx_expense_attach_r ON expense_attach(row_id);

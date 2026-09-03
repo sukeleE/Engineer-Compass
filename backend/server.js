@@ -24,6 +24,7 @@ import admin, { publicAnnounce } from './routes/admin.js';
 import resource, { publicR } from './routes/resource.js';
 import importPlan from './routes/importPlan.js';
 import feishu from './routes/feishu.js';
+import expense from './routes/expense.js';
 import { hasSMTP } from './routes/mailer.js';
 import { accessLog } from './routes/middleware.js';
 
@@ -59,6 +60,7 @@ app.use('/api/resource', publicR); // 公开分享下载先声明（无鉴权，
 app.use('/api/resource', resource);
 app.use('/api/import', importPlan);
 app.use('/api/feishu', feishu);
+app.use('/api/expense', expense);
 // 飞书互传工作台页面（独立静态工具页，不参与业务）
 app.use(express.static('public'));
 

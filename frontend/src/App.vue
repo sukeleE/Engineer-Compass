@@ -38,6 +38,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
         <router-link to="/schedule"><span class="ic">📅</span><span class="txt">日程规划</span></router-link>
         <router-link to="/team"><span class="ic">🏗️</span><span class="txt">项目小组</span></router-link>
         <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
+        <router-link to="/expense"><span class="ic">🧾</span><span class="txt">报销整理</span></router-link>
         <router-link v-if="auth.user?.is_ghost" to="/ghost-share"><span class="ic">👻</span><span class="txt">秘密分享</span></router-link>
       </nav>
       <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页） -->
