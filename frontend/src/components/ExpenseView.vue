@@ -76,6 +76,13 @@ const canEditMemberRow = (row) => canEditRow(row) && myRole.value === 'member'; 
 const canAddIn = (t) => isOwner.value || (myRole.value === 'member' && myTeamId.value === t.id && open());
 // 全项目统一支付 pane 可见：owner 恒可见（代录/纠错）；成员 open 可见（需自理入口）；有行即可见（含读他人行）
 const PROJ_TAB = 'proj';
+// 标签条横向滚动辅助：内容溢出时，鼠标纵向滚轮(或触控板双指)直接横滚标签；未溢出则放行页面滚动
+function tabWheel(e) {
+  const el = e.currentTarget;
+  if (!el || el.scrollWidth <= el.clientWidth + 2) return;
+  e.preventDefault();
+  el.scrollLeft += (e.deltaX || e.deltaY) * (e.shiftKey ? 1.6 : 1);
+}
 const projPaneVisible = computed(() => isOwner.value || projPayRows.value.length > 0
   || (myRole.value === 'member' && open()));
 // 项目级区新增入口（owner or 成员且 open）；成员服务端强制归属=自己，前端同口径
@@ -383,7 +390,10 @@ onMounted(() => loadMine());
     <!-- ============ 落地页（无 code 生效项目） ============ -->
     <div v-if="!code" class="exp-wrap">
       <section class="hero card">
-        <h2>🧾 竞赛报销发票整理</h2>
+        <div class="hero-top">
+          <h2>🧾 竞赛报销发票整理</h2>
+          <el-button size="small" @click="router.push('/expense/guide')">📖 使用教程</el-button>
+        </div>
         <p>负责人建项目 → 按"队伍→成员"预录名单 → 把链接发群，队员打开即可认领填报，各填各的、只读他人；发票 PDF / 查验 / 凭证截图 / 清单等原件直接传网页，项目级统一支付与零散票据单独成区，自动按队打包、一键导出 Excel 汇总金额。</p>
         <div class="steps">
           <span>① 负责人：创建项目 + 添加队伍名单</span>
@@ -515,7 +525,7 @@ onMounted(() => loadMine());
 
         <!-- 主体标签条：可查看主体（全项目统一支付 + 各队）≥2 才出现；第一个=全项目统一支付，其后每队一个；
              点标签切换查看对应主体 —— 单主体时无标签条、直接整卡渲染（见下各 pane） -->
-        <div v-if="viewTabs.length > 1" class="exp-tabbar">
+        <div v-if="viewTabs.length > 1" class="exp-tabbar" @wheel="tabWheel">
           <button v-for="tb in viewTabs" :key="String(tb.key)" type="button"
                   class="tabchip" :class="{ on: activeTab === tb.key }" @click="activeTab = tb.key">
             <template v-if="tb.key === PROJ_TAB">💰 全项目统一支付<i v-if="tb.cnt" class="tab-sub">{{ tb.cnt }} 条</i></template>
@@ -651,6 +661,7 @@ h3 { margin: 0; font-size: 16px; }
 .sub2 { color: var(--text-2); font-size: 12px; margin: 3px 0; }
 .grow { flex: 1; }
 .btn-link { text-decoration: none; }
+.hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 
 .hero p { color: var(--text-2); line-height: 1.7; margin: 8px 0 12px; }
 .steps { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -703,9 +714,13 @@ h3 { margin: 0; font-size: 16px; }
 .cat-title { font-weight: 600; }
 .cat-total { color: var(--text-2); font-size: 12px; margin-left: 8px; }
 .cat-empty { color: var(--text-2); font-size: 12px; padding: 4px 2px; }
-/* 主体横向标签条（全项目统一支付 + 各队；窄屏可横向滚动） */
-.exp-tabbar { display: flex; gap: 6px; align-items: center; overflow-x: auto; overflow-y: hidden; padding: 2px 2px 8px; }
-.exp-tabbar::-webkit-scrollbar { display: none; }
+/* 主体横向标签条（全项目统一支付 + 各队）：溢出可横向滚动 —— 细滚动条可见可拖、鼠标滚轮/触控板横滚 */
+.exp-tabbar { display: flex; gap: 6px; align-items: center; overflow-x: auto; overflow-y: hidden; padding: 2px 2px 6px;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.exp-tabbar::-webkit-scrollbar { height: 6px; }
+.exp-tabbar::-webkit-scrollbar-track { background: transparent; }
+.exp-tabbar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.exp-tabbar::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 .tabchip { flex: none; white-space: nowrap; font: inherit; border: 1px solid var(--border); background: var(--surface-2);
   color: var(--text-2); border-radius: 18px; padding: 5px 12px; font-size: 13px; cursor: pointer; transition: all .15s; }
 .tabchip:hover { border-color: var(--primary); }
