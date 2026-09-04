@@ -264,7 +264,9 @@ export const api = {
   // 放弃认领：释放当前名字 + 清掉该浏览器在本项目的认领 token（回到只读访客）
   expenseRelease: (code) => req(`/expense/o/${encodeURIComponent(code)}/release`, { method: 'POST', headers: expenseJsonHeaders(code) }),
   expenseRowCreate: (code, team_id, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ team_id, category, data, owner_name }) }),
-  // 全项目统一支付行（项目级区块，不属任何队伍）：project_pay 标记走服务端专属分支（仅负责人，范围强制=全体成员）
+  // 全项目统一支付行（项目级区块，不属任何队伍）：project_pay 标记走服务端专属分支（2026-09-04：负责人可记
+  // 任意名单成员/本人；已认领成员只能记自己名下、他人名 403；范围=弹窗所选：整个项目/勾选子集(跨队)/留空均收，
+  // 本队语义'全部成员' 400 拒绝 —— 服务端为唯一仲裁，前端无下拉即不会发出他人名）
   expenseRowProjCreate: (code, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ project_pay: true, category, data, owner_name }) }),
   expenseRowUpdate: (code, rid, body) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}`, { method: 'PUT', headers: expenseJsonHeaders(code), body: JSON.stringify(body) }),
   expenseRowDelete: (code, rid) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}`, { method: 'DELETE', headers: expenseJsonHeaders(code) }),

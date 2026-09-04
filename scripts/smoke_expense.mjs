@@ -1,8 +1,8 @@
 // 报销整理模块冒烟：owner 建项目/队伍/名单 → 匿名只读 → 认领矩阵(404/409/403) →
-// 成员操作(2026-09-04 放开：可给本队名单任意成员代录/互编本队行；跨队/项目级/负责人登录态 403；
-//   prop 购买人须=归属) → 附件 上传替换/内联PDF/强制附件.html/本队互传/越权403 →
-// 改名同步 owner_name+prop购买人 → 重置认领旧token失效 → 统一支付(范围三态/项目级行仅负责人·范围放开子集留空)
-// 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
+// 成员操作(2026-09-04 放开：可给本队名单任意成员代录/互编本队行；跨队/负责人登录态 403；
+//   prop 购买人须=归属；项目级行(全项目统一支付)成员可建/改/删自己名下——他人名下仍 403) →
+// 改名同步 owner_name+prop购买人 → 重置认领旧token失效 → 统一支付(范围三态/项目级范围放开子集留空)
+// 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400、成员可自建自己名下) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
 // 单一身份(12.7)：一账户一项目一名 —— 带 token 再认领=原子换名(switchedFrom) / release 放弃 / 无 token 400 / 失效 404 →
 // zip(含 team_id=0 全项目/06零散票据)/xlsx(=SUM 六列/注入转义/全项目统一支付独立 sheet) → 四级删除级联清盘
 // → 清理测试用户（DatabaseSync + fs.rmSync 自清理，process.exit(fail?1:0)）
@@ -51,6 +51,7 @@ let P = 0, C = '', t1 = 0, t2 = 0, midWang = 0, midLi = 0, midZhao = 0, mSelfId 
 let M1 = '', M2 = '';                 // 王小明 / 李小华2 的认领 token
 let ridTrain = 0, ridHotel = 0, ridMail = 0, ridPropLi = 0;
 let ridProj = 0; // 全项目统一支付（项目级行）
+let ridMemProj = 0; // 成员自建的项目级行（§13 重开后 DELETE 归零，不扰 §14 计数）
 let fidPdf = 0, fidPdf2 = 0, fidHtml = 0;
 
 try {
@@ -248,8 +249,9 @@ try {
   got = await expect(`/expense/o/${C}/row`, 400, { method: 'POST', token: ta, body: { team_id: t1, category: 'reg', owner_name: '王小明', data: { 金额: 1, 统一支付范围: '路人甲' } } });
   ok('统一支付含非名单成员 400', got.ok);
 
-  // ---------- 11.6 全项目统一支付（项目级行 team_id=空：独立区块、仅负责人；2026-09-03 范围放开：
-  // 不再强制'全体成员' —— 可勾选子集(跨队)或留空；本队语义'全部成员' 400 拒绝） ----------
+  // ---------- 11.6 全项目统一支付（项目级行 team_id=空：独立区块；2026-09-03 范围放开：
+  // 不再强制'全体成员' —— 可勾选子集(跨队)或留空；本队语义'全部成员' 400 拒绝。
+  // 2026-09-04 放开：成员也可建/改/删自己名下项目级行(含⑥零散票据)，他人名下仍 403(仅负责人可代录)） ----------
   got = await expect(`/expense/o/${C}/row`, 400, { method: 'POST', token: ta, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 1, 统一支付范围: '全部成员' } } });
   ok('项目级行拒绝本队语义"全部成员" 400', got.ok);
   const pproj1 = await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 1234.56, 备注: '全员报名费一人缴纳', 统一支付范围: '王小明、赵大强' } } });
@@ -259,19 +261,44 @@ try {
   ok('项目级行范围可留空保存 + 出钱人可跨队', pproj2.row.team_id === null && pproj2.row.owner_name === '赵大强' && pproj2.row.data['统一支付范围'] === '');
   got = await expect(`/expense/o/${C}/row`, 400, { method: 'POST', token: ta, body: { project_pay: true, category: 'reg', owner_name: '路人甲', data: { 金额: 1 } } });
   ok('项目级行出钱人非名单成员/非负责人本人 400', got.ok);
-  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 1 } } });
-  ok('成员建项目级行 403(仅负责人可录入)', got.ok);
+  // —— 2026-09-04 放开：成员可建自己名下项目级行（范围可整个项目/子集/留空；他人名 403；'全部成员' 400）
+  const mProj = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 50, 备注: '成员自建项目级行', 统一支付范围: '全体成员' } } });
+  ridMemProj = Number(mProj.row.id);
+  ok('成员建自己名下项目级行 201(范围=全体成员)', mProj.row.team_id === null && mProj.row.owner_name === '王小明' && mProj.row.data['统一支付范围'] === '全体成员' && Number(mProj.row.data.金额) === 50);
+  const mProj2 = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', data: { 金额: 60, 备注: '成员不填归属' } } });
+  ok('成员建项目级行不填归属 → 服务端默认本人', mProj2.row.owner_name === '王小明' && mProj2.row.team_id === null);
+  await api(`/expense/o/${C}/row/${Number(mProj2.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '赵大强', data: { 金额: 1 } } });
+  ok('成员建他人名下项目级行 403(只能记自己本人)', got.ok);
+  got = await expect(`/expense/o/${C}/row`, 400, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 1, 统一支付范围: '全部成员' } } });
+  ok('成员项目级行拒绝本队语义"全部成员" 400', got.ok);
+  const mProjMisc = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'misc', owner_name: '王小明', data: { 票据名称: '成员自己打的出租票', 金额: 30, 备注: '' } } });
+  ok('成员可自建⑥零散票据项目级行 201(自己名下)', mProjMisc.row.team_id === null && mProjMisc.row.owner_name === '王小明' && mProjMisc.row.data.票据名称 === '成员自己打的出租票');
+  await api(`/expense/o/${C}/row/${Number(mProjMisc.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 1 } } });
   ok('访客建项目级行 403', got.ok);
-  got = await expect(`/expense/o/${C}/row/${ridProj}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 1 } } });
-  ok('成员改项目级行 403(哪怕行挂自己名下)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${Number(pproj2.row.id)}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 2 } } });
+  ok('成员改他人名下项目级行(赵大强) 403', got.ok);
+  got = await expect(`/expense/o/${C}/row/${Number(pproj2.row.id)}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删他人名下项目级行(赵大强) 403', got.ok);
   const pUpd = await api(`/expense/o/${C}/row/${ridProj}`, { method: 'PUT', token: ta, body: { data: { 金额: 2000, 备注: '改后', 统一支付范围: '赵大强、王小明' } } });
   ok('负责人改项目级行：范围子集原样保存(不被改成全体成员)', pUpd.row.data['统一支付范围'] === '赵大强、王小明' && Number(pUpd.row.data.金额) === 2000 && pUpd.row.team_id === null);
-  // 项目级附件 + 全项目 ZIP(team_id=0)（owner 上传走 Authorization，member 用的 X-Claim-Token 会 403）
+  // —— 2026-09-04 放开：成员改/删仅限自己名下 —— 王小明改负责人代录在自己名下的 ridProj(范围保持子集原样)
+  const mProjUpd = await api(`/expense/o/${C}/row/${ridProj}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 2001, 备注: '成员改自己名下项目级行', 统一支付范围: '赵大强、王小明' } } });
+  ok('成员改自己名下项目级行 200(归属/类别/项目级不变)', mProjUpd.row.owner_name === '王小明' && Number(mProjUpd.row.data.金额) === 2001 && mProjUpd.row.team_id === null && mProjUpd.row.data['统一支付范围'] === '赵大强、王小明');
+  // 项目级附件 + 全项目 ZIP(team_id=0)（owner 上传走 Authorization；member 2026-09-04 起可传自己名下项目级行）
   const fdP = new FormData();
   fdP.append('file', new Blob([pdfBytes]), '全员报名费发票.pdf');
   const uProjRes = await rawReq(`/expense/o/${C}/row/${ridProj}/file?slot=invoice`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` }, body: fdP });
   ok('项目级行上传附件(负责人) 201', uProjRes.status === 201);
+  // 成员也给自己名下项目级行传/删附件（项目级行每槽可多份，两件并存后删成员那份）
+  const fdPm = new FormData();
+  fdPm.append('file', new Blob([Buffer.from('PNG-成员传的项目级票据\n')]), '成员传的发票.png');
+  const mUpRes = await rawReq(`/expense/o/${C}/row/${ridProj}/file?slot=invoice`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: fdPm });
+  const mFid = Number((await mUpRes.json()).att.id);
+  ok('成员给自己项目级行传附件 201(每槽可多份)', mUpRes.status === 201 && mFid > 0);
+  const dMFid = await rawReq(`/expense/o/${C}/row/${ridProj}/file/${mFid}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删自己项目级行附件 200(清理归零)', dMFid.status === 200);
   const pZipRes = await rawReq(`/expense/o/${C}/export/zip?team_id=0`);
   const pZip = Buffer.from(await pZipRes.arrayBuffer());
   ok('全项目 ZIP(team_id=0) 200 且含项目级条目', pZipRes.status === 200 && pZip.slice(0, 4).toString('latin1') === 'PK\x03\x04'
@@ -464,6 +491,10 @@ try {
   ok('截止后成员建行 403', got.ok);
   got = await expect(`/expense/o/${C}/row/${ridTrain}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain } } });
   ok('截止后成员改行 403', got.ok);
+  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 5, 统一支付范围: '全体成员' } } });
+  ok('截止后成员建项目级行 403', got.ok);
+  got = await expect(`/expense/o/${C}/row/${ridMemProj}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 51 } } });
+  ok('截止后成员改自己名下项目级行 403(闭幕后仍只读)', got.ok);
   const ownerUpd = await api(`/expense/o/${C}/row/${ridTrain}`, { method: 'PUT', token: ta, body: { data: { ...dTrain, 到达地: '上海' } } });
   ok('截止后 owner 仍可改(纠错通道)', ownerUpd.row.data.到达地 === '上海');
   got = await expect(`/expense/o/${C}`, 200);
@@ -473,6 +504,10 @@ try {
   await api(`/expense/${P}`, { method: 'PATCH', token: ta, body: { status: 'open' } });
   const again = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', data: { 金额: 3.14, 是否帮付: '否', 帮付人: '', 备注: '' } } });
   ok('重开后成员可建行', Number(again.row.data.金额) === 3.14);
+  const mProjRe = await api(`/expense/o/${C}/row/${ridMemProj}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 51, 备注: '重开后成员改自己的项目级行', 统一支付范围: '全体成员' } } });
+  ok('重开后成员改自己名下项目级行 200', mProjRe.row.owner_name === '王小明' && Number(mProjRe.row.data.金额) === 51 && mProjRe.row.team_id === null);
+  const dMemProj = await api(`/expense/o/${C}/row/${ridMemProj}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删自己项目级行 200(归零，不扰 §14 级联计数)', !!dMemProj.message);
   const disk1 = readdirSync(`${UP}\\${C}\\${ridTrain}\\invoice`);
   ok('上传目录只剩新文件(替换清旧)', disk1.length === 1);
 

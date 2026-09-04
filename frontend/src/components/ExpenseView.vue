@@ -2,7 +2,8 @@
 // 报销整理主视图（/expense）：三态 ——
 // 1) 无 code：落地页（说明 + 邀请码直达 + 登录用户的"我的报销项目"管理）
 // 2) 有 code：填报页（负责人登录=管理态 / 成员认领=可写本队含代录 / 访客=只读）
-// 2026-09-04：一个账户一项目只占一个名字（认领=占名，可放弃换名）；成员可操作本队所有行（不限行归属）
+// 2026-09-04：一个账户一项目只占一个名字（认领=占名，可放弃换名）；成员可操作本队所有行（不限行归属），
+//   并可新增/编辑/删除自己名下的项目级行（全项目统一支付区 = 横向标签第一个）；主体按「横向标签」切换查看
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -58,13 +59,14 @@ async function load(c) {
 // ?code=xxx 直达（后退/切项目时跟随路由变化）
 watch(() => route.query.code, (c) => {
   code.value = String(c || '');
-  if (code.value) load(code.value);
+  if (code.value) { activeTab.value = PROJ_TAB; load(code.value); } // 切项目标签复位到第一个（全项目统一支付）
 });
-onMounted(() => { if (route.query.code) code.value = String(route.query.code); if (code.value) load(code.value); });
+onMounted(() => { if (route.query.code) code.value = String(route.query.code); if (code.value) { activeTab.value = PROJ_TAB; load(code.value); } });
 
 // ---- 身份 ----
 // 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 录入/编辑/删附件不限行归属（代录队友的行也行），
-// 服务端 rowWriteError 同规则兜底；跨队行与项目级行（team_id 空 = 全项目统一支付）仍仅负责人
+// 并可新增/编辑/删除「自己名下」的项目级行（team_id 空 = 全项目统一支付；出钱人创建时服务端强制=自己）；
+// 跨队行与他人名下的项目级行仍仅负责人 —— 服务端 rowWriteError 同规则兜底
 const open = () => status.value === 'open';
 const myTeamId = computed(() => myMember.value?.team_id || null);
 const canEditRow = (row) =>
@@ -72,6 +74,15 @@ const canEditRow = (row) =>
 const canEditMemberRow = (row) => canEditRow(row) && myRole.value === 'member'; // 成员态同队行（prop 购买人字段冻结用）
 // 能否在某队名下新增记录（负责人 or 本队已认领成员；同队级"＋ 添加记录"按钮口径）
 const canAddIn = (t) => isOwner.value || (myRole.value === 'member' && myTeamId.value === t.id && open());
+// 全项目统一支付 pane 可见：owner 恒可见（代录/纠错）；成员 open 可见（需自理入口）；有行即可见（含读他人行）
+const PROJ_TAB = 'proj';
+const projPaneVisible = computed(() => isOwner.value || projPayRows.value.length > 0
+  || (myRole.value === 'member' && open()));
+// 项目级区新增入口（owner or 成员且 open）；成员服务端强制归属=自己，前端同口径
+const projCanAdd = computed(() => isOwner.value || (myRole.value === 'member' && open()));
+// 项目级行可写：owner 全行；成员仅自己名下且 open（closed 后只读 —— 与服务端 rowWriteError 一致）
+const canEditProjRow = (row) => isOwner.value
+  || (myRole.value === 'member' && open() && String(row.owner_name) === String(myMember.value?.name || ''));
 
 // 认领（一账户一项目只占一个名字）：request 带已有 token 且名字不同 = 后端原子换名（旧名自动释放）
 async function claim(name) {
@@ -80,7 +91,7 @@ async function claim(name) {
     api.expenseSaveClaim(code.value, d.token);
     ElMessage.success(d.switchedFrom
       ? `已放弃「${d.switchedFrom}」、换认领为「${name}」`
-      : `你好，${name}！现在可以填报自己的记录，也能代录/编辑本队其他成员的行`);
+      : `你好，${name}！现在可以填报/代录本队记录，也能在全项目统一支付区录自己名下`);
     await load(code.value);
   } catch (e) {
     ElMessage.error(e.message);
@@ -152,6 +163,24 @@ const membersOf = (teamId) => (pld.value?.members || []).filter((m) => m.team_id
 // 某队员名下垫付合计（口径与 Excel 一致：金额记出钱人/垫付人名下）
 const memberMoney = (teamId, name) => (pld.value?.rows || []).reduce(
   (s, r) => (r.team_id === teamId && String(r.owner_name) === String(name) ? s + rowMoney(r.category, r.data) : s), 0);
+
+// ---- 横向标签（可查看主体：全项目统一支付为第一个 + 每队一个；激活键失效即钳回第一个） ----
+const activeTab = ref(PROJ_TAB); // 'proj'（字符串哨兵）或队伍 id（number）
+const viewTabs = computed(() => {
+  const arr = [];
+  if (projPaneVisible.value) arr.push({ key: PROJ_TAB, name: '全项目统一支付', cnt: projPayRows.value.length });
+  for (const t of pld.value?.teams || []) {
+    arr.push({ key: t.id, name: t.name, roster: membersOf(t.id).length,
+      claimed: membersOf(t.id).filter((x) => x.claimed).length });
+  }
+  return arr;
+});
+watch(viewTabs, (tabs) => {
+  // 队伍被删/项目切换/认领态变化致主体增减：当前键不在列表则回到第一个（单主体直排时也会把 'proj' 钳到唯一队伍）
+  if (tabs.length && !tabs.some((x) => x.key === activeTab.value)) activeTab.value = tabs[0].key;
+});
+const activeTeam = computed(() => (activeTab.value === PROJ_TAB ? null
+  : (pld.value?.teams.find((t) => t.id === activeTab.value) || null)));
 
 // ---- 新增/编辑行 ----
 const dlg = ref({ open: false, mode: 'create', row: null, teamId: null, initialCat: '' });
@@ -454,7 +483,7 @@ onMounted(() => loadMine());
           <el-tag v-if="open()" size="small" type="success">可填报/代录本队记录</el-tag>
           <el-tag size="small" type="danger" effect="plain">队员不能认领你的名字</el-tag>
           <span class="grow"></span>
-          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 队员可互录互编本队记录；跨队与全项目统一支付仅你可操作</span>
+          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 队员可互录互编本队记录、自理全项目区自己名下；跨队行与他人项目级行由你代录/纠错</span>
         </div>
 
         <!-- 身份条（成员/访客） -->
@@ -462,9 +491,9 @@ onMounted(() => loadMine());
           <template v-if="claimState === 'member'">
             <span class="ok-dot"></span>
             <b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）已认领
-            <el-tag v-if="open()" size="small" type="success">可填报自己 · 可代录/编辑本队行</el-tag>
+            <el-tag v-if="open()" size="small" type="success">可录/编本队行 · 全项目区可录自己名下</el-tag>
             <span class="grow"></span>
-            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 本队互编，跨队/全项目仅负责人</span>
+            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 本队互编，全项目区可自理自己名下（他人项目级行/跨队只读）</span>
             <el-button size="small" type="danger" plain @click="releaseClaim" title="放弃后回到只读，可重新认领其他名字">放弃认领（换名）</el-button>
           </template>
           <template v-else-if="claimState === 'guest'">
@@ -484,20 +513,29 @@ onMounted(() => loadMine());
           </template>
         </div>
 
-        <!-- 全项目统一支付（项目级区块）：位于所有队伍卡片之外 —— 项目级行（team_id 空）：一人统一缴纳、
-             不属任何一支队伍的费用（全员报名费、全团住宿等），或一张可能含多人/跨队成员的⑥零散票据文件；
-             行归属=出钱人（可跨队选或负责人本人），涵盖的人录入时可勾选子集或留空。仅负责人可录入/编辑/传附件 -->
-        <section v-if="isOwner || projPayRows.length" class="team card pp-card">
+        <!-- 主体标签条：可查看主体（全项目统一支付 + 各队）≥2 才出现；第一个=全项目统一支付，其后每队一个；
+             点标签切换查看对应主体 —— 单主体时无标签条、直接整卡渲染（见下各 pane） -->
+        <div v-if="viewTabs.length > 1" class="exp-tabbar">
+          <button v-for="tb in viewTabs" :key="String(tb.key)" type="button"
+                  class="tabchip" :class="{ on: activeTab === tb.key }" @click="activeTab = tb.key">
+            <template v-if="tb.key === PROJ_TAB">💰 全项目统一支付<i v-if="tb.cnt" class="tab-sub">{{ tb.cnt }} 条</i></template>
+            <template v-else>🏁 {{ tb.name }}队<i class="tab-sub">名单 {{ tb.roster }} · 已认领 {{ tb.claimed }}</i></template>
+          </button>
+        </div>
+
+        <!-- 全项目统一支付 pane（第一标签）：项目级行（team_id 空）—— owner 可记任一名单成员/本人并全权代录纠错；
+             成员可新增（服务端强制归属=自己）与改/删自己名下，他人名下只读（closed 后成员只读）；⑥零散票据只在这里 -->
+        <section v-if="projPaneVisible && (viewTabs.length === 1 || activeTab === PROJ_TAB)" class="team card pp-card">
           <div class="team-head">
             <div class="pp-head">
               <h3>💰 全项目统一支付</h3>
-              <p class="sub2">项目级记录（不属任何队伍）：一人统一缴纳的费用可勾选涵盖的人（不必全体），或放一张含多人/跨队的 ⑥ 零散票据；统计进总计、导出 Excel 独立成块</p>
+              <p class="sub2">项目级记录（不属任何队伍）：一人统一缴纳的费用可勾选涵盖的人（不必全体），或放一张含多人/跨队的 ⑥ 零散票据；成员可录自己名下（出钱人=本人）；统计进总计、导出 Excel 独立成块</p>
             </div>
             <div class="team-ops">
               <a v-if="isOwner" class="btn-link" :href="api.expenseZipUrl(code, 0)" download>
                 <el-button size="small" type="success" plain>📦 附件 ZIP</el-button>
               </a>
-              <el-button v-if="isOwner" size="small" type="primary" @click="openProjCreate()">＋ 添加记录</el-button>
+              <el-button v-if="projCanAdd" size="small" type="primary" @click="openProjCreate()">＋ 添加记录</el-button>
             </div>
           </div>
 
@@ -506,42 +544,33 @@ onMounted(() => loadMine());
               <div class="cat-head">
                 <span class="cat-title">{{ c.num }} {{ c.zh }}</span>
                 <span v-if="projPayMoney(c.key)" class="cat-total">小计 ¥{{ fmt(projPayMoney(c.key)) }}（{{ projRowsOf(c.key).length }} 条）</span>
-                <el-button v-if="isOwner" size="small" text type="primary" class="cat-add" @click="openProjCreate(c.key)">＋ 添加{{ c.zh }}</el-button>
+                <el-button v-if="projCanAdd" size="small" text type="primary" class="cat-add" @click="openProjCreate(c.key)">＋ 添加{{ c.zh }}</el-button>
               </div>
               <div v-if="!projRowsOf(c.key).length" class="cat-empty">暂无记录</div>
-              <RowCard v-for="row in projRowsOf(c.key)" :key="row.id" :code="code" :row="row" :editable="isOwner"
+              <RowCard v-for="row in projRowsOf(c.key)" :key="row.id" :code="code" :row="row"
+                       :editable="canEditProjRow(row)"
+                       :locked-field="myRole === 'member' && canEditProjRow(row) && row.category === 'prop' ? '购买人' : ''"
                        @edit="openEdit(row)" @changed="onRowChanged" />
             </div>
           </template>
-          <el-empty v-else-if="isOwner" description="还没有项目级记录" :image-size="60">
-            <p class="dim-tip">由负责人代录，点「＋ 添加记录」：选类别 → 出钱人（负责人本人或任一队成员）→ 涵盖的人可勾选（可跨队）、选整个项目全体，或先不选人只存档；⑥ 零散票据（一张含多人/跨队的散票）也在这里添加。明细/附件导出 Excel 独立成块。</p>
-          </el-empty>
-          <p v-else class="sub2">负责人尚未录入项目级记录</p>
-        </section>
-
-        <!-- 无队伍空态：新建项目的第一步引导（此前没有任何入口 → 负责人"建了却填不了"） -->
-        <section v-if="!pld.teams.length" class="card">
-          <el-empty description="还没有队伍 —— 队伍下才能添加成员名单、成员认领后才能填写记录">
-            <template v-if="isOwner">
-              <p class="dim-tip">第一步：点上方「＋ 添加队伍」，再进队伍 ⚙ 管理 →「＋ 添加成员」把队员姓名预录进名单；然后就可以替全队录入，或把邀请链接发群让成员认领自己填。</p>
-              <el-button type="primary" @click="addTeam">＋ 添加第一支队伍</el-button>
-            </template>
-            <template v-else>
-              <p class="dim-tip">负责人还没建立队伍，稍后再来，或联系负责人</p>
-            </template>
+          <el-empty v-else description="还没有项目级记录" :image-size="60">
+            <p v-if="isOwner" class="dim-tip">
+              点「＋ 添加记录」：选类别 → 出钱人（任一队成员或你本人）→ 涵盖的人可勾选（可跨队）、选整个项目全体，或先不选人只存档；⑥ 零散票据（一张含多人/跨队的散票）也在这里添加。<template v-if="!pld.teams.length">还没有队伍 —— 可先点上方「＋ 添加队伍」建队预录名单；成员认领后也能自理自己名下的项目级记录。</template>
+            </p>
+            <p v-else class="dim-tip">你可以添加自己名下（出钱人自动=你本人）的统一支付或 ⑥ 零散票据；他人的项目级行只读，代他人垫付/公用开销请找负责人录。</p>
           </el-empty>
         </section>
 
-        <!-- 队伍卡片 -->
-        <section v-for="t in pld.teams" :key="t.id" class="team card">
+        <!-- 队伍 pane（每队一个标签）：当前激活队伍；单主体时无标签条、直接渲染这唯一一张队伍卡 -->
+        <section v-else-if="activeTeam" class="team card">
           <div class="team-head">
-            <h3>🏁 {{ t.name }}队 <span class="sub2">名单 {{ membersOf(t.id).length }} 人 · 已认领 {{ membersOf(t.id).filter((x) => x.claimed).length }}</span></h3>
+            <h3>🏁 {{ activeTeam.name }}队 <span class="sub2">名单 {{ membersOf(activeTeam.id).length }} 人 · 已认领 {{ membersOf(activeTeam.id).filter((x) => x.claimed).length }}</span></h3>
             <div class="team-ops">
-              <a v-if="isOwner" class="btn-link" :href="api.expenseZipUrl(code, t.id)" download>
+              <a v-if="isOwner" class="btn-link" :href="api.expenseZipUrl(code, activeTeam.id)" download>
                 <el-button size="small" type="success" plain>📦 附件 ZIP</el-button>
               </a>
-              <el-button v-if="canAddIn(t)" size="small" type="primary" @click="openCreate(t.id)">＋ 添加记录</el-button>
-              <el-dropdown v-if="isOwner" trigger="click" @command="(cmd) => { if (cmd === 'rename') renameTeam(t); if (cmd === 'del') delTeam(t); if (cmd === 'member') addMember(t); }">
+              <el-button v-if="canAddIn(activeTeam)" size="small" type="primary" @click="openCreate(activeTeam.id)">＋ 添加记录</el-button>
+              <el-dropdown v-if="isOwner" trigger="click" @command="(cmd) => { if (cmd === 'rename') renameTeam(activeTeam); if (cmd === 'del') delTeam(activeTeam); if (cmd === 'member') addMember(activeTeam); }">
                 <el-button size="small" plain>⚙ 管理</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -556,12 +585,12 @@ onMounted(() => loadMine());
 
           <!-- 成员行：负责人可管理（标记本人/改名/重置认领/移出） -->
           <div class="member-row">
-            <span v-for="m in membersOf(t.id)" :key="m.id" class="member-chip">              <span :class="['m-dot', { ok: m.claimed }]"></span>{{ m.name }}
+            <span v-for="m in membersOf(activeTeam.id)" :key="m.id" class="member-chip">              <span :class="['m-dot', { ok: m.claimed }]"></span>{{ m.name }}
               <el-tag v-if="m.isOwner" size="small" type="danger" effect="plain">负责人</el-tag>
               <el-tag v-if="m.me && !m.isOwner" size="small" type="success">我</el-tag>
               <el-tag v-if="m.claimed && !m.me && !m.isOwner" size="small" type="info">已认领</el-tag>
               <el-tag v-if="m.rowCount" size="small">{{ m.rowCount }} 条</el-tag>
-              <el-tag v-if="memberMoney(t.id, m.name) > 0" size="small" type="warning" effect="plain">¥{{ fmt(memberMoney(t.id, m.name)) }}</el-tag>
+              <el-tag v-if="memberMoney(activeTeam.id, m.name) > 0" size="small" type="warning" effect="plain">¥{{ fmt(memberMoney(activeTeam.id, m.name)) }}</el-tag>
               <el-dropdown v-if="isOwner" trigger="click" @command="(cmd) => memberCmd(cmd, m)">
                 <span class="m-more">⋯</span>
                 <template #dropdown>
@@ -575,7 +604,7 @@ onMounted(() => loadMine());
                 </template>
               </el-dropdown>
             </span>
-            <p v-if="!membersOf(t.id).length" class="sub2" style="width:100%">
+            <p v-if="!membersOf(activeTeam.id).length" class="sub2" style="width:100%">
               <template v-if="isOwner">名单为空 —— 点右上「⚙ 管理 → ＋ 添加成员」把队员姓名预录进来，队员才能认领填写</template>
               <template v-else>负责人还没添加成员名单</template>
             </p>
@@ -585,18 +614,25 @@ onMounted(() => loadMine());
           <div v-for="c in teamCats" :key="c.key" class="cat-block" :class="'cat-' + c.key">
             <div class="cat-head">
               <span class="cat-title">{{ c.num }} {{ c.zh }}</span>
-              <span v-if="teamAgg(t.id)[c.key].total" class="cat-total">小计 ¥{{ fmt(teamAgg(t.id)[c.key].total) }}（{{ teamAgg(t.id)[c.key].count }} 条）</span>
+              <span v-if="teamAgg(activeTeam.id)[c.key].total" class="cat-total">小计 ¥{{ fmt(teamAgg(activeTeam.id)[c.key].total) }}（{{ teamAgg(activeTeam.id)[c.key].count }} 条）</span>
               <!-- 类别头常驻添加：同类别可多条（如一张车票一行，多张票就加多行），不限于空态 -->
-              <el-button v-if="canAddIn(t)" size="small" text type="primary" class="cat-add" @click="openCreate(t.id, c.key)">＋ 添加{{ c.zh }}</el-button>
+              <el-button v-if="canAddIn(activeTeam)" size="small" text type="primary" class="cat-add" @click="openCreate(activeTeam.id, c.key)">＋ 添加{{ c.zh }}</el-button>
             </div>
-            <div v-if="!rowsOf(t.id, c.key).length" class="cat-empty">暂无记录</div>
-            <RowCard v-for="row in rowsOf(t.id, c.key)" :key="row.id" :code="code" :row="row" :editable="canEditRow(row)"
+            <div v-if="!rowsOf(activeTeam.id, c.key).length" class="cat-empty">暂无记录</div>
+            <RowCard v-for="row in rowsOf(activeTeam.id, c.key)" :key="row.id" :code="code" :row="row" :editable="canEditRow(row)"
                      :locked-field="canEditMemberRow(row) && c.key === 'prop' ? '购买人' : ''"
                      @edit="openEdit(row)" @changed="onRowChanged" />
           </div>
         </section>
 
-        <p class="foot-note">队员可互录互编本队记录（跨队/全项目统一支付只读）· 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
+        <!-- 无可查看主体（无队伍 且 无项目级记录；owner/可写成员必达上方 pane —— 此处只可能是访客或闭幕后成员） -->
+        <section v-else class="card">
+          <el-empty description="还没有可查看的内容">
+            <p class="dim-tip">负责人尚未建立队伍，也还没有全项目统一支付记录<template v-if="status === 'closed'">（该项目已截止填报）</template>，稍后再来，或联系负责人。</p>
+          </el-empty>
+        </section>
+
+        <p class="foot-note">队员可互录互编本队记录、全项目区自理自己名下（他人项目级行/跨队只读）· 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
 
         <!-- 录入/编辑弹窗 -->
         <RowFormDialog v-if="dlg.open" v-model="dlg.open" :mode="dlg.mode" :row="dlg.row" :team-id="dlg.teamId"
@@ -667,7 +703,16 @@ h3 { margin: 0; font-size: 16px; }
 .cat-title { font-weight: 600; }
 .cat-total { color: var(--text-2); font-size: 12px; margin-left: 8px; }
 .cat-empty { color: var(--text-2); font-size: 12px; padding: 4px 2px; }
+/* 主体横向标签条（全项目统一支付 + 各队；窄屏可横向滚动） */
+.exp-tabbar { display: flex; gap: 6px; align-items: center; overflow-x: auto; overflow-y: hidden; padding: 2px 2px 8px; }
+.exp-tabbar::-webkit-scrollbar { display: none; }
+.tabchip { flex: none; white-space: nowrap; font: inherit; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-2); border-radius: 18px; padding: 5px 12px; font-size: 13px; cursor: pointer; transition: all .15s; }
+.tabchip:hover { border-color: var(--primary); }
+.tabchip.on { background: var(--primary-tint); border-color: var(--primary); color: var(--primary-dark); font-weight: 600; }
+.tab-sub { font-style: normal; opacity: .72; font-size: 11px; margin-left: 6px; font-weight: 400; }
 .foot-note { text-align: center; color: var(--text-2); font-size: 12px; margin: 4px 0 20px; }
+@media (max-width: 768px) { .tabchip { font-size: 12px; padding: 4px 9px; } }
 .dim-tip { color: var(--text-2); font-size: 13px; margin: 0 0 10px; line-height: 1.7; }
 .dim-tip .el-empty__description + * { margin-top: 8px; }
 </style>

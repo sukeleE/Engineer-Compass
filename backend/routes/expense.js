@@ -65,13 +65,19 @@ function identity(req, p) {
   return { role: 'guest', member: null };
 }
 // member 可写行校验：返回 null=放行，否则 {status,error}
-// 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 代录/编辑/删附件不限行归属（行记在谁名下均可，
-//   创建时归属白名单=本队名单兜底）；跨队行与项目级行（team_id 空=全项目统一支付）仍仅负责人
+// 2026-09-04 放开（第二波）：成员可操作「自己队伍」的全部行（代录/编辑/删附件不限行归属，创建时白名单=本队名单兜底），
+//   并可新增/编辑/删除「自己名下」的项目级行（team_id 空=全项目统一支付，出钱人=行归属人，创建时服务端强制自己）；
+//   他人名下的项目级行与跨队队伍行仍仅负责人。403 优先级：owner 放行 → guest 先认领 → closed 成员只读 →
+//   项目级他人名下 → 跨队
 function rowWriteError(ctx, p, row) {
   if (ctx.role === 'owner') return null;
   if (ctx.role === 'guest') return { status: 403, error: '请先认领你的身份（打开链接后选自己姓名）' };
   if (String(p.status) !== 'open') return { status: 403, error: '该项目已截止填报，如需修改请联系负责人' };
-  if (row && row.team_id == null) return { status: 403, error: '全项目统一支付仅负责人可操作（成员请找负责人代录）' };
+  if (row && row.team_id == null) {
+    // 项目级行：成员只能操作自己名下（closed 已被上一分支先拦 → 成员闭幕后对项目级行仍只读）
+    if (String(row.owner_name) === String(ctx.member.name)) return null;
+    return { status: 403, error: '全项目区的记录只能操作自己名下（他人的行请找该出钱人本人或负责人处理）' };
+  }
   if (row && Number(row.team_id) !== Number(ctx.member.team_id)) return { status: 403, error: '只能操作自己队伍里的记录（跨队记录请找该队成员或负责人）' };
   return null;
 }
@@ -199,7 +205,8 @@ function touch(p) {
 
 // POST /o/:code/row —— 新增费用行
 // 队伍行：member 可给本队名单任意成员代录（归属=所选本队成员，默认自己）；prop 公共行（归属"队伍"）仅负责人
-// project_pay 项目级行：全项目统一支付（不属任何队伍，显示在全部小队之外的区块）——仅负责人可建
+// project_pay 项目级行：全项目统一支付（不属任何队伍，标签页第一块）——owner 可记任一名单成员/本人；
+//   member 只能记自己名下（服务端强制：空默认自己、填他人 403、prop 购买人=自己）；misc ⑥零散票据同为项目级
 o.post('/:code/row', (req, res) => {
   const got = loadRowForWrite(req, res, false);
   if (!got) return;
@@ -211,20 +218,36 @@ o.post('/:code/row', (req, res) => {
   if (!norm.ok) return res.status(400).json({ error: norm.error });
   const data = norm.data;
 
-  // ---- 全项目统一支付/零散票据（team_id = NULL；仅负责人；范围=勾选名单或'全体成员'，不必全含） ----
+  // ---- 全项目统一支付/零散票据（team_id = NULL；范围=勾选名单或'全体成员'，不必全含；misc/其他可留空） ----
   if (body.project_pay) {
-    if (ctx.role !== 'owner') {
-      return res.status(403).json({ error: '全项目统一支付仅负责人可录入（成员请找负责人代录）' });
+    // 出钱人（行归属）：owner 白名单=全项目名单或本人；member 服务端强制=自己（空默认本人；填他人/'队伍' 403）
+    let owner_name;
+    if (ctx.role === 'member') {
+      if (String(p.status) !== 'open') {
+        return res.status(403).json({ error: '该项目已截止填报，如需修改请联系负责人' });
+      }
+      const given = String(body.owner_name || '').trim().slice(0, 20);
+      if (given && given !== String(ctx.member.name)) {
+        return res.status(403).json({ error: `全项目区只能记自己名下 —— 出钱人须是「${ctx.member.name}」本人；代他人垫付或公用开销请找负责人录入` });
+      }
+      owner_name = String(ctx.member.name);
+      if (category === 'prop' && String(data.购买人 || '') !== owner_name) {
+        return res.status(403).json({ error: '耗材道具的购买人需与归属成员一致（你只能录自己名下的项目级行；公用物品请找负责人）' });
+      }
+    } else {
+      if (ctx.role !== 'owner') {
+        return res.status(403).json({ error: '请先认领你的身份（打开链接后选自己姓名）' });
+      }
+      owner_name = String(body.owner_name || '').trim().slice(0, 20);
+      const inRoster = db.prepare('SELECT id FROM expense_member WHERE project_id = ? AND name = ?').get(p.id, owner_name);
+      const isMe = owner_name && (owner_name === String(req.user?.username || '')
+        || (req.user?.nickname && owner_name === String(req.user.nickname)));
+      if (!owner_name || owner_name === '队伍' || (!inRoster && !isMe)) {
+        return res.status(400).json({ error: '出钱人需是项目名单成员或负责人本人（跨队成员也可）' });
+      }
     }
-    const owner_name = String(body.owner_name || '').trim().slice(0, 20);
-    const inRoster = db.prepare('SELECT id FROM expense_member WHERE project_id = ? AND name = ?').get(p.id, owner_name);
-    const isMe = owner_name && (owner_name === String(req.user?.username || '')
-      || (req.user?.nickname && owner_name === String(req.user.nickname)));
-    if (!owner_name || owner_name === '队伍' || (!inRoster && !isMe)) {
-      return res.status(400).json({ error: '出钱人需是项目名单成员或负责人本人（跨队成员也可）' });
-    }
-    // 涵盖范围（2026-09-03 下午放开）：'全体成员' 关键词或勾选名单（⊆ 全项目名单，可跨队）；misc/其他可留空
-    // 项目级行没有"本队"概念，'全部成员' 在此无意义 → 明确拒绝
+    // 涵盖范围（2026-09-03 放开）：'全体成员' 关键词或勾选名单（⊆ 全项目名单，可跨队）；可留空
+    // 项目级行没有"本队"概念，'全部成员' 在此无意义 → 明确拒绝（owner/member 一致）
     const payScope = String(data['统一支付范围'] || '').trim();
     if (payScope === '全部成员') {
       return res.status(400).json({ error: '项目级记录没有"本队"概念 —— 选「整个项目全体成员」，或直接勾选包含的成员' });
@@ -291,7 +314,7 @@ o.post('/:code/row', (req, res) => {
   res.status(201).json({ row: rowOut(row, attsOf(row.id)), warnings: norm.warnings });
 });
 
-// PUT /o/:code/row/:rid —— 改行（类别与归属不可改；member 仅本队行、仅 data；负责人可移队）
+// PUT /o/:code/row/:rid —— 改行（类别与归属不可改；member 仅本队行或自己名下项目级行、仅 data；负责人可移队）
 o.put('/:code/row/:rid', (req, res) => {
   const got = loadRowForWrite(req, res);
   if (!got) return;

@@ -1,7 +1,8 @@
 <script setup>
 // 报销记录录入/编辑弹窗：按 FIELDS 元数据生成表单
-// 成员态（2026-09-04）：新增可给本队名单任意成员代录（出钱人=下拉所选，默认自己；服务端白名单=本队成员兜底）；
-//   编辑可改本队任意行（仅 data，归属/类别冻结）；owner：可挑选名单成员或"队伍"（公用耗材）
+// 成员态（2026-09-04）：队行新增可给本队名单任意成员代录（出钱人=下拉所选，默认自己；服务端白名单=本队成员兜底）；
+//   队行编辑可改本队任意行（仅 data，归属/类别冻结）；owner：可挑选名单成员或"队伍"（公用耗材）
+//   项目级行（全项目统一支付区）：新增/编辑仅限自己名下，出钱人固定本人 —— 无下拉、服务端强制（他人开销找负责人代录）
 // money→el-input-number(precision2) yn→三态 radio  textarea→textarea
 // 2026-09-03 下午：帮付三字段已全部删除（无 yn 联动字段）；prop「是否日常家用=是」仍有使用图软提示
 import { reactive, ref, computed, watch } from 'vue';
@@ -34,8 +35,8 @@ const ownerSel = ref('');
 const roster = computed(() => (props.members || []).filter((m) => m.team_id === teamSel.value));
 
 // —— 全项目统一支付（项目级行）：create 从 teamId=0 入口进入；edit 由行 team_id 为空识别 ——
-// 弹窗只可能被负责人打开（成员名下出现项目行也只是被代录，只读）；范围不必全体：
-// 可勾选子集（跨队可）或留空 —— 详见下方 pay-zone 项目级分支
+// 2026-09-04：成员也可打开本弹窗（新增自己名下/编辑自己名下行）；出钱人=本人，服务端强制无下拉；
+// 范围不必全体：可勾选子集（跨队可）或留空 —— 详见下方 pay-zone 项目级分支
 const isProjPay = computed(() => props.mode === 'create' ? Number(props.teamId) === 0
   : !!(props.row && props.row.team_id == null));
 // 负责人本人显示名（服务端比对 username/nickname 同名即可，跨队名单外的兜底出钱人）
@@ -111,11 +112,10 @@ function initForm() {
     payNames.value = [];
   } else { payMode.value = 'team'; payNames.value = []; }
   if (props.mode === 'edit') ownerSel.value = String(props.row.owner_name);
+  // 成员：默认自己（认领名必在本队名单 → 兜底本队第一个）；队行可再下拉代录队友，
+  //   项目级行（teamSel=0 无队伍）同样固定自己 —— 服务端强制=本人，模板无下拉
+  else if (isMember()) ownerSel.value = String(myMember.value?.name || '') || roster.value[0]?.name || '';
   else if (isProjPay.value) ownerSel.value = selfName() || (props.members || [])[0]?.name || '';
-  // 成员代录：默认自己（认领即名单成员 → 理论上必有自己；兜底选本队第一个）
-  else if (isMember()) ownerSel.value = (props.members || []).find(
-    (m) => m.team_id === teamSel.value && String(m.name) === String(myMember.value?.name))?.name
-    || roster.value[0]?.name || '';
   else ownerSel.value = roster.value[0]?.name || '';
   // prop 成员行「购买人」冻结且须=出钱人 → 默认同步所选（换人时下方 watch 跟随）
   if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = ownerSel.value;
@@ -193,7 +193,8 @@ async function save() {
     let resp;
     if (props.mode === 'create') {
       // 全项目统一支付走项目级分支（后端 team_id=NULL；范围=弹窗所选：整个项目/子集/留空均收），其余=队伍行
-      // 归属=所选 ownerSel：负责人=名单成员/队伍，成员=本队任意成员（默认自己）→ 服务端名单白名单兜底
+      // 归属=所选 ownerSel：负责人=名单成员/队伍或本人；成员队行=本队任意成员（默认自己）；
+      // 成员项目级行=固定自己（模板无下拉）→ 服务端仍强制校验（他人名 403 兜底）
       resp = isProjPay.value
         ? await api.expenseRowProjCreate(props.code, cat.value, data, ownerSel.value)
         : await api.expenseRowCreate(props.code, teamSel.value, cat.value, data, ownerSel.value);
@@ -233,7 +234,7 @@ async function save() {
         ⚠ 该队名单为空：归属选不出成员 —— 先取消，进队伍「⚙ 管理 → ＋ 添加成员」预录姓名；公用物品类（⑤耗材道具）可归属"队伍"代录
       </div>
       <p class="dim line">
-        <!-- 全项目统一支付：区块名 + 全项目成员挑选出钱人（含负责人本人） -->
+        <!-- 全项目统一支付：区块名；出钱人 = 负责人任选（跨队/本人）/ 成员固定自己本人（服务端强制） -->
         <template v-if="isProjPay">
           区块：<b>全项目统一支付</b><el-tag size="small" type="warning" effect="plain" style="margin:0 4px">不属任何队伍 · 涵盖整个项目</el-tag>
           <template v-if="isOwner">
@@ -241,6 +242,12 @@ async function save() {
             <el-select v-model="ownerSel" size="small" style="width: 200px" :disabled="props.mode === 'edit'">
               <el-option v-for="o in pickList" :key="o.v" :label="o.label" :value="o.v" />
             </el-select>
+          </template>
+          <template v-else>
+            <!-- 成员新增/编辑项目级行：出钱人无下拉，恒为认领的本人（服务端强制；能打开=自己名下） -->
+            · 出钱人：<b>{{ ownerSel }}</b><el-tag size="small" style="margin-left:6px">本人</el-tag>
+            <el-tag v-if="props.mode === 'create'" type="info" size="small" style="margin-left:6px">项目级区只能记自己名下（他人的开销找负责人代录）</el-tag>
+            <el-tag v-else type="info" size="small" style="margin-left:6px">归属不可改</el-tag>
           </template>
         </template>
         <template v-else>
