@@ -14,15 +14,17 @@ import RowFormDialog from './expense/RowFormDialog.vue';
 const route = useRoute();
 const router = useRouter();
 
-const code = ref('');
+const code = ref(''); // 当前生效项目的邀请码（仅由 ?code= 路由驱动，见 watch/onMounted）
+const draft = ref(''); // 落地页输入框草稿 —— 独立于 code：敲字/粘贴绝不触发页面切换（否则页面会空）
 const pld = ref(null); // GET /o/:code 完整 payload
 const loading = ref(false);
 const errMsg = ref('');
 
 const isOwner = computed(() => pld.value?.me?.role === 'owner');
-const myMember = computed(() => pld.value?.me?.member || null);
+const myMember = computed(() => pld.value?.me?.member || null); // 成员=认领条目；负责人=自己的 is_owner 条目（可能同时是队员）
 const status = computed(() => pld.value?.project?.status || 'open');
 const myRole = computed(() => pld.value?.me?.role || 'guest');
+const teamNameOf = (id) => pld.value?.teams.find((t) => t.id === id)?.name || '';
 
 // ---- 数据加载 ----
 function onRowChanged() {
@@ -151,13 +153,34 @@ function onSaved(msg) {
 
 // ---- 负责人管理工具 ----
 const inviteUrl = computed(() => `${location.origin}/expense?code=${code.value}`);
+// 复制邀请链接：优先 navigator.clipboard（仅 https/localhost 可用）→ execCommand 降级（http 内网也能复制）
+// → 都不行则弹窗展示链接供长按/选中手动复制（浏览器拦截复制时最后的兜底）
 async function copyInvite() {
+  const txt = inviteUrl.value;
   try {
-    await navigator.clipboard.writeText(inviteUrl.value);
-    ElMessage.success('邀请链接已复制，发到群里即可');
-  } catch {
-    ElMessage.error('复制失败，请长按地址手动复制');
-  }
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(txt);
+      ElMessage.success('邀请链接已复制，发到群里即可');
+      return;
+    }
+  } catch { /* 权限被拒 → 走降级 */ }
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-999px;left:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(ta);
+  let done = false;
+  try {
+    ta.focus();
+    ta.select();
+    done = document.execCommand('copy');
+  } catch { /* 老浏览器 */ }
+  ta.remove();
+  if (done) return ElMessage.success('邀请链接已复制，发到群里即可');
+  ElMessageBox.alert(
+    '一键复制被浏览器拦截（页面非 https 时常见）——请长按/选中下方链接，手动复制后发到群里：<br/><b style="word-break:break-all;color:var(--primary)">' + txt + '</b>',
+    '复制邀请链接', { confirmButtonText: '知道了', dangerouslyUseHTMLString: true }
+  );
 }
 async function toggleClose() {
   const next = status.value === 'open' ? 'closed' : 'open';
@@ -214,9 +237,23 @@ async function addMember(t) {
   try { await api.expenseMemberCreate(pld.value.project.id, t.id, name); await load(code.value); }
   catch (e) { ElMessage.error(e.message); }
 }
-// 成员操作（下拉）：重置认领 / 改名 / 移出
+// 成员操作（下拉）：标记/取消「负责人本人」/ 重置认领 / 改名 / 移出
 async function memberCmd(cmd, m) {
-  if (cmd === 'reset') {
+  if (cmd === 'owner') {
+    // 负责人可能同时是队员：把某名单条目标记/取消为自己的队员身份（登录即占用、队员不可认领）
+    const turnOn = !m.isOwner;
+    const msg = turnOn
+      ? `把「${m.name}」标记为负责人本人的队员身份？标记后该姓名不可被队员认领${m.claimed ? '（若已被抢先认领会立即重置）' : ''}，负责人登录即可填报自己名下的费用。`
+      : `取消「${m.name}」的负责人标记？取消后它回到普通队员条目，队员可重新认领该姓名。`;
+    try {
+      await ElMessageBox.confirm(msg, turnOn ? '标记负责人本人' : '取消负责人标记',
+        { type: 'warning', confirmButtonText: turnOn ? '标记' : '取消标记', cancelButtonText: '取消' });
+    } catch { return; }
+    try {
+      await api.expenseMemberPatch(m.id, { is_owner: turnOn });
+      ElMessage.success(turnOn ? '已标记 —— 登录即占用该队员身份，队员不可认领' : '已取消标记（回到可认领名单）');
+    } catch (e) { ElMessage.error(e.message); }
+  } else if (cmd === 'reset') {
     try {
       await ElMessageBox.confirm(`重置「${m.name}」的认领？对方将重新认领（旧设备上的身份立即失效）。`, '重置认领', { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' });
     } catch { return; }
@@ -239,7 +276,7 @@ async function memberCmd(cmd, m) {
   } else if (cmd === 'delete') {
     try {
       await ElMessageBox.confirm(
-        `移出「${m.name}」将删除其名下 ${m.rowCount} 条记录与附件原件，不可恢复。`,
+        `移出「${m.name}」将删除其名下 ${m.rowCount} 条记录与附件原件，不可恢复。${m.isOwner ? '（该条目是负责人本人的队员身份，移出后负责人名下记录一并删除）' : ''}`,
         '移出成员', { type: 'warning', confirmButtonText: '移出', cancelButtonText: '取消' }
       );
     } catch { return; }
@@ -269,13 +306,24 @@ async function createProject() {
     router.push({ path: '/expense', query: { code: d.code } });
   } catch (e) { ElMessage.error(e.message); }
 }
+// 邀请码识别：直接输入 8 位码 / 粘贴整条邀请链接(?code=XXXX) / 粘贴带前后文字的码 —— 均归一为大写码
+function extractCode(raw) {
+  const s = String(raw || '').replace(/\s+/g, '');
+  const m = s.match(/(?:[?&]|^)code=([A-Za-z0-9]{8})(?:$|[&#])/) // 完整链接/查询串里的 code=
+    || s.match(/\b([A-Za-z0-9]{8})\b/);                          // 光秃秃的 8 位码（夹在文字里也认）
+  return m ? m[1].toUpperCase() : '';
+}
 function enterCode() {
-  const c = String(code.value || '').trim();
-  if (!c) return;
-  router.push({ path: '/expense', query: { code: c } });
+  const c = extractCode(draft.value);
+  if (!c) {
+    ElMessage.warning('没认出来邀请码 —— 可以直接粘贴完整的邀请链接，或只贴 8 位邀请码');
+    return;
+  }
+  goProject(c);
 }
 function goProject(c) {
-  code.value = c;
+  // 不手动改 code.value —— 只推路由，watch(() => route.query.code) 统一负责置 code + load，
+  // 避免中间出现「code 已置但 pld/loading 未就绪」的空帧
   router.push({ path: '/expense', query: { code: c } });
 }
 onMounted(() => loadMine());
@@ -299,7 +347,7 @@ onMounted(() => loadMine());
       <section class="enter card">
         <h3>已有邀请链接？</h3>
         <div class="enter-row">
-          <el-input v-model="code" placeholder="输入 8 位邀请码（或在链接里 ?code= 已自动进入）" maxlength="8" clearable @keyup.enter="enterCode" />
+          <el-input v-model="draft" placeholder="粘贴完整邀请链接，或直接输入 8 位邀请码" maxlength="300" clearable @keyup.enter="enterCode" />
           <el-button type="primary" @click="enterCode">进入填报</el-button>
         </div>
         <el-alert v-if="errMsg" type="error" :title="errMsg" show-icon :closable="false" style="margin-top:10px" />
@@ -379,11 +427,21 @@ onMounted(() => loadMine());
           </div>
         </div>
 
-        <!-- 身份条 -->
+        <!-- 身份条：负责人本人也可能是队员（名单 is_owner 条目，登录即占用） -->
+        <div v-if="claimState === 'owner' && myMember" class="who card">
+          <span class="ok-dot"></span>
+          你的队员身份：<b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）· 已占用
+          <el-tag v-if="open()" size="small" type="success">可填报自己名下费用</el-tag>
+          <el-tag size="small" type="danger" effect="plain">队员不能认领你的名字</el-tag>
+          <span class="grow"></span>
+          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 其余队员各填各的只读他人</span>
+        </div>
+
+        <!-- 身份条（成员/访客） -->
         <div class="who card" v-if="claimState !== 'owner'">
           <template v-if="claimState === 'member'">
             <span class="ok-dot"></span>
-            <b>{{ myMember.name }}</b>（{{ pld.teams.find((t) => t.id === myMember.team_id)?.name || '' }}队）已认领
+            <b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）已认领
             <el-tag v-if="open()" size="small" type="success">可填报自己名下记录</el-tag>
             <span class="grow"></span>
             <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 他人只读</span>
@@ -395,9 +453,9 @@ onMounted(() => loadMine());
                 <template v-for="t in pld.teams" :key="t.id">
                   <span class="claim-group">{{ t.name }}</span>
                   <el-tag v-for="m in membersOf(t.id)" :key="m.id" class="claim-tag"
-                          :type="m.claimed ? 'info' : 'primary'" effect="plain"
-                          :disabled="m.claimed" @click="claim(m.name)">
-                    {{ m.name }}{{ m.claimed ? '（已认领）' : ' — 点我认领' }}
+                          :type="m.isOwner ? 'danger' : (m.claimed ? 'info' : 'primary')" effect="plain"
+                          :disabled="m.isOwner || m.claimed" @click="claim(m.name)">
+                    {{ m.name }}{{ m.isOwner ? '（负责人本人·登录占用，不用认领）' : m.claimed ? '（已认领）' : ' — 点我认领' }}
                   </el-tag>
                 </template>
               </div>
@@ -475,18 +533,20 @@ onMounted(() => loadMine());
             </div>
           </div>
 
-          <!-- 成员行：负责人可管理（改名/重置认领/移出） -->
+          <!-- 成员行：负责人可管理（标记本人/改名/重置认领/移出） -->
           <div class="member-row">
             <span v-for="m in membersOf(t.id)" :key="m.id" class="member-chip">              <span :class="['m-dot', { ok: m.claimed }]"></span>{{ m.name }}
-              <el-tag v-if="m.me" size="small" type="success">我</el-tag>
-              <el-tag v-if="m.claimed && !m.me" size="small" type="info">已认领</el-tag>
+              <el-tag v-if="m.isOwner" size="small" type="danger" effect="plain">负责人</el-tag>
+              <el-tag v-if="m.me && !m.isOwner" size="small" type="success">我</el-tag>
+              <el-tag v-if="m.claimed && !m.me && !m.isOwner" size="small" type="info">已认领</el-tag>
               <el-tag v-if="m.rowCount" size="small">{{ m.rowCount }} 条</el-tag>
               <el-tag v-if="memberMoney(t.id, m.name) > 0" size="small" type="warning" effect="plain">¥{{ fmt(memberMoney(t.id, m.name)) }}</el-tag>
               <el-dropdown v-if="isOwner" trigger="click" @command="(cmd) => memberCmd(cmd, m)">
                 <span class="m-more">⋯</span>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="reset" :disabled="!m.claimed">重置认领</el-dropdown-item>
+                    <el-dropdown-item command="owner">{{ m.isOwner ? '取消「负责人本人」标记' : '标记为负责人本人' }}</el-dropdown-item>
+                    <el-dropdown-item command="reset" :disabled="!m.claimed || m.isOwner">重置认领</el-dropdown-item>
                     <el-dropdown-item command="rename">改名（记录同步）</el-dropdown-item>
                     <el-dropdown-item command="move">转队</el-dropdown-item>
                     <el-dropdown-item command="delete" divided>移出（删其记录）</el-dropdown-item>

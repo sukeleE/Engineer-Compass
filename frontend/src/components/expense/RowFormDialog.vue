@@ -131,12 +131,13 @@ const propPhotoTip = computed(() =>
 
 // 名称选择区（负责人 = 出钱人；统一支付出钱人必须是个人，公用"队伍"仅单人行可选）
 // 全项目统一支付：出钱人 = 项目里任意队伍的成员（跨队）或负责人本人
+// is_owner 条目=负责人本人的队员身份：打「负责人」标（可能是负责人在名单里的自己，出钱人首选）
 const pickList = computed(() => {
   if (isProjPay.value) {
     const tname = (tid) => String((props.teams || []).find((t) => t.id === tid)?.name || '');
     const ls = (props.members || []).map((m) => ({
       v: m.name,
-      label: `${m.name}（${tname(m.team_id)}队${m.claimed ? '' : '·未认领'}）`,
+      label: `${m.name}（${tname(m.team_id)}队${m.isOwner ? '·负责人' : m.claimed ? '' : '·未认领'}）`,
     }));
     const me = selfName();
     if (me && !ls.some((x) => x.v === me)) ls.unshift({ v: me, label: `${me}（负责人本人）` });
@@ -144,7 +145,7 @@ const pickList = computed(() => {
     if (ownerSel.value && !ls.some((x) => x.v === ownerSel.value)) ls.unshift({ v: ownerSel.value, label: `${ownerSel.value}（原出钱人）` });
     return ls;
   }
-  const members = roster.value.map((m) => ({ v: m.name, label: `${m.name}（成员${m.claimed ? '' : '·未认领'}）` }));
+  const members = roster.value.map((m) => ({ v: m.name, label: `${m.name}（${m.isOwner ? '负责人·' : ''}成员${m.claimed ? '' : '·未认领'}）` }));
   if (cat.value === 'prop' && isOwner.value && !unified.value) members.unshift({ v: '队伍', label: '队伍（公用耗材，全体分摊）' });
   return members;
 });
@@ -319,7 +320,7 @@ async function save() {
               <div class="pay-line">
                 <el-checkbox v-for="m in g.ms" :key="m.id" :model-value="hasName(m.name)" :disabled="saving"
                              @change="toggleName(m.name, $event)">
-                  {{ m.name }}<i v-if="!m.claimed" class="pay-uncl">（未认领）</i>
+                  {{ m.name }}<i v-if="m.isOwner" class="pay-uncl">（负责人）</i><i v-else-if="!m.claimed" class="pay-uncl">（未认领）</i>
                 </el-checkbox>
               </div>
             </template>
@@ -349,7 +350,7 @@ async function save() {
             <div class="pay-line">
               <el-checkbox v-for="m in g.ms" :key="m.id" :model-value="hasName(m.name)" :disabled="saving"
                            @change="toggleName(m.name, $event)">
-                {{ m.name }}<i v-if="!m.claimed" class="pay-uncl">（未认领）</i>
+                {{ m.name }}<i v-if="m.isOwner" class="pay-uncl">（负责人）</i><i v-else-if="!m.claimed" class="pay-uncl">（未认领）</i>
               </el-checkbox>
             </div>
           </template>

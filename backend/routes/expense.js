@@ -1,6 +1,8 @@
 // 报销整理模块路由（挂载 /api/expense）：
 // 身份三层 —— owner（登录且是项目负责人）/ member（X-Claim-Token 认领，token 仅走请求头，
 //   永不进 URL/query —— access_log 会记录 originalUrl）/ guest（code 即钥匙，只读）
+// 负责人可能同时是队员（expense_member.is_owner=1 条目）：登录即占用该队员身份 ——
+//   identity owner 分支带 member=自己条目、他人 claim 该名 403（防伪冒）、录入自己费用归属此名
 // 路由顺序：开放组 /o/:code… 全部先声明；owner 组 /:id… 后声明（数值守卫 + authRequired）
 // 文件落盘 backend/uploads/expense/{code}/{rowId}/{slot}/，DB 只存元数据
 import { Router } from 'express';
@@ -43,8 +45,14 @@ function loadProject(code) {
   const p = db.prepare('SELECT * FROM expense_project WHERE code = ?').get(String(code || ''));
   return p || null;
 }
+// 负责人本人的队员身份（is_owner 条目：负责人可能同时是队员——登录即占用，无 claim token）
+function selfMember(p) {
+  return db.prepare('SELECT * FROM expense_member WHERE project_id = ? AND is_owner = 1').get(p.id) || null;
+}
 function identity(req, p) {
-  if (req.user && String(req.user.id) === String(p.owner)) return { role: 'owner', member: null };
+  // 登录的负责人：owner 态同时带上自己的队员身份（member=自己 is_owner 条目或 null），
+  // 便于前端显示「我/本人合计」；owner 分支的写权限不依赖 member，故无副作用
+  if (req.user && String(req.user.id) === String(p.owner)) return { role: 'owner', member: selfMember(p) };
   const tok = String(req.headers['x-claim-token'] || '');
   if (tok && tok.length <= 128) {
     const m = db.prepare(
@@ -97,9 +105,12 @@ function projectPayload(code, ctx = null) {
     me: { role: ctx?.role || 'guest', member: ctx?.member || null },
     teams,
     members: members.map((m) => ({
-      id: m.id, team_id: m.team_id, name: m.name, claimed: !!m.claim_token,
+      id: m.id, team_id: m.team_id, name: m.name,
+      isOwner: !!m.is_owner,           // 负责人本人的队员身份（登录占用、不可认领）
+      claimed: !!(m.claim_token || m.is_owner), // is_owner 条目恒为已认领（占用权=负责人登录态）
       rowCount: perMember.get(m.name) || 0,
-      me: !!(ctx && ctx.role === 'member' && m.id === ctx.member.id),
+      me: !!(ctx && ((ctx.role === 'member' && m.id === ctx.member.id)
+        || (ctx.role === 'owner' && m.is_owner))), // owner 态下自己的队员条目也打「我」
     })),
     rows: rows.map((x) => rowOut(x, attsByRow.get(x.id) || [])),
   };
@@ -121,6 +132,10 @@ o.post('/:code/claim', (req, res) => {
   if (!name) return res.status(400).json({ error: '请填写姓名' });
   const m = db.prepare('SELECT * FROM expense_member WHERE project_id = ? AND name = ?').get(p.id, name);
   if (!m) return res.status(404).json({ error: '名单里没有这个名字，请检查姓名或联系负责人添加' });
+  // 负责人本人的队员身份：登录即占用（identity owner 分支），无需也绝不能由队员认领/代领 —— 防伪冒其名下记录
+  if (m.is_owner) {
+    return res.status(403).json({ error: `「${name}」是负责人本人的队员身份（负责人登录即可填报自己费用），队员不能认领或代领；你的开销请认领自己的姓名` });
+  }
   if (m.claim_token) return res.status(409).json({ error: '这个名字已被认领（重复姓名请找负责人区分后重试）' });
   const token = randomBytes(16).toString('hex');
   db.prepare("UPDATE expense_member SET claim_token = ?, claim_at = datetime('now','localtime') WHERE id = ?").run(token, m.id);
@@ -510,11 +525,11 @@ r.get('/', (req, res) => {
   res.json(list);
 });
 
-// GET /api/expense/:id —— 完整 payload（与 /o/:code 同构，负责人视角 member=me）
+// GET /api/expense/:id —— 完整 payload（与 /o/:code 同构，负责人视角 member=自己 is_owner 条目或 null）
 r.get('/:id', (req, res) => {
   const p = ownProject(req, res);
   if (!p) return;
-  res.json(projectPayload(p.code, { role: 'owner', member: null, id: p.id }));
+  res.json(projectPayload(p.code, { role: 'owner', member: selfMember(p), id: p.id }));
 });
 
 // PATCH /api/expense/:id —— 改名/竞赛名/截止与重开
@@ -608,6 +623,7 @@ r.delete('/team/:tid', (req, res) => {
 });
 
 // POST /api/expense/:id/team/:tid/member — 预录名单成员（项目内重名 409）
+// 负责人可能同时是队员：姓名=本人昵称/用户名时自动标 is_owner（登录占用，队员不可认领该名，防止伪冒）
 r.post('/:id/team/:tid/member', (req, res) => {
   const p = ownProject(req, res);
   if (!p) return;
@@ -623,16 +639,35 @@ r.post('/:id/team/:tid/member', (req, res) => {
   const mx = db.prepare('SELECT COALESCE(MAX(ord),0) AS n FROM expense_member WHERE project_id = ?').get(p.id).n;
   const ins = db.prepare('INSERT INTO expense_member (project_id, team_id, name, ord) VALUES (?,?,?,?)')
     .run(p.id, tid, name, mx + 1);
-  ownerAudit(req, 'expense-member-create', name, { pid: p.id, tid, mid: Number(ins.lastInsertRowid) });
-  res.status(201).json({ id: Number(ins.lastInsertRowid), team_id: tid, name });
+  // 本人快捷标记：姓名与负责人登录账号昵称/用户名一致 → 互斥置 is_owner（项目内仅一个负责人条目）
+  const isMe = name === String(req.user?.nickname || '').trim() || name === String(req.user?.username || '').trim();
+  if (isMe) {
+    db.prepare('UPDATE expense_member SET is_owner = 0 WHERE project_id = ? AND id != ?').run(p.id, Number(ins.lastInsertRowid));
+    db.prepare('UPDATE expense_member SET is_owner = 1 WHERE id = ?').run(Number(ins.lastInsertRowid));
+  }
+  ownerAudit(req, 'expense-member-create', name, { pid: p.id, tid, mid: Number(ins.lastInsertRowid), isOwner: isMe ? 1 : 0 });
+  res.status(201).json({ id: Number(ins.lastInsertRowid), team_id: tid, name, is_owner: isMe ? 1 : 0 });
 });
 
-// PATCH /api/expense/member/:mid — 改名（同步其记录 owner_name 与 prop 购买人）/ 转队
+// PATCH /api/expense/member/:mid — 改名（同步其记录 owner_name 与 prop 购买人）/ 转队 / 标记负责人本人
 r.patch('/member/:mid', (req, res) => {
   const m = ownMember(req, res, intParam(req.params.mid));
   if (!m) return;
   const body = req.body || {};
   const out = { name: m.name, team_id: m.team_id };
+  if (body.is_owner !== undefined) {
+    const v = body.is_owner === true ? 1 : body.is_owner === false ? 0 : null; // 严格布尔，防字符串脏值
+    if (v === null) return res.status(400).json({ error: 'is_owner 需为布尔值' });
+    if (v) {
+      // 置为负责人本人的队员身份：项目内互斥（仅一个负责人条目）+ 收回被抢先认领的 token（该名登录即占用）
+      db.prepare('UPDATE expense_member SET is_owner = 0 WHERE project_id = ? AND id != ?').run(m.project_id, m.id);
+      db.prepare('UPDATE expense_member SET claim_token = NULL, claim_at = NULL WHERE id = ?').run(m.id);
+      out.claim_token = null;
+    }
+    db.prepare('UPDATE expense_member SET is_owner = ? WHERE id = ?').run(v, m.id);
+    out.is_owner = v;
+    ownerAudit(req, v ? 'expense-member-mark-owner' : 'expense-member-unmark-owner', m.name, { pid: m.project_id, mid: m.id });
+  }
   if (body.name !== undefined) {
     const name = String(body.name).trim().slice(0, 20);
     if (!name) return res.status(400).json({ error: '姓名不能为空' });
@@ -680,9 +715,13 @@ r.delete('/member/:mid', (req, res) => {
 });
 
 // POST /api/expense/member/:mid/reset-claim — 重置认领（旧 token 立即失效，本人可重新认领）
+// is_owner 条目（负责人本人）不依赖认领 token：登录即占用，无可重置 —— 改由「标记/取消标记」控制
 r.post('/member/:mid/reset-claim', (req, res) => {
   const m = ownMember(req, res, intParam(req.params.mid));
   if (!m) return;
+  if (m.is_owner) {
+    return res.status(400).json({ error: '「' + m.name + '」是负责人本人的队员身份（登录即占用，无认领 token 可重置）' });
+  }
   db.prepare('UPDATE expense_member SET claim_token = NULL, claim_at = NULL WHERE id = ?').run(m.id);
   ownerAudit(req, 'expense-member-reset', m.name, { pid: m.project_id, mid: m.id });
   res.json({ message: '认领已重置，该成员可重新认领' });

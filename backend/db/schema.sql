@@ -483,6 +483,9 @@ CREATE INDEX IF NOT EXISTS idx_expense_team_p ON expense_team(project_id);
 
 -- 表41 报销整理·队员名单（负责人预录；claim_token 首认领即得 32 位 hex，负责人可重置=清空，旧 token 立即失效）
 -- 姓名项目内唯一（UNIQUE(project_id, name)），重名队员需在名单中区分
+-- is_owner=1：该条目是负责人本人的队员身份（负责人可能同时是队员，如自己垫付个人开销也要报）。
+--   登录即占用：claimed 恒真、不可被队员认领/代领（防伪冒），录入自己费用即归属此名；
+--   建成员时姓名=本人昵称/用户名自动标记，管理界面可手动标记/取消（标记时收回被抢先认领的 token）
 CREATE TABLE IF NOT EXISTS expense_member (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id  INTEGER NOT NULL REFERENCES expense_project(id) ON DELETE CASCADE,
@@ -490,6 +493,7 @@ CREATE TABLE IF NOT EXISTS expense_member (
   name        TEXT NOT NULL,                -- 姓名（≤20 字）
   claim_token TEXT,                         -- 认领 token；NULL=未认领
   claim_at    TEXT,                         -- 认领时间
+  is_owner    INTEGER DEFAULT 0,            -- 1=负责人本人的队员身份（登录占用，不可被队员认领）
   ord         INTEGER DEFAULT 0,
   UNIQUE(project_id, name)
 );

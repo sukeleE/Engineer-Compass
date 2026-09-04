@@ -31,6 +31,7 @@ migCol('user', 'avatar', 'ALTER TABLE user ADD COLUMN avatar TEXT'); // 头像 d
 migCol('user', 'status', 'ALTER TABLE user ADD COLUMN status INTEGER DEFAULT 0'); // 0=正常 1=封禁 2=禁言（后台管理）
 migCol('user', 'is_ghost', 'ALTER TABLE user ADD COLUMN is_ghost INTEGER DEFAULT 0'); // 幽灵模式（秘密通道，仅幽灵可见内容）
 migCol('share_post', 'is_ghost', 'ALTER TABLE share_post ADD COLUMN is_ghost INTEGER DEFAULT 0'); // 1=幽灵帖（仅幽灵用户可见）
+migCol('expense_member', 'is_owner', 'ALTER TABLE expense_member ADD COLUMN is_owner INTEGER DEFAULT 0'); // 1=负责人本人的队员身份（登录占用、不可被队员认领）
 migCol('user_resource', 'share_token', 'ALTER TABLE user_resource ADD COLUMN share_token TEXT'); // 公开分享 token（引用功能：可撤销下载链接）
 migCol('user_resource', 'feishu_token', 'ALTER TABLE user_resource ADD COLUMN feishu_token TEXT'); // 飞书分享：云盘 file_token（撤销分享时删除飞书文件）
 migCol('team_file', 'resource_ref', 'ALTER TABLE team_file ADD COLUMN resource_ref INTEGER'); // 引用型文件：指向 user_resource.id（data 为空）

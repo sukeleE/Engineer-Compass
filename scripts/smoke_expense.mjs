@@ -45,7 +45,7 @@ let pass = 0, fail = 0;
 const ok = (name, cond) => { cond ? (pass++, console.log(`✅ ${name}`)) : (fail++, console.log(`❌ ${name}`)); };
 
 // ===== 实体 id 变量（跨阶段引用） =====
-let P = 0, C = '', t1 = 0, t2 = 0, midWang = 0, midLi = 0, midZhao = 0;
+let P = 0, C = '', t1 = 0, t2 = 0, midWang = 0, midLi = 0, midZhao = 0, mSelfId = 0;
 let M1 = '', M2 = '';                 // 王小明 / 李小华2 的认领 token
 let ridTrain = 0, ridHotel = 0, ridMail = 0, ridPropLi = 0;
 let ridProj = 0; // 全项目统一支付（项目级行）
@@ -372,6 +372,44 @@ try {
   const gM2b = await rawReq(`/expense/o/${C}/file/${Number(m2a.att.id)}/download`);
   ok('同槽剩余那份仍可下载', gM2b.status === 200);
   ok('删除后槽位目录剩 1 份', readdirSync(`${UP}\\${C}\\${Number(misc1.row.id)}\\ticket`).length === 1);
+
+  // ---------- 12.6 负责人同时是队员（is_owner 条目）：登录占用、他人不可认领、防伪冒 ----------
+  // owner A 昵称='报销负责人'：自加名单同名 → 自动标 is_owner（项目内互斥）
+  const mSelf = await api(`/expense/${P}/team/${t1}/member`, { method: 'POST', token: ta, body: { name: '报销负责人' } });
+  mSelfId = Number(mSelf.id);
+  ok('负责人自加名单(姓名=本人昵称) → 自动标 is_owner', mSelf.is_owner === 1);
+  let ownP = await api(`/expense/${P}`, { token: ta });
+  let selfM = ownP.members.find((m) => m.name === '报销负责人');
+  ok('payload: is_owner 条目 claimed+me+isOwner；owner me.member=本人', !!selfM && selfM.isOwner === true && selfM.claimed === true && selfM.me === true
+    && ownP.me.role === 'owner' && ownP.me.member?.name === '报销负责人');
+  got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', body: { name: '报销负责人' } });
+  ok('匿名认领负责人名 403(登录占用)', got.ok);
+  got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '报销负责人' } });
+  ok('已认领队员代领负责人名 403(防伪冒)', got.ok);
+  // 防伪冒实证：成员(王小明)改/删负责人名下个人行 → 403
+  const rSelf = await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body: { team_id: t1, category: 'train', owner_name: '报销负责人', data: { ...dTrain, 出发地: '广州' } } });
+  ok('负责人录入自己的个人行(归属本人 is_owner 名)', rSelf.row.owner_name === '报销负责人' && Number(rSelf.row.data.金额) === 553.5);
+  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain } } });
+  ok('队员改负责人名下个人行 403(防伪冒)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('队员删负责人名下个人行 403(防伪冒)', got.ok);
+  got = await expect(`/expense/member/${mSelfId}/reset-claim`, 400, { method: 'POST', token: ta });
+  ok('负责人条目 reset-claim 400(登录占用无 token 可重置)', got.ok);
+  // 取消标记 → 回到可认领池（他人可认领 201）；重新标记 → 收回 token（旧 token 立即失效、认领再 403）
+  await api(`/expense/member/${mSelfId}`, { method: 'PATCH', token: ta, body: { is_owner: false } });
+  ownP = await api(`/expense/${P}`, { token: ta });
+  ok('取消标记后条目回到未认领(普通队员)', ownP.members.find((m) => m.name === '报销负责人').isOwner === false
+    && ownP.members.find((m) => m.name === '报销负责人').claimed === false);
+  const claimSelf = await api(`/expense/o/${C}/claim`, { method: 'POST', body: { name: '报销负责人' } });
+  ok('取消标记后他人可认领该名 201', /^[0-9a-f]{32}$/.test(claimSelf.token));
+  await api(`/expense/member/${mSelfId}`, { method: 'PATCH', token: ta, body: { is_owner: true } });
+  ownP = await api(`/expense/${P}`, { token: ta });
+  selfM = ownP.members.find((m) => m.name === '报销负责人');
+  ok('重新标记 → 占用并收回已被认领的 token', selfM.isOwner === true && selfM.claimed === true);
+  got = await expect(`/expense/o/${C}`, 200, { headers: { 'X-Claim-Token': claimSelf.token } });
+  ok('被收回 token 立即失效(回落 guest)', got.ok && got.data.me.role === 'guest');
+  got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', body: { name: '报销负责人' } });
+  ok('重新标记后认领再次 403', got.ok);
 
   // ---------- 13. 截止：成员禁写、owner 可改、读/下载开放 ----------
   await api(`/expense/${P}`, { method: 'PATCH', token: ta, body: { status: 'closed' } });
