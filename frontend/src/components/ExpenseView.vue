@@ -22,6 +22,28 @@ const pld = ref(null); // GET /o/:code 完整 payload
 const loading = ref(false);
 const errMsg = ref('');
 
+// —— 最近进入的项目（本机记忆 localStorage，匿名可用）：进入成功即记，落地页「🕘 最近进入的项目」一键重进，
+//   免去每次翻聊天记录找邀请码；最多留 8 条，可单条移除/清空 ——
+const RECENT_KEY = 'expense_recent';
+const recent = ref([]);
+function rememberProject(c, name) {
+  try {
+    const list = (JSON.parse(localStorage.getItem(RECENT_KEY)) || []).filter((x) => x && x.code && String(x.code) !== String(c));
+    list.unshift({ code: String(c), name: String(name || c).slice(0, 40), ts: Date.now() });
+    recent.value = list.slice(0, 8);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value));
+  } catch { /* localStorage 不可用（隐私模式）则静默不记 */ }
+}
+function loadRecent() {
+  try { recent.value = (JSON.parse(localStorage.getItem(RECENT_KEY)) || []).filter((x) => x && x.code).slice(0, 8); }
+  catch { recent.value = []; }
+}
+function dropRecent(c) {
+  recent.value = recent.value.filter((x) => String(x.code) !== String(c));
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value)); } catch { /* 同上 */ }
+}
+function clearRecent() { recent.value = []; try { localStorage.removeItem(RECENT_KEY); } catch { /* 同上 */ } }
+
 const isOwner = computed(() => pld.value?.me?.role === 'owner');
 const myMember = computed(() => pld.value?.me?.member || null); // 成员=认领条目；负责人=自己的 is_owner 条目（可能同时是队员）
 const status = computed(() => pld.value?.project?.status || 'open');
@@ -43,6 +65,7 @@ async function load(c) {
   try {
     const d = await api.expenseOpen(c);
     pld.value = d;
+    rememberProject(c, d.project?.name); // 打开成功 → 记入本机「最近进入的项目」（再次进入免邀请码）
     // 本地存了认领 token 但服务端已不认（被重置/项目换了）→ 清掉引导重认领
     if (myRole.value === 'guest' && api.expenseClaimTok(c)) {
       api.expenseClearClaim(c);
@@ -60,8 +83,13 @@ async function load(c) {
 watch(() => route.query.code, (c) => {
   code.value = String(c || '');
   if (code.value) { activeTab.value = PROJ_TAB; load(code.value); } // 切项目标签复位到第一个（全项目统一支付）
+  else errMsg.value = ''; // 离开项目回落地页时清掉上一次的报错
 });
-onMounted(() => { if (route.query.code) code.value = String(route.query.code); if (code.value) { activeTab.value = PROJ_TAB; load(code.value); } });
+onMounted(() => {
+  loadRecent(); // 落地页「最近进入的项目」本机记忆
+  if (route.query.code) code.value = String(route.query.code);
+  if (code.value) { activeTab.value = PROJ_TAB; load(code.value); }
+});
 
 // ---- 身份 ----
 // 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 录入/编辑/删附件不限行归属（代录队友的行也行），
@@ -412,6 +440,22 @@ onMounted(() => loadMine());
         <el-alert v-if="errMsg" type="error" :title="errMsg" show-icon :closable="false" style="margin-top:10px" />
       </section>
 
+      <!-- 最近进入的项目（本机记忆 localStorage，匿名可用）：本浏览器打开过的项目免邀请码一键重进 -->
+      <section v-if="recent.length" class="card mine">
+        <div class="mine-head">
+          <h3>🕘 最近进入的项目</h3>
+          <el-button size="small" text type="danger" @click="clearRecent">清空记录</el-button>
+        </div>
+        <div v-for="r in recent" :key="r.code" class="mine-item">
+          <div class="mi-main">
+            <span class="mi-name">{{ r.name }}</span>
+            <el-tag type="info" size="small" effect="plain">邀请码 {{ r.code }}</el-tag>
+            <el-button size="small" text @click="dropRecent(r.code)">🗑 移除</el-button>
+          </div>
+          <el-button size="small" type="primary" plain @click="goProject(r.code)">进入</el-button>
+        </div>
+      </section>
+
       <template v-if="auth.token">
         <section class="card mine">
           <div class="mine-head">
@@ -457,9 +501,17 @@ onMounted(() => loadMine());
       <div v-if="loading" class="center-load"><el-icon class="is-loading" :size="26"><svg viewBox="0 0 1024 1024"><path fill="currentColor" d="M512 64a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V96a32 32 0 0 1 32-32m0 640a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V736a32 32 0 0 1 32-32m448-128a32 32 0 0 1-32 32H736a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32m-640 0a32 32 0 0 1-32 32H96a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32M195.2 195.2a32 32 0 0 1 45.248 0L376.32 331.008a32 32 0 0 1-45.248 45.248L195.2 240.448a32 32 0 0 1 0-45.248m452.544 452.544a32 32 0 0 1 45.248 0L828.8 783.552a32 32 0 0 1-45.248 45.248L647.744 692.992a32 32 0 0 1 0-45.248M828.8 195.2a32 32 0 0 1 0 45.248L692.992 376.32a32 32 0 0 1-45.248-45.248L783.552 195.2a32 32 0 0 1 45.248 0m-452.544 452.544a32 32 0 0 1 0 45.248L240.448 828.8a32 32 0 0 1-45.248-45.248l135.808-135.808a32 32 0 0 1 45.248 0"/></svg></el-icon></div>
       <el-empty v-else-if="errMsg" :description="errMsg">
         <el-button type="primary" @click="router.push('/expense')">返回报销整理首页</el-button>
+        <p v-if="recent.some((x) => String(x.code) === String(code))" style="margin-top: 10px">
+          <el-button size="small" text type="danger" @click="dropRecent(code); router.push('/expense')">这个项目已失效 —— 从最近进入中移除</el-button>
+        </p>
       </el-empty>
 
       <template v-else-if="pld">
+        <!-- 返回导航：退出项目回落地页；本项目已记入本机「🕘 最近进入的项目」，此后免邀请码再进 -->
+        <div class="back-row">
+          <el-button size="small" plain @click="router.push('/expense')">← 返回报销整理</el-button>
+          <span class="sub2">离开后想再进：报销整理页 → 🕘 最近进入的项目（本浏览器免邀请码）</span>
+        </div>
         <!-- 项目头部 -->
         <div class="head card">
           <div class="head-main">
@@ -669,6 +721,8 @@ h3 { margin: 0; font-size: 16px; }
 
 .enter-row { display: flex; gap: 8px; }
 .enter-row .el-input { flex: 1; }
+.back-row { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; }
+.mi-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 .mine-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .mine-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px dashed var(--border); flex-wrap: wrap; }
