@@ -252,12 +252,17 @@ export const api = {
   feishuDocContent: (documentId, format = 'markdown') => req(`/feishu/doc/content?document_id=${documentId}&format=${format}`, {}, 120000),
   // ==================== 报销整理（/expense）====================
   // 成员免登录：邀请码 code 即钥匙，打开 /expense?code=xxx 只读；认领后写操作带 X-Claim-Token
-  // claim token 存 localStorage（expense_claim_{code}），冲突 409 需负责人重置（expenseMemberReset）
+  // claim token 存 localStorage（expense_claim_{code}），按项目独立 —— 一个浏览器/账户在一项目只占一个名字：
+  // 已认领（request 带旧 token）再认领 = 原子换名（旧名自动释放）；release = 放弃认领后可认领任意空名；
+  // 想认领他人已占的名字 → 409，需负责人重置（expenseMemberReset）
   expenseClaimTok: (code) => localStorage.getItem(`expense_claim_${code}`),
   expenseSaveClaim: (code, token) => localStorage.setItem(`expense_claim_${code}`, token),
   expenseClearClaim: (code) => localStorage.removeItem(`expense_claim_${code}`),
-  expenseOpen: (code) => req(`/expense/o/${encodeURIComponent(code)}`),
-  expenseClaim: (code, name) => req(`/expense/o/${encodeURIComponent(code)}/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  // 只读快照也带认领头：认领后 load 才能得到 me=member（否则永远回落 guest，成员态 UI 不可达）
+  expenseOpen: (code) => req(`/expense/o/${encodeURIComponent(code)}`, { headers: expenseAuth(code) }),
+  expenseClaim: (code, name) => req(`/expense/o/${encodeURIComponent(code)}/claim`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ name }) }),
+  // 放弃认领：释放当前名字 + 清掉该浏览器在本项目的认领 token（回到只读访客）
+  expenseRelease: (code) => req(`/expense/o/${encodeURIComponent(code)}/release`, { method: 'POST', headers: expenseJsonHeaders(code) }),
   expenseRowCreate: (code, team_id, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ team_id, category, data, owner_name }) }),
   // 全项目统一支付行（项目级区块，不属任何队伍）：project_pay 标记走服务端专属分支（仅负责人，范围强制=全体成员）
   expenseRowProjCreate: (code, category, data, owner_name) => req(`/expense/o/${encodeURIComponent(code)}/row`, { method: 'POST', headers: expenseJsonHeaders(code), body: JSON.stringify({ project_pay: true, category, data, owner_name }) }),

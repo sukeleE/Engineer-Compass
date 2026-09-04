@@ -1,7 +1,9 @@
 // 报销整理模块冒烟：owner 建项目/队伍/名单 → 匿名只读 → 认领矩阵(404/409/403) →
-// 成员只能建自己名下(服务端注入/跨队403/prop购买人403) → 附件 上传替换/内联PDF/强制附件.html/越权403 →
+// 成员操作(2026-09-04 放开：可给本队名单任意成员代录/互编本队行；跨队/项目级/负责人登录态 403；
+//   prop 购买人须=归属) → 附件 上传替换/内联PDF/强制附件.html/本队互传/越权403 →
 // 改名同步 owner_name+prop购买人 → 重置认领旧token失效 → 统一支付(范围三态/项目级行仅负责人·范围放开子集留空)
 // 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
+// 单一身份(12.7)：一账户一项目一名 —— 带 token 再认领=原子换名(switchedFrom) / release 放弃 / 无 token 400 / 失效 404 →
 // zip(含 team_id=0 全项目/06零散票据)/xlsx(=SUM 六列/注入转义/全项目统一支付独立 sheet) → 四级删除级联清盘
 // → 清理测试用户（DatabaseSync + fs.rmSync 自清理，process.exit(fail?1:0)）
 import { DatabaseSync } from 'node:sqlite';
@@ -141,11 +143,13 @@ try {
   const li = me1.members.find((m) => m.name === '李小华');
   ok('他人认领态只读可见', li.claimed === true && li.rowCount === 2 && li.me === false);
 
-  // ---------- 7. member 写权限矩阵 ----------
+  // ---------- 7. member 写权限矩阵（2026-09-04：本队名单任意成员可代录；跨队/非名单 403；空归属=默认自己） ----------
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', body: { team_id: t1, category: 'reg', data: { 金额: 1 } } });
   ok('匿名建行 403(先认领)', got.ok);
-  const fakeOwn = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '赵大强', data: { 金额: 66.6, 是否帮付: '否', 帮付人: '', 备注: '' } } });
-  ok('成员建行归属被服务端注入本人(伪冒无效)', fakeOwn.row.owner_name === '王小明' && fakeOwn.row.data.金额 === 66.6);
+  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '赵大强', data: { 金额: 66.6, 是否帮付: '否', 帮付人: '', 备注: '' } } });
+  ok('成员代录跨队成员 403(归属白名单=本队名单)', got.ok);
+  const fakeOwn = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', data: { 金额: 66.6, 是否帮付: '否', 帮付人: '', 备注: '' } } });
+  ok('成员不填归属建行 → 服务端默认本人', fakeOwn.row.owner_name === '王小明' && fakeOwn.row.data.金额 === 66.6);
   const ridOwn = Number(fakeOwn.row.id);
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t2, category: 'reg', data: { 金额: 1 } } });
   ok('跨队建行 403', got.ok);
@@ -155,10 +159,9 @@ try {
   ok('成员 prop 购买人≠本人 403', got.ok);
   const ownProp = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'prop', data: { 购买人: '王小明', 物品名称: '电池', 金额: 12, 是否日常家用: '否', 备注: '' } } });
   ok('成员建自己 prop 行 201', ownProp.row.data.购买人 === '王小明');
-  got = await expect(`/expense/o/${C}/row/${ridHotel}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 酒店名称: 'x', 房号: '1', 实付金额: 1, 是否帮付: '', 帮付人: '', 备注: '' } } });
-  ok('改他人(李小华)行 403', got.ok);
-  got = await expect(`/expense/o/${C}/row/${ridHotel}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
-  ok('删他人行 403', got.ok);
+  // 2026-09-04 放开：本队行互可编辑 —— 队友(李小华)的住宿行成员也能改（归属/类别冻结，只改 data）
+  const updTeammate = await api(`/expense/o/${C}/row/${ridHotel}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 酒店名称: '如家', 房号: '801', 入住日期: '2026-07-20', 退房日期: '2026-07-22', 实付金额: 320, 备注: '' } } });
+  ok('成员改本队队友行 200(归属/类别冻结)', updTeammate.row.owner_name === '李小华' && updTeammate.row.category === 'hotel' && Number(updTeammate.row.data.实付金额) === 320);
   const upd = await api(`/expense/o/${C}/row/${ridTrain}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain, 到达地: '杭州' } } });
   ok('成员改自己名下行 200(类别/归属不变)', upd.row.owner_name === '王小明' && upd.row.data.到达地 === '杭州');
   const delOwn = await api(`/expense/o/${C}/row/${ridOwn}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
@@ -197,8 +200,10 @@ try {
   const g3 = await rawReq(`/expense/o/${C}/file/${fidHtml}/download`);
   const g3b = Buffer.from(await g3.arrayBuffer());
   ok('.html 非白名单 → 强制 attachment 下载(字节一致)', (g3.headers.get('content-disposition') || '').startsWith('attachment') && g3b.equals(Buffer.from('<html>x</html>')));
-  got = await expect(`/expense/o/${C}/row/${ridTrain}/file?slot=invoice`, 403, { method: 'POST', headers: { 'X-Claim-Token': M2 } });
-  ok('他人在自己行上上传 403', got.ok);
+  // 2026-09-04：本队行成员可互传附件 —— M2(李小华) 替王小明行的 payProof 槽补传（单人行槽位 → 替换原 .html）
+  const u2M = await upload(ridTrain, 'payProof', '发票截图-同队补传.png', Buffer.from('PNG-截图2号\n'), M2);
+  const att2M = await u2M.json();
+  ok('成员替本队队友行补传附件 201(替换原槽位)', u2M.status === 201 && Number(att2M.att.id) !== fidHtml);
 
   // ---------- 9. 改名同步 owner_name + prop 购买人 ----------
   const rn = await api(`/expense/member/${midLi}`, { method: 'PATCH', token: ta, body: { name: '李小华2' } });
@@ -386,13 +391,14 @@ try {
   ok('匿名认领负责人名 403(登录占用)', got.ok);
   got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '报销负责人' } });
   ok('已认领队员代领负责人名 403(防伪冒)', got.ok);
-  // 防伪冒实证：成员(王小明)改/删负责人名下个人行 → 403
+  // 同队放开（2026-09-04）：负责人名下同队个人行属"本队行"，队员可代改/代删（防伪冒=该名不可认领、
+  // 登录占用、无 claim token；负责人可见全部记录随时纠错）
   const rSelf = await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body: { team_id: t1, category: 'train', owner_name: '报销负责人', data: { ...dTrain, 出发地: '广州' } } });
   ok('负责人录入自己的个人行(归属本人 is_owner 名)', rSelf.row.owner_name === '报销负责人' && Number(rSelf.row.data.金额) === 553.5);
-  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain } } });
-  ok('队员改负责人名下个人行 403(防伪冒)', got.ok);
-  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
-  ok('队员删负责人名下个人行 403(防伪冒)', got.ok);
+  const rSelfUpd = await api(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain, 出发地: '深圳' } } });
+  ok('成员改负责人名下同队个人行 200(同队放开,归属不变)', rSelfUpd.row.owner_name === '报销负责人' && rSelfUpd.row.data.出发地 === '深圳');
+  const rSelfDel = await api(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删负责人名下同队个人行 200(可审计纠错)', !!rSelfDel.message);
   got = await expect(`/expense/member/${mSelfId}/reset-claim`, 400, { method: 'POST', token: ta });
   ok('负责人条目 reset-claim 400(登录占用无 token 可重置)', got.ok);
   // 取消标记 → 回到可认领池（他人可认领 201）；重新标记 → 收回 token（旧 token 立即失效、认领再 403）
@@ -410,6 +416,47 @@ try {
   ok('被收回 token 立即失效(回落 guest)', got.ok && got.data.me.role === 'guest');
   got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', body: { name: '报销负责人' } });
   ok('重新标记后认领再次 403', got.ok);
+
+  // ---------- 12.7 (2026-09-04) 单一身份约束：一账户(X-Claim-Token)一项目只占一个名字 ----------
+  // 已认领着再 claim 他人 = 原子换名（旧名释放、同一 token 复用）；release=放弃回访客；占名冲突 409 原身份不变
+  // (a) 代录队友建行 → 队友行互删（净 0 行，不影响末尾级联计数）
+  const daiRow = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '李小华2', data: { 金额: 77.7, 是否帮付: '否', 帮付人: '', 备注: '王小明代录' } } });
+  ok('成员代录本队队友(李小华2)行 201(归属=队友)', daiRow.row.owner_name === '李小华2' && Number(daiRow.row.data.金额) === 77.7);
+  const dDai = await api(`/expense/o/${C}/row/${Number(daiRow.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删自己代录的队友行 200', !!dDai.message);
+  // (b) 跨队行（§12 赵大强在 t2 的 10 元行）：成员改/删 403（仅负责人）
+  const pldX = await api(`/expense/o/${C}`, { headers: { 'X-Claim-Token': M1 } });
+  const rowT2 = pldX.rows.find((x) => x.team_id === t2 && x.owner_name === '赵大强');
+  ok('找到 t2 队赵大强行(供跨队越权测试)', !!rowT2);
+  got = await expect(`/expense/o/${C}/row/${rowT2.id}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 金额: 11 } } });
+  ok('成员改跨队行 403(本队之外仍仅负责人)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${rowT2.id}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删跨队行 403', got.ok);
+  // (c) 换名：王小明(M1) → 赵大强：同一 token 原子换名，旧名释放
+  const sw = await api(`/expense/o/${C}/claim`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '赵大强' } });
+  ok('已认领者换名赵大强 201(same token + switchedFrom)', sw.token === M1 && sw.member.name === '赵大强' && sw.switchedFrom === '王小明');
+  let pl1 = await api(`/expense/o/${C}`, { headers: { 'X-Claim-Token': M1 } });
+  ok('换名后身份=赵大强；王小明名字已释放', pl1.me.member.name === '赵大强' && !pl1.members.find((m) => m.name === '王小明').claimed);
+  got = await expect(`/expense/o/${C}/claim`, 409, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '李小华2' } });
+  ok('换名到他人已占名字 409', got.ok);
+  pl1 = await api(`/expense/o/${C}`, { headers: { 'X-Claim-Token': M1 } });
+  ok('409 后仍保持赵大强(事务无部分写入)', pl1.me.member.name === '赵大强');
+  const sw2 = await api(`/expense/o/${C}/claim`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '王小明' } });
+  ok('换回王小明 201(赵大强再释放)', sw2.token === M1 && sw2.switchedFrom === '赵大强' && sw2.member.name === '王小明');
+  // (d) 放弃认领 release 矩阵
+  const rl = await api(`/expense/o/${C}/release`, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('release 放弃「王小明」 200', rl.message.includes('王小明'));
+  const plR = await api(`/expense/o/${C}`);
+  ok('释放后匿名读取回落 guest', plR.me.role === 'guest');
+  const plR2 = await api(`/expense/o/${C}`, { headers: { 'X-Claim-Token': M1 } });
+  ok('释放后旧 token 不再认身份(王小明名已空出)', plR2.me.role === 'guest' && !plR2.members.find((m) => m.name === '王小明').claimed);
+  got = await expect(`/expense/o/${C}/release`, 400, { method: 'POST' });
+  ok('无 token release 400(未认领)', got.ok);
+  got = await expect(`/expense/o/${C}/release`, 404, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('已释放 token 再 release 404(身份已失效)', got.ok);
+  const clN = await api(`/expense/o/${C}/claim`, { method: 'POST', body: { name: '王小明' } });
+  ok('释放后可重新认领(新 token)', clN.token !== M1 && /^[0-9a-f]{32}$/.test(clN.token) && clN.member.name === '王小明');
+  M1 = clN.token;
 
   // ---------- 13. 截止：成员禁写、owner 可改、读/下载开放 ----------
   await api(`/expense/${P}`, { method: 'PATCH', token: ta, body: { status: 'closed' } });

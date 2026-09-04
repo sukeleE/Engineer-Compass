@@ -1,6 +1,7 @@
 <script setup>
 // 报销记录录入/编辑弹窗：按 FIELDS 元数据生成表单
-// 成员态：姓名/队伍冻结（归属服务端强制注入）；owner：可挑选名单成员或"队伍"（公用耗材）
+// 成员态（2026-09-04）：新增可给本队名单任意成员代录（出钱人=下拉所选，默认自己；服务端白名单=本队成员兜底）；
+//   编辑可改本队任意行（仅 data，归属/类别冻结）；owner：可挑选名单成员或"队伍"（公用耗材）
 // money→el-input-number(precision2) yn→三态 radio  textarea→textarea
 // 2026-09-03 下午：帮付三字段已全部删除（无 yn 联动字段）；prop「是否日常家用=是」仍有使用图软提示
 import { reactive, ref, computed, watch } from 'vue';
@@ -18,6 +19,7 @@ const emit = defineEmits(['update:modelValue', 'saved', 'claim-lost']);
 
 const isOwner = computed(() => props.me?.role === 'owner');
 const myMember = computed(() => props.me?.member || null);
+const isMember = () => !!myMember.value && !isOwner.value; // 成员态（先于 initForm 使用，故放这里）
 
 // 分类（新增时可先选；编辑继承 row.category）
 const cat = ref(props.mode === 'create' ? (props.initialCat || '') : props.row.category);
@@ -26,7 +28,8 @@ const slots = computed(() => (cat.value ? SLOTS[cat.value] : []));
 const meta = computed(() => CATEGORIES.find((x) => x.key === cat.value));
 const teamSel = ref(props.mode === 'create' ? props.teamId : props.row.team_id);
 const teamName = computed(() => props.teams?.find((t) => t.id === teamSel.value)?.name || '');
-// 负责人创建时挑选归属（名单成员 / prop 公用"队伍"）；成员创建锁定自己
+// 出钱人/归属（新增时挑选；编辑冻结不可改）：负责人 = 名单成员 / prop 公用"队伍"；
+// 成员 = 本队任意成员（代录队友用，默认自己）—— 行归属=所选出钱人，服务端名单白名单兜底
 const ownerSel = ref('');
 const roster = computed(() => (props.members || []).filter((m) => m.team_id === teamSel.value));
 
@@ -109,15 +112,22 @@ function initForm() {
   } else { payMode.value = 'team'; payNames.value = []; }
   if (props.mode === 'edit') ownerSel.value = String(props.row.owner_name);
   else if (isProjPay.value) ownerSel.value = selfName() || (props.members || [])[0]?.name || '';
+  // 成员代录：默认自己（认领即名单成员 → 理论上必有自己；兜底选本队第一个）
+  else if (isMember()) ownerSel.value = (props.members || []).find(
+    (m) => m.team_id === teamSel.value && String(m.name) === String(myMember.value?.name))?.name
+    || roster.value[0]?.name || '';
   else ownerSel.value = roster.value[0]?.name || '';
+  // prop 成员行「购买人」冻结且须=出钱人 → 默认同步所选（换人时下方 watch 跟随）
+  if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = ownerSel.value;
 }
+// 成员代录 prop：出钱人换人 →「购买人」跟随（该字段对成员冻结，后端强制=归属）
+watch(ownerSel, (v) => { if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = v; });
 watch(cat, initForm, { immediate: true });
 watch(() => props.teamId, (t) => { if (props.mode === 'create' && t) teamSel.value = t; });
 watch(teamSel, () => { if (props.mode === 'create' && isOwner.value && roster.value.length) ownerSel.value = roster.value[0].name; });
 
-const isMember = () => !!myMember.value && !isOwner.value;
 const lockField = (f) => {
-  // 购买人锁定：成员 prop 行必须=本人；公用"队伍"行必须=队伍（服务端同规则强制）
+  // 购买人锁定：成员 prop 行必须=该行归属（代录队友时=队友，服务端同规则强制）；公用"队伍"行编辑也锁
   if (f.key === '购买人' && isMember()) return true;
   if (f.key === '购买人' && props.mode === 'edit' && String(props.row.owner_name) === '队伍') return true;
   return false;
@@ -173,18 +183,20 @@ async function save() {
   }
   // 范围写入（白名单键，单人行=空）；后端创建时校验包含者都是本队名单成员
   data['统一支付范围'] = unified.value ? scopeText() : '';
-  // prop 购买人：成员强制本人；负责人默认=归属（"队伍"公用行也在此生效）；编辑行沿用原值
+  // prop 购买人：成员=出钱人（代录队友时=队友，冻结字段由 ownerSel 跟随推导，服务端强制=归属）；
+  // 负责人默认=归属（"队伍"公用行也在此生效）；编辑行沿用原值
   if (cat.value === 'prop') {
-    if (!data.购买人) data.购买人 = isOwner.value ? ownerSel.value : (myMember.value?.name || '');
+    if (!data.购买人) data.购买人 = ownerSel.value || '';
   }
   saving.value = true;
   try {
     let resp;
     if (props.mode === 'create') {
       // 全项目统一支付走项目级分支（后端 team_id=NULL；范围=弹窗所选：整个项目/子集/留空均收），其余=队伍行
+      // 归属=所选 ownerSel：负责人=名单成员/队伍，成员=本队任意成员（默认自己）→ 服务端名单白名单兜底
       resp = isProjPay.value
-        ? await api.expenseRowProjCreate(props.code, cat.value, data, isOwner.value ? ownerSel.value : undefined)
-        : await api.expenseRowCreate(props.code, teamSel.value, cat.value, data, isOwner.value ? ownerSel.value : undefined);
+        ? await api.expenseRowProjCreate(props.code, cat.value, data, ownerSel.value)
+        : await api.expenseRowCreate(props.code, teamSel.value, cat.value, data, ownerSel.value);
     } else {
       resp = await api.expenseRowUpdate(props.code, props.row.id, { data });
     }
@@ -233,7 +245,22 @@ async function save() {
         </template>
         <template v-else>
           队伍：<b>{{ teamName }}</b>
-          <template v-if="isMember()"> · 成员：<b>{{ myMember.name }}</b><el-tag size="small" style="margin-left:6px">本人</el-tag></template>
+          <!-- 成员新增：给本队任意成员代录（默认自己；行归属=所选出钱人，后端白名单=本队名单） -->
+          <template v-if="isMember() && props.mode === 'create'">
+            · 出钱人（谁付的钱；可代录队友）：
+            <el-select v-model="ownerSel" size="small" style="width: 168px">
+              <el-option v-for="o in pickList" :key="o.v" :label="o.label" :value="o.v" />
+            </el-select>
+            <el-tag v-if="ownerSel === myMember.name" size="small" style="margin-left:4px">本人</el-tag>
+            <el-tag v-else-if="ownerSel" size="small" type="warning" style="margin-left:4px">代录</el-tag>
+          </template>
+          <!-- 成员编辑：归属冻结（只改字段数据；队友的行也可改，行归属仍是对方） -->
+          <template v-else-if="isMember()">
+            · 归属（出钱人）：<b>{{ String(props.row.owner_name) }}</b>
+            <el-tag v-if="String(props.row.owner_name) !== String(myMember.name)" size="small" type="warning" style="margin-left:6px">队友的行 · 你可代编辑</el-tag>
+            <el-tag v-else size="small" style="margin-left:6px">本人</el-tag>
+            <el-tag type="info" size="small" style="margin-left:6px">归属不可改</el-tag>
+          </template>
           <template v-else>
             · 归属（出钱人）：
             <el-select v-model="ownerSel" size="small" style="width: 180px" :disabled="props.mode === 'edit'">
@@ -275,7 +302,7 @@ async function save() {
           </template>
         </template>
         <template v-else>
-          统一支付：{{ isOwner ? '所选出钱人' : '你' }}为范围内的人垫付一笔「{{ meta?.zh }}」——范围可勾选多人、其他队伍的成员，或直接选整个项目；金额=这一笔合计，统计记出钱人名下，发票/凭证按类别传一份即可。
+          统一支付：{{ isOwner ? '所选出钱人' : (ownerSel === myMember?.name ? '你' : (ownerSel ? `队友「${ownerSel}」` : '所选出钱人')) }}为范围内的人垫付一笔「{{ meta?.zh }}」——范围可勾选多人、其他队伍的成员，或直接选整个项目；金额=这一笔合计，统计记出钱人名下，发票/凭证按类别传一份即可。
         </template>
       </p>
 

@@ -1,7 +1,8 @@
 <script setup>
 // 报销整理主视图（/expense）：三态 ——
 // 1) 无 code：落地页（说明 + 邀请码直达 + 登录用户的"我的报销项目"管理）
-// 2) 有 code：填报页（负责人登录=管理态 / 成员认领=可写本人 / 访客=只读）
+// 2) 有 code：填报页（负责人登录=管理态 / 成员认领=可写本队含代录 / 访客=只读）
+// 2026-09-04：一个账户一项目只占一个名字（认领=占名，可放弃换名）；成员可操作本队所有行（不限行归属）
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -62,21 +63,40 @@ watch(() => route.query.code, (c) => {
 onMounted(() => { if (route.query.code) code.value = String(route.query.code); if (code.value) load(code.value); });
 
 // ---- 身份 ----
-const canEditRow = (row) =>
-  // 项目级行（team_id 空 = 全项目统一支付）仅负责人可编辑（成员名下出现也只是被代录，403 兜底见后端）
-  row.team_id != null && (isOwner.value || (myRole.value === 'member' && status.value === 'open' && String(row.owner_name) === String(myMember.value?.name)));
-const canEditMemberRow = (row) => canEditRow(row) && String(row.owner_name) === String(myMember.value?.name);
+// 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 录入/编辑/删附件不限行归属（代录队友的行也行），
+// 服务端 rowWriteError 同规则兜底；跨队行与项目级行（team_id 空 = 全项目统一支付）仍仅负责人
 const open = () => status.value === 'open';
 const myTeamId = computed(() => myMember.value?.team_id || null);
+const canEditRow = (row) =>
+  row.team_id != null && (isOwner.value || (myRole.value === 'member' && open() && Number(row.team_id) === myTeamId.value));
+const canEditMemberRow = (row) => canEditRow(row) && myRole.value === 'member'; // 成员态同队行（prop 购买人字段冻结用）
 // 能否在某队名下新增记录（负责人 or 本队已认领成员；同队级"＋ 添加记录"按钮口径）
 const canAddIn = (t) => isOwner.value || (myRole.value === 'member' && myTeamId.value === t.id && open());
 
-// 认领
+// 认领（一账户一项目只占一个名字）：request 带已有 token 且名字不同 = 后端原子换名（旧名自动释放）
 async function claim(name) {
   try {
     const d = await api.expenseClaim(code.value, name);
     api.expenseSaveClaim(code.value, d.token);
-    ElMessage.success(`你好，${name}！现在可以填报自己的记录和附件了`);
+    ElMessage.success(d.switchedFrom
+      ? `已放弃「${d.switchedFrom}」、换认领为「${name}」`
+      : `你好，${name}！现在可以填报自己的记录，也能代录/编辑本队其他成员的行`);
+    await load(code.value);
+  } catch (e) {
+    ElMessage.error(e.message);
+  }
+}
+// 放弃认领：释放当前名字回到只读（想换名：先放弃，再点任意空名字）
+async function releaseClaim() {
+  if (!myMember.value) return;
+  const nm = myMember.value.name;
+  try {
+    await ElMessageBox.confirm(`放弃认领「${nm}」？\n\n放弃后本浏览器/账户在该项目里不再占任何名字：不能填报、代录或编辑记录（回到只读），随时可以重新认领任意空名字。`, '放弃认领', { type: 'warning', confirmButtonText: '放弃认领', cancelButtonText: '再想想' });
+  } catch { return; }
+  try {
+    await api.expenseRelease(code.value);
+    api.expenseClearClaim(code.value);
+    ElMessage.success(`已放弃「${nm}」，现在是只读访客`);
     await load(code.value);
   } catch (e) {
     ElMessage.error(e.message);
@@ -431,10 +451,10 @@ onMounted(() => loadMine());
         <div v-if="claimState === 'owner' && myMember" class="who card">
           <span class="ok-dot"></span>
           你的队员身份：<b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）· 已占用
-          <el-tag v-if="open()" size="small" type="success">可填报自己名下费用</el-tag>
+          <el-tag v-if="open()" size="small" type="success">可填报/代录本队记录</el-tag>
           <el-tag size="small" type="danger" effect="plain">队员不能认领你的名字</el-tag>
           <span class="grow"></span>
-          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 其余队员各填各的只读他人</span>
+          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 队员可互录互编本队记录；跨队与全项目统一支付仅你可操作</span>
         </div>
 
         <!-- 身份条（成员/访客） -->
@@ -442,13 +462,14 @@ onMounted(() => loadMine());
           <template v-if="claimState === 'member'">
             <span class="ok-dot"></span>
             <b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）已认领
-            <el-tag v-if="open()" size="small" type="success">可填报自己名下记录</el-tag>
+            <el-tag v-if="open()" size="small" type="success">可填报自己 · 可代录/编辑本队行</el-tag>
             <span class="grow"></span>
-            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 他人只读</span>
+            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 本队互编，跨队/全项目仅负责人</span>
+            <el-button size="small" type="danger" plain @click="releaseClaim" title="放弃后回到只读，可重新认领其他名字">放弃认领（换名）</el-button>
           </template>
           <template v-else-if="claimState === 'guest'">
             <div class="claim-box">
-              <p class="claim-tip">👋 认领你的名字后即可填报（各填各的，重复姓名先找负责人区分）</p>
+              <p class="claim-tip">👋 认领你的名字后即可填报（一人一项目一个名字，各填各的；重复姓名先找负责人区分）</p>
               <div class="claim-chips">
                 <template v-for="t in pld.teams" :key="t.id">
                   <span class="claim-group">{{ t.name }}</span>
@@ -575,7 +596,7 @@ onMounted(() => loadMine());
           </div>
         </section>
 
-        <p class="foot-note">只读他人 · 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
+        <p class="foot-note">队员可互录互编本队记录（跨队/全项目统一支付只读）· 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
 
         <!-- 录入/编辑弹窗 -->
         <RowFormDialog v-if="dlg.open" v-model="dlg.open" :mode="dlg.mode" :row="dlg.row" :team-id="dlg.teamId"
@@ -621,7 +642,7 @@ h3 { margin: 0; font-size: 16px; }
 .head-ops { display: flex; gap: 6px; flex-wrap: wrap; }
 .head-ops .el-button, .head-ops a { margin-left: 0; }
 
-.who { display: flex; align-items: center; gap: 8px; }
+.who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ok-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block; }
 .my-total { color: var(--primary); }
 .claim-tip { margin: 0 0 8px; color: var(--text-2); }

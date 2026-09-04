@@ -65,13 +65,14 @@ function identity(req, p) {
   return { role: 'guest', member: null };
 }
 // member 可写行校验：返回 null=放行，否则 {status,error}
-// 全项目统一支付行（team_id 为空，项目级区块）非负责人一律不可写 —— 出钱人虽是成员也不放开
+// 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 代录/编辑/删附件不限行归属（行记在谁名下均可，
+//   创建时归属白名单=本队名单兜底）；跨队行与项目级行（team_id 空=全项目统一支付）仍仅负责人
 function rowWriteError(ctx, p, row) {
   if (ctx.role === 'owner') return null;
   if (ctx.role === 'guest') return { status: 403, error: '请先认领你的身份（打开链接后选自己姓名）' };
   if (String(p.status) !== 'open') return { status: 403, error: '该项目已截止填报，如需修改请联系负责人' };
   if (row && row.team_id == null) return { status: 403, error: '全项目统一支付仅负责人可操作（成员请找负责人代录）' };
-  if (String(row.owner_name) !== String(ctx.member.name)) return { status: 403, error: '只能修改自己名下的记录' };
+  if (row && Number(row.team_id) !== Number(ctx.member.team_id)) return { status: 403, error: '只能操作自己队伍里的记录（跨队记录请找该队成员或负责人）' };
   return null;
 }
 // 审计（匿名成员动作 user 字段为空照记，detail 带 code 便于排查）
@@ -124,7 +125,9 @@ o.get('/:code', (req, res) => {
   res.json(projectPayload(p.code, ctx));
 });
 
-// POST /o/:code/claim —— 认领身份：名单首认领得 token（重复/他人已认领 409）
+// POST /o/:code/claim —— 认领身份：一个账户（X-Claim-Token，浏览器存 expense_claim_{code}）在同一项目内只占一个名字。
+// 已认领者再 claim 他人 = 换名：事务内释放旧行、目标行复用同一 token（前端存储无需变）；全新设备首认领发新 token。
+// 跨项目互不影响（token 按项目行查询，属别的项目的 token 在此视为无身份）。
 o.post('/:code/claim', (req, res) => {
   const p = loadProject(req.params.code);
   if (!p) return res.status(404).json({ error: '邀请码不存在' });
@@ -136,11 +139,45 @@ o.post('/:code/claim', (req, res) => {
   if (m.is_owner) {
     return res.status(403).json({ error: `「${name}」是负责人本人的队员身份（负责人登录即可填报自己费用），队员不能认领或代领；你的开销请认领自己的姓名` });
   }
-  if (m.claim_token) return res.status(409).json({ error: '这个名字已被认领（重复姓名请找负责人区分后重试）' });
+  if (m.claim_token) {
+    const mine = String(req.headers['x-claim-token'] || '') === String(m.claim_token);
+    return res.status(409).json({ error: mine ? `你已经认领「${name}」了` : `「${name}」已被他人认领（若认领错了或重复姓名，找负责人重置或区分）` });
+  }
+  const curTok = String(req.headers['x-claim-token'] || '');
+  const old = curTok ? db.prepare('SELECT * FROM expense_member WHERE project_id = ? AND claim_token = ?').get(p.id, curTok) : null;
+  if (old) {
+    // 换名：释放旧名字 → 认领新名字（同一 token 复用，原设备身份不间断）
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE expense_member SET claim_token = NULL, claim_at = NULL WHERE id = ?').run(old.id);
+      db.prepare("UPDATE expense_member SET claim_token = ?, claim_at = datetime('now','localtime') WHERE id = ?").run(curTok, m.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    audit(req, 'expense-claim-switch', m.name, { mid: m.id, fromMid: old.id, fromName: old.name });
+    res.status(201).json({ token: curTok, member: { id: m.id, team_id: m.team_id, name: m.name }, switchedFrom: old.name });
+    return;
+  }
   const token = randomBytes(16).toString('hex');
   db.prepare("UPDATE expense_member SET claim_token = ?, claim_at = datetime('now','localtime') WHERE id = ?").run(token, m.id);
   audit(req, 'expense-claim', m.name, { mid: m.id });
   res.status(201).json({ token, member: { id: m.id, team_id: m.team_id, name: m.name } });
+});
+
+// POST /o/:code/release —— 放弃认领（换身份入口：先放弃才能认领别的名字；负责人本人的身份不可放弃）
+o.post('/:code/release', (req, res) => {
+  const p = loadProject(req.params.code);
+  if (!p) return res.status(404).json({ error: '邀请码不存在' });
+  const tok = String(req.headers['x-claim-token'] || '');
+  if (!tok) return res.status(400).json({ error: '未认领任何身份' });
+  const m = db.prepare('SELECT * FROM expense_member WHERE project_id = ? AND claim_token = ?').get(p.id, tok);
+  if (!m) return res.status(404).json({ error: '身份已失效（可能已被负责人重置），刷新页面重新认领即可' });
+  if (m.is_owner) return res.status(403).json({ error: '负责人本人的身份由登录占用，无需也不可放弃' });
+  db.prepare('UPDATE expense_member SET claim_token = NULL, claim_at = NULL WHERE id = ?').run(m.id);
+  audit(req, 'expense-claim-release', m.name, { mid: m.id });
+  res.json({ message: `已放弃「${m.name}」，可重新认领其他名字` });
 });
 
 // 行写操作通用装配：查项目/行/身份 → 校验 → 返回 ctx,row 或已响应
@@ -161,7 +198,7 @@ function touch(p) {
 }
 
 // POST /o/:code/row —— 新增费用行
-// 队伍行：成员只能建自己名下；prop 公共行仅负责人
+// 队伍行：member 可给本队名单任意成员代录（归属=所选本队成员，默认自己）；prop 公共行（归属"队伍"）仅负责人
 // project_pay 项目级行：全项目统一支付（不属任何队伍，显示在全部小队之外的区块）——仅负责人可建
 o.post('/:code/row', (req, res) => {
   const got = loadRowForWrite(req, res, false);
@@ -218,12 +255,16 @@ o.post('/:code/row', (req, res) => {
   if (ctx.role === 'member' && Number(team_id) !== Number(ctx.member.team_id)) {
     return res.status(403).json({ error: '只能给本队录入' });
   }
-  // 服务端强制注入归属，payload 无法伪装
+  // 服务端注入归属，payload 无法伪装 —— member 可代录本队名单任意成员（2026-09-04 放开），跨队名单 403
   let owner_name;
   if (ctx.role === 'member') {
-    owner_name = ctx.member.name;
-    if (category === 'prop' && String(data.购买人 || '') !== String(ctx.member.name)) {
-      return res.status(403).json({ error: '耗材道具的购买人需填本人（公用物品请找负责人录入）' });
+    owner_name = String(body.owner_name || '').trim().slice(0, 20) || String(ctx.member.name);
+    const inRoster = db.prepare('SELECT id FROM expense_member WHERE project_id = ? AND name = ? AND team_id = ?').get(p.id, owner_name, team_id);
+    if (!inRoster) {
+      return res.status(403).json({ error: '只能给本队名单成员录入（出钱人需是本队成员或你本人；代录他人选其名字即可）' });
+    }
+    if (category === 'prop' && String(data.购买人 || '') !== String(owner_name)) {
+      return res.status(403).json({ error: '耗材道具的购买人需与归属成员一致（公用物品请找负责人录入）' });
     }
   } else {
     owner_name = String(body.owner_name || '').trim().slice(0, 20);
@@ -250,7 +291,7 @@ o.post('/:code/row', (req, res) => {
   res.status(201).json({ row: rowOut(row, attsOf(row.id)), warnings: norm.warnings });
 });
 
-// PUT /o/:code/row/:rid —— 改自己名下的行（类别不可改；成员仅 data；负责人可移队）
+// PUT /o/:code/row/:rid —— 改行（类别与归属不可改；member 仅本队行、仅 data；负责人可移队）
 o.put('/:code/row/:rid', (req, res) => {
   const got = loadRowForWrite(req, res);
   if (!got) return;
@@ -261,8 +302,9 @@ o.put('/:code/row/:rid', (req, res) => {
   if (!norm.ok) return res.status(400).json({ error: norm.error });
   const data = norm.data;
   if (row.category === 'prop') {
-    if (ctx.role === 'member' && String(data.购买人 || '') !== String(ctx.member.name)) {
-      return res.status(403).json({ error: '耗材道具的购买人需填本人（公用物品请找负责人录入）' });
+    // member 可代录本队行，但购买人不可改归属：须与该行归属成员一致（公用行=“队伍”）
+    if (ctx.role === 'member' && String(data.购买人 || '') !== String(row.owner_name)) {
+      return res.status(403).json({ error: `耗材道具的购买人须与该行归属成员一致（归属：${row.owner_name}；公用物品请找负责人）` });
     }
     if (ctx.role === 'owner' && String(row.owner_name) === '队伍' && String(data.购买人 || '') !== '队伍') {
       return res.status(403).json({ error: '公用物品行的购买人应为“队伍”' });
