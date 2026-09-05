@@ -51,17 +51,22 @@ const myRole = computed(() => pld.value?.me?.role || 'guest');
 const teamNameOf = (id) => pld.value?.teams.find((t) => t.id === id)?.name || '';
 
 // ---- 数据加载 ----
+// soft=true = 已在项目内的 after-change 刷新（上传/编辑/删除附件等，滚动位置要保住）：
+//   失败时保留现有内容原地报错，不整页清空；普通进入/切项目的全新加载失败仍走整页错误页
 function onRowChanged() {
-  load(code.value);
+  load(code.value, { soft: true });
 }
 function onClaimLost() {
   api.expenseClearClaim(code.value);
-  load(code.value);
+  load(code.value, { soft: true });
 }
-async function load(c) {
+async function load(c, { soft = false } = {}) {
   if (!c) return;
   loading.value = true;
   errMsg.value = '';
+  // 切到别的项目：先清掉旧内容走整页 spinner（防旧项目内容串台）；
+  // 同项目重载（soft 刷新）保留内容挂载 —— 页面不卸载就不会跳回顶部
+  if (pld.value && pld.value.project?.code !== c) pld.value = null;
   try {
     const d = await api.expenseOpen(c);
     pld.value = d;
@@ -72,8 +77,13 @@ async function load(c) {
       ElMessage.warning('身份已失效，请重新认领');
     }
   } catch (e) {
-    pld.value = null;
-    errMsg.value = e.message;
+    if (soft && pld.value) {
+      // 页内软刷新失败（偶发网络）→ 保留现有内容原地报错，不整页清空（也不会跳顶）
+      ElMessage.error('刷新失败：' + e.message);
+    } else {
+      pld.value = null;
+      errMsg.value = e.message;
+    }
   } finally {
     loading.value = false;
   }
@@ -497,8 +507,9 @@ onMounted(() => loadMine());
     </div>
 
     <!-- ============ 填报/管理页（有 code） ============ -->
-    <div v-else class="exp-wrap">
-      <div v-if="loading" class="center-load"><el-icon class="is-loading" :size="26"><svg viewBox="0 0 1024 1024"><path fill="currentColor" d="M512 64a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V96a32 32 0 0 1 32-32m0 640a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V736a32 32 0 0 1 32-32m448-128a32 32 0 0 1-32 32H736a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32m-640 0a32 32 0 0 1-32 32H96a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32M195.2 195.2a32 32 0 0 1 45.248 0L376.32 331.008a32 32 0 0 1-45.248 45.248L195.2 240.448a32 32 0 0 1 0-45.248m452.544 452.544a32 32 0 0 1 45.248 0L828.8 783.552a32 32 0 0 1-45.248 45.248L647.744 692.992a32 32 0 0 1 0-45.248M828.8 195.2a32 32 0 0 1 0 45.248L692.992 376.32a32 32 0 0 1-45.248-45.248L783.552 195.2a32 32 0 0 1 45.248 0m-452.544 452.544a32 32 0 0 1 0 45.248L240.448 828.8a32 32 0 0 1-45.248-45.248l135.808-135.808a32 32 0 0 1 45.248 0"/></svg></el-icon></div>
+    <!-- busy：同项目 after-change 刷新时内容保持挂载只加遮罩提示 —— 卸载整页会导致滚动位置被钳回顶部（上传完跳顶） -->
+    <div v-else class="exp-wrap" :class="{ busy: loading && pld }">
+      <div v-if="loading && !pld" class="center-load"><el-icon class="is-loading" :size="26"><svg viewBox="0 0 1024 1024"><path fill="currentColor" d="M512 64a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V96a32 32 0 0 1 32-32m0 640a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V736a32 32 0 0 1 32-32m448-128a32 32 0 0 1-32 32H736a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32m-640 0a32 32 0 0 1-32 32H96a32 32 0 0 1 0-64h192a32 32 0 0 1 32 32M195.2 195.2a32 32 0 0 1 45.248 0L376.32 331.008a32 32 0 0 1-45.248 45.248L195.2 240.448a32 32 0 0 1 0-45.248m452.544 452.544a32 32 0 0 1 45.248 0L828.8 783.552a32 32 0 0 1-45.248 45.248L647.744 692.992a32 32 0 0 1 0-45.248M828.8 195.2a32 32 0 0 1 0 45.248L692.992 376.32a32 32 0 0 1-45.248-45.248L783.552 195.2a32 32 0 0 1 45.248 0m-452.544 452.544a32 32 0 0 1 0 45.248L240.448 828.8a32 32 0 0 1-45.248-45.248l135.808-135.808a32 32 0 0 1 45.248 0"/></svg></el-icon></div>
       <el-empty v-else-if="errMsg" :description="errMsg">
         <el-button type="primary" @click="router.push('/expense')">返回报销整理首页</el-button>
         <p v-if="recent.some((x) => String(x.code) === String(code))" style="margin-top: 10px">
@@ -732,6 +743,15 @@ h3 { margin: 0; font-size: 16px; }
 .need-login { text-align: center; }
 
 .center-load { display: flex; justify-content: center; padding: 60px 0; }
+/* 同项目刷新忙碌态：内容不卸载（保住滚动位置），半透明禁点 + 顶部浮动"更新中"提示 */
+.exp-wrap.busy { opacity: 0.6; pointer-events: none; }
+.exp-wrap.busy::after {
+  content: '🔄 更新中…';
+  position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
+  background: var(--card-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 14px; border-radius: 20px; font-size: 13px; z-index: 3001;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); pointer-events: none;
+}
 
 .head-main .sub2 { margin: 0; }
 .sum-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
