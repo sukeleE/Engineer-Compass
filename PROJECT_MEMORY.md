@@ -300,3 +300,22 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **前端**：ExpenseView.vue（落地页+填报页双态、owner 管理条/成员 chips 重置认领、成员 chips 显示条数+该成员垫付合计 memberMoney、类别头**常驻「＋ 添加xxx」**按 c.key 直达类别——同类别可多条（多张车票各一行），入口条件抽 canAddIn(t) 复用队级按钮；openCreate(t.id, catKey)）+ expense/RowCard.vue（卡片+槽位附件 chips：图片 openImage/PDF 新开/其余下载；**统一支付行每槽可多份**：rowMulti=team_id 空或范围非空 → 逐份 chip + 常驻「＋槽位名」再传入口（空槽时即上传入口，title 提示"可存多份"），单人行保持原每槽一份展示）+ expense/RowFormDialog.vue（meta 生成表单、类别第一步选择（initialCat prop 预选则跳过）、锁定字段规则与后端一致）
 - **冒烟**：scripts/smoke_expense.mjs **115 项断言全绿**（建项目→认领矩阵→越权矩阵→附件替换/内联/强附件→改名/重置认领→统一支付（范围三态/非名单400/Excel范围列四值）→全项目统一支付（team_id 空/**范围放开**：勾选子集原样+留空可存+本队'全部成员'400+PUT 不再强制回写/成员访客建改403/项目级附件+zip?team_id=0）→⑥零散票据（队行 400/票据名称+金额选填/空金额空范围纯存档/ticket 槽附件/zip 含06目录）→**统一支付行附件每槽多份（§11.8 放在 xlsx 断言后：⑥槽同槽两份独立下载+目录并存+删一份另一份不受影响；队内统一支付行发票槽连传三份全保留）**→xlsx（汇总六列 I3=SUM(C3:H3)/注脚新口径/项目级 sheet 范围子集+⑥块）→四级删除级联清盘（删王小明级联 8 行）→自清理）；坑：sqlite datetime() 参数必须单引号；multer 前置 gate 要 req.p/req.ctx 一并挂载；§11.8 别放在 xlsx 断言前（删掉 misc1 首份附件会让附件清单 sheet 失去 ⑥零散票据 行 → §12 includes 断言挂）
 - **前端坑（必读）**：模板内联事件里顶层 ref 已自动解包 → 写 `load(code.value)` 等于 `'码'.value`=undefined → load 首行 `if (!c) return` 静默吞掉 → 上传/删除后页面永不刷新（无报错无 toast 异常）！表现为"上传成功（库里有）但 chip 不出现、还能继续传"。模板内联一律用 `code` 不带 .value；或把逻辑收进 `<script setup>` 命名函数（如 @changed/@claim-lost → onRowChanged/onClaimLost 再调 code.value）。2026-09-03 用 CDP 无头 Edge 实测复现并修复（ui 上传交互回归：真实 change 事件→上传 201→自动 load→chip 即时出现）
+
+## 2026-09-04~09-05 报销整理演进（09-06 收紧的铺垫史，chronological per commit）
+
+- **负责人可兼队员身份（09-04 08:10）**：is_owner 落地页/认领引导 —— owner 登录态即项目负责人，同时可认领队员名（成员身份与负责人身份并存）
+- **报销单一身份 + 本队互编（09-04 08:36 cb965f9）**：一账户一项目只占一个名字（认领/改名唯一，消除一人多名的多重身份）；**成员可操作本队全部行**（本队互编/代录）——此为该日放宽点，09-06 已收紧废除（见下章）
+- **成员可录自己名下项目级行 + 队伍横向标签条（09-04 10:50 f172a56）**：项目级行（team_id 空=全项目统一支付/⑥零散票据）放开给已认领成员 **仅自己名下**（出钱人服务端强制=本人：空默认自己、填他人 403 点名、prop 购买人须=自己；他人名下/访客/closed 后成员 403；owner 全权代录纠错不变）——项目级行从"仅负责人可建"（09-03 章）改为成员自理；自绘 chip 标签条（不用 el-tabs）：『💰 全项目统一支付』首标签 + 每队一个（队名+名单/已认领小字），≥2 显示标签条 / ==1 直排单卡 / ==0 引导卡，activeTab 钳制 watch 防单队断链；单队项目布局不变
+- **标签条滚动修复 + 使用教程页（09-04 11:20 51c141a）**：webkit 滚动条曾被 display:none 隐藏致桌面端到不了溢出队伍 → 可见 6px 细条 + @wheel 横滚（溢出时滚轮/双指横滚、Shift 1.6 倍速，未溢出放行页面滚动）、chip flex:none+nowrap；落地页 hero「📖 使用教程」→ /expense/guide（ExpenseGuide.vue 静态页，CSS 变量双主题）：11 节（一分钟流程/三身份权限三色卡/负责人起步/队员认领占名换名重置/六类费用逐卡/单人 vs 统一支付对照/项目级区与标签/附件规则/统计与 Excel·ZIP 对照/截止锁账纠错/FAQ 12 条）+ 返回按钮
+- **填报态返回按钮 + 最近进入记忆（09-04 13:12 9cbec40）**：code 视图头部「← 返回报销整理」（清 ?code 顺带清 errMsg）；404 空态命中最近记录时可「从最近进入中移除」；localStorage expense_recent ≤8 条 {code,name,ts} 成功打开才记、幂等置顶，落地页 enter 卡与登录区间卡片列出（项目名+邀请码，点进入 router 推 ?code 复用加载链路，逐条删+右上清空），整页刷新/换浏览器持久
+- **soft 刷新滚动保持（09-05 3753f7a）**：load() 加 soft 模式——上传附件/编辑保存后 onRowChanged/onClaimLost 页内刷新不再整页 v-if 卸载（旧模板 loading=true 卸载换 spinner → 高度塌缩浏览器把滚动钳回顶部）；soft=内容保留挂载 + busy 半透明禁点 + 顶部浮动「🔄 更新中…」chip（.exp-wrap.busy::after），失败原地 ElMessage 不整页清空；全新进入/切换项目才整页 spinner（切 code 先清旧 pld 防串台），失败走整页错误页；回归修复「返回落地页后重进已删项目被旧内容顶包」——soft 与硬加载按调用源区分
+
+## 2026-09-06 报销写入权限收紧（第三波，现行口径）：成员仅自理自己名下，他人已填一律不可删改
+
+- **需求**：用户「报销整理页面：对于其他成员已填的费用信息，非负责人无法删改」→ AskUserQuestion 确认方案 A「全面自理」：成员**新增/改/删/传附件全部限自己名下**；同队队友行、公用「队伍」行、跨队行、他人名下项目级行一律仅负责人可动——**废除 09-04 本队互编/代录**（对称：无创建者追踪字段，放开创建=无法精确鉴权删除）
+- **判定根基**：行归属=owner_name（出钱人），姓名项目内唯一（新增/改名 409）→ 比较精确无重名歧义；**队行与项目级行（team_id 空）同一套 rowWriteError 一视同仁**（项目级行 09-04 起本就限自己名下，本次把队行的"同队放行"也收成自己名下，两口径合一）
+- **服务端（expense.js rowWriteError 重写）**：403 优先级：owner 放行 → guest「请先认领你的身份」 → closed「该项目已截止填报，如需修改请联系负责人」 → 非本人名下 `只能操作自己名下的记录 —— 他人已填的费用信息仅负责人可删改（代垫付/公用开销/纠错请联系负责人）`；四个调用点（PUT/DELETE 行、上传、删附件）零改动继承
+- **POST team-row 成员分支**：填他人名 403 `队内记录只能记自己名下 —— 出钱人须是「{ctx.member.name}」本人；替队友垫付或公用开销请找负责人录入`；空名默认自己；prop `耗材道具的购买人须是你本人（公用物品请找负责人录入）`；「队伍」公用行仅 owner 可建
+- **前端（ExpenseView.vue / RowFormDialog.vue / api.js / ExpenseGuide.vue）**：canEditRow 成员分支 `String(row.owner_name)===String(myName())`（移除同队比较，新增 myName computed；队行与项目级行共用同一判断）；RowFormDialog 成员态无出钱人下拉=固定姓名 + 「本人」tag + create「只能记自己名下（他人开销/公用请找负责人代录）」/ edit「归属不可改」；身份条/引导卡/toast/FAQ 文案同步（"代录"字样清除）
+- **冒烟**：scripts/smoke_expense.mjs **160 项断言全绿**（沿革 115→156→160）：翻转 §7/§8/§12.6/§12.7a 为 403——成员建本队队友名行、改/删本队队友行、给队友行补传附件、改/删负责人名下同队个人行、删队友名下 prop 行、代录本队队友建行；§14 行数不变（owner 事后删除自己的行净零）；前端 build 通过
+- **注意**：上一会话（09-05）工作区遗留未提交变更（backend/routes/planChat.js、schedule.js、study.js + frontend CompDialog/ScheduleView/ToolDock + scripts/smoke_privacy.mjs）——与报销无关，勿混入本批提交

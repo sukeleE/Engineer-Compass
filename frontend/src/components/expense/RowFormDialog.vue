@@ -1,8 +1,8 @@
 <script setup>
 // 报销记录录入/编辑弹窗：按 FIELDS 元数据生成表单
-// 成员态（2026-09-04）：队行新增可给本队名单任意成员代录（出钱人=下拉所选，默认自己；服务端白名单=本队成员兜底）；
-//   队行编辑可改本队任意行（仅 data，归属/类别冻结）；owner：可挑选名单成员或"队伍"（公用耗材）
-//   项目级行（全项目统一支付区）：新增/编辑仅限自己名下，出钱人固定本人 —— 无下拉、服务端强制（他人开销找负责人代录）
+// 成员态（2026-09-06 收紧）：新增/编辑一律只限自己名下 —— 队行与项目级行统一口径：
+//   出钱人固定本人、无下拉，服务端强制（空默认自己、填他人 403）；他人已填的行在前端即不提供入口
+// owner：可挑选名单成员或"队伍"（公用耗材），全权代录/纠错
 // money→el-input-number(precision2) yn→三态 radio  textarea→textarea
 // 2026-09-03 下午：帮付三字段已全部删除（无 yn 联动字段）；prop「是否日常家用=是」仍有使用图软提示
 import { reactive, ref, computed, watch } from 'vue';
@@ -30,7 +30,7 @@ const meta = computed(() => CATEGORIES.find((x) => x.key === cat.value));
 const teamSel = ref(props.mode === 'create' ? props.teamId : props.row.team_id);
 const teamName = computed(() => props.teams?.find((t) => t.id === teamSel.value)?.name || '');
 // 出钱人/归属（新增时挑选；编辑冻结不可改）：负责人 = 名单成员 / prop 公用"队伍"；
-// 成员 = 本队任意成员（代录队友用，默认自己）—— 行归属=所选出钱人，服务端名单白名单兜底
+// 成员 = 恒为本人（认领名；弹窗无下拉 —— 服务端强制归属=自己兜底）
 const ownerSel = ref('');
 const roster = computed(() => (props.members || []).filter((m) => m.team_id === teamSel.value));
 
@@ -112,22 +112,19 @@ function initForm() {
     payNames.value = [];
   } else { payMode.value = 'team'; payNames.value = []; }
   if (props.mode === 'edit') ownerSel.value = String(props.row.owner_name);
-  // 成员：默认自己（认领名必在本队名单 → 兜底本队第一个）；队行可再下拉代录队友，
-  //   项目级行（teamSel=0 无队伍）同样固定自己 —— 服务端强制=本人，模板无下拉
+  // 成员：恒=自己 —— 编辑能打开的本就只能是自己名下的行（父层 :editable 同口径），新增由服务端强制归属=本人
   else if (isMember()) ownerSel.value = String(myMember.value?.name || '') || roster.value[0]?.name || '';
   else if (isProjPay.value) ownerSel.value = selfName() || (props.members || [])[0]?.name || '';
   else ownerSel.value = roster.value[0]?.name || '';
-  // prop 成员行「购买人」冻结且须=出钱人 → 默认同步所选（换人时下方 watch 跟随）
+  // prop 成员行「购买人」冻结且须=出钱人（成员出钱人恒=自己）→ 默认同步
   if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = ownerSel.value;
 }
-// 成员代录 prop：出钱人换人 →「购买人」跟随（该字段对成员冻结，后端强制=归属）
-watch(ownerSel, (v) => { if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = v; });
 watch(cat, initForm, { immediate: true });
 watch(() => props.teamId, (t) => { if (props.mode === 'create' && t) teamSel.value = t; });
 watch(teamSel, () => { if (props.mode === 'create' && isOwner.value && roster.value.length) ownerSel.value = roster.value[0].name; });
 
 const lockField = (f) => {
-  // 购买人锁定：成员 prop 行必须=该行归属（代录队友时=队友，服务端同规则强制）；公用"队伍"行编辑也锁
+  // 购买人锁定：成员 prop 行必须=本人（服务端同规则强制）；公用"队伍"行编辑也锁
   if (f.key === '购买人' && isMember()) return true;
   if (f.key === '购买人' && props.mode === 'edit' && String(props.row.owner_name) === '队伍') return true;
   return false;
@@ -183,8 +180,7 @@ async function save() {
   }
   // 范围写入（白名单键，单人行=空）；后端创建时校验包含者都是本队名单成员
   data['统一支付范围'] = unified.value ? scopeText() : '';
-  // prop 购买人：成员=出钱人（代录队友时=队友，冻结字段由 ownerSel 跟随推导，服务端强制=归属）；
-  // 负责人默认=归属（"队伍"公用行也在此生效）；编辑行沿用原值
+  // prop 购买人：成员=自己（冻结字段，服务端强制=归属）；负责人默认=归属（"队伍"公用行也在此生效）；编辑行沿用原值
   if (cat.value === 'prop') {
     if (!data.购买人) data.购买人 = ownerSel.value || '';
   }
@@ -193,8 +189,8 @@ async function save() {
     let resp;
     if (props.mode === 'create') {
       // 全项目统一支付走项目级分支（后端 team_id=NULL；范围=弹窗所选：整个项目/子集/留空均收），其余=队伍行
-      // 归属=所选 ownerSel：负责人=名单成员/队伍或本人；成员队行=本队任意成员（默认自己）；
-      // 成员项目级行=固定自己（模板无下拉）→ 服务端仍强制校验（他人名 403 兜底）
+      // 归属=所选 ownerSel：负责人=名单成员/队伍或本人；成员队行/项目级行一律固定本人（模板无下拉）
+      //   → 服务端仍强制校验（他人名 403 兜底）
       resp = isProjPay.value
         ? await api.expenseRowProjCreate(props.code, cat.value, data, ownerSel.value)
         : await api.expenseRowCreate(props.code, teamSel.value, cat.value, data, ownerSel.value);
@@ -252,21 +248,11 @@ async function save() {
         </template>
         <template v-else>
           队伍：<b>{{ teamName }}</b>
-          <!-- 成员新增：给本队任意成员代录（默认自己；行归属=所选出钱人，后端白名单=本队名单） -->
-          <template v-if="isMember() && props.mode === 'create'">
-            · 出钱人（谁付的钱；可代录队友）：
-            <el-select v-model="ownerSel" size="small" style="width: 168px">
-              <el-option v-for="o in pickList" :key="o.v" :label="o.label" :value="o.v" />
-            </el-select>
-            <el-tag v-if="ownerSel === myMember.name" size="small" style="margin-left:4px">本人</el-tag>
-            <el-tag v-else-if="ownerSel" size="small" type="warning" style="margin-left:4px">代录</el-tag>
-          </template>
-          <!-- 成员编辑：归属冻结（只改字段数据；队友的行也可改，行归属仍是对方） -->
-          <template v-else-if="isMember()">
-            · 归属（出钱人）：<b>{{ String(props.row.owner_name) }}</b>
-            <el-tag v-if="String(props.row.owner_name) !== String(myMember.name)" size="small" type="warning" style="margin-left:6px">队友的行 · 你可代编辑</el-tag>
-            <el-tag v-else size="small" style="margin-left:6px">本人</el-tag>
-            <el-tag type="info" size="small" style="margin-left:6px">归属不可改</el-tag>
+          <!-- 成员新增/编辑：出钱人恒=本人、无下拉 —— 新增由服务端强制归属=自己；编辑能打开必是自己名下行 -->
+          <template v-if="isMember()">
+            · 出钱人：<b>{{ ownerSel }}</b><el-tag size="small" style="margin-left:6px">本人</el-tag>
+            <el-tag v-if="props.mode === 'create'" type="info" size="small" style="margin-left:6px">只能记自己名下（他人开销/公用请找负责人代录）</el-tag>
+            <el-tag v-else type="info" size="small" style="margin-left:6px">归属不可改</el-tag>
           </template>
           <template v-else>
             · 归属（出钱人）：
@@ -309,7 +295,7 @@ async function save() {
           </template>
         </template>
         <template v-else>
-          统一支付：{{ isOwner ? '所选出钱人' : (ownerSel === myMember?.name ? '你' : (ownerSel ? `队友「${ownerSel}」` : '所选出钱人')) }}为范围内的人垫付一笔「{{ meta?.zh }}」——范围可勾选多人、其他队伍的成员，或直接选整个项目；金额=这一笔合计，统计记出钱人名下，发票/凭证按类别传一份即可。
+          统一支付：{{ isOwner ? '所选出钱人' : '你' }}为范围内的人垫付一笔「{{ meta?.zh }}」——范围可勾选多人、其他队伍的成员，或直接选整个项目；金额=这一笔合计，统计记出钱人名下，发票/凭证按类别传一份即可。
         </template>
       </p>
 

@@ -1,6 +1,6 @@
 // 报销整理模块冒烟：owner 建项目/队伍/名单 → 匿名只读 → 认领矩阵(404/409/403) →
-// 成员操作(2026-09-04 放开：可给本队名单任意成员代录/互编本队行；跨队/负责人登录态 403；
-//   prop 购买人须=归属；项目级行(全项目统一支付)成员可建/改/删自己名下——他人名下仍 403) →
+// 成员操作(2026-09-06 收紧：只能新增/改/删/传附件「自己名下」的行 —— 队行与项目级行统一口径；
+//   填他人名 403、改/删/传本队队友行 403（他人已填仅负责人可动）；prop 购买人须=本人；跨队 403) →
 // 改名同步 owner_name+prop购买人 → 重置认领旧token失效 → 统一支付(范围三态/项目级范围放开子集留空)
 // 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400、成员可自建自己名下) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
 // 单一身份(12.7)：一账户一项目一名 —— 带 token 再认领=原子换名(switchedFrom) / release 放弃 / 无 token 400 / 失效 404 →
@@ -144,11 +144,13 @@ try {
   const li = me1.members.find((m) => m.name === '李小华');
   ok('他人认领态只读可见', li.claimed === true && li.rowCount === 2 && li.me === false);
 
-  // ---------- 7. member 写权限矩阵（2026-09-04：本队名单任意成员可代录；跨队/非名单 403；空归属=默认自己） ----------
+  // ---------- 7. member 写权限矩阵（2026-09-06 收紧：只能记自己名下 —— 填他人名 403；跨队 403；空归属=默认自己） ----------
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', body: { team_id: t1, category: 'reg', data: { 金额: 1 } } });
   ok('匿名建行 403(先认领)', got.ok);
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '赵大强', data: { 金额: 66.6, 是否帮付: '否', 帮付人: '', 备注: '' } } });
-  ok('成员代录跨队成员 403(归属白名单=本队名单)', got.ok);
+  ok('成员填他人名(跨队赵大强)建行 403(只能记自己名下)', got.ok);
+  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '李小华', data: { 金额: 1, 是否帮付: '否', 帮付人: '', 备注: '' } } });
+  ok('成员填本队队友名建行 403(2026-09-06 取消代录，只能记自己名下)', got.ok);
   const fakeOwn = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', data: { 金额: 66.6, 是否帮付: '否', 帮付人: '', 备注: '' } } });
   ok('成员不填归属建行 → 服务端默认本人', fakeOwn.row.owner_name === '王小明' && fakeOwn.row.data.金额 === 66.6);
   const ridOwn = Number(fakeOwn.row.id);
@@ -160,9 +162,11 @@ try {
   ok('成员 prop 购买人≠本人 403', got.ok);
   const ownProp = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'prop', data: { 购买人: '王小明', 物品名称: '电池', 金额: 12, 是否日常家用: '否', 备注: '' } } });
   ok('成员建自己 prop 行 201', ownProp.row.data.购买人 === '王小明');
-  // 2026-09-04 放开：本队行互可编辑 —— 队友(李小华)的住宿行成员也能改（归属/类别冻结，只改 data）
-  const updTeammate = await api(`/expense/o/${C}/row/${ridHotel}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 酒店名称: '如家', 房号: '801', 入住日期: '2026-07-20', 退房日期: '2026-07-22', 实付金额: 320, 备注: '' } } });
-  ok('成员改本队队友行 200(归属/类别冻结)', updTeammate.row.owner_name === '李小华' && updTeammate.row.category === 'hotel' && Number(updTeammate.row.data.实付金额) === 320);
+  // 2026-09-06 收紧：本队队友行也不可互编 —— 队友(李小华)已填的住宿行成员改/删一律 403（仅负责人可删改）
+  got = await expect(`/expense/o/${C}/row/${ridHotel}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { 酒店名称: '如家', 房号: '801', 入住日期: '2026-07-20', 退房日期: '2026-07-22', 实付金额: 320, 备注: '' } } });
+  ok('成员改本队队友行 403(他人已填仅负责人可改)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${ridHotel}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删本队队友行 403(仅负责人可删)', got.ok);
   const upd = await api(`/expense/o/${C}/row/${ridTrain}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain, 到达地: '杭州' } } });
   ok('成员改自己名下行 200(类别/归属不变)', upd.row.owner_name === '王小明' && upd.row.data.到达地 === '杭州');
   const delOwn = await api(`/expense/o/${C}/row/${ridOwn}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
@@ -201,10 +205,9 @@ try {
   const g3 = await rawReq(`/expense/o/${C}/file/${fidHtml}/download`);
   const g3b = Buffer.from(await g3.arrayBuffer());
   ok('.html 非白名单 → 强制 attachment 下载(字节一致)', (g3.headers.get('content-disposition') || '').startsWith('attachment') && g3b.equals(Buffer.from('<html>x</html>')));
-  // 2026-09-04：本队行成员可互传附件 —— M2(李小华) 替王小明行的 payProof 槽补传（单人行槽位 → 替换原 .html）
-  const u2M = await upload(ridTrain, 'payProof', '发票截图-同队补传.png', Buffer.from('PNG-截图2号\n'), M2);
-  const att2M = await u2M.json();
-  ok('成员替本队队友行补传附件 201(替换原槽位)', u2M.status === 201 && Number(att2M.att.id) !== fidHtml);
+  // 2026-09-06 收紧：成员只给自己名下的行传附件 —— M2(李小华) 替王小明(同队)行补传 403（原 .html 保留）
+  got = await expect(`/expense/o/${C}/row/${ridTrain}/file?slot=payProof`, 403, { method: 'POST', headers: { 'X-Claim-Token': M2 } });
+  ok('成员替本队队友行补传附件 403(他人行仅负责人可传)', got.ok);
 
   // ---------- 9. 改名同步 owner_name + prop 购买人 ----------
   const rn = await api(`/expense/member/${midLi}`, { method: 'PATCH', token: ta, body: { name: '李小华2' } });
@@ -418,14 +421,16 @@ try {
   ok('匿名认领负责人名 403(登录占用)', got.ok);
   got = await expect(`/expense/o/${C}/claim`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { name: '报销负责人' } });
   ok('已认领队员代领负责人名 403(防伪冒)', got.ok);
-  // 同队放开（2026-09-04）：负责人名下同队个人行属"本队行"，队员可代改/代删（防伪冒=该名不可认领、
-  // 登录占用、无 claim token；负责人可见全部记录随时纠错）
+  // 收紧（2026-09-06）：负责人本人的队员身份行同样属"他人名下"—— 同队成员代改/代删 403（防伪冒三层：
+  // 该名不可认领、登录占用、无 claim token；纠错只有负责人登录态能做）
   const rSelf = await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body: { team_id: t1, category: 'train', owner_name: '报销负责人', data: { ...dTrain, 出发地: '广州' } } });
   ok('负责人录入自己的个人行(归属本人 is_owner 名)', rSelf.row.owner_name === '报销负责人' && Number(rSelf.row.data.金额) === 553.5);
-  const rSelfUpd = await api(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain, 出发地: '深圳' } } });
-  ok('成员改负责人名下同队个人行 200(同队放开,归属不变)', rSelfUpd.row.owner_name === '报销负责人' && rSelfUpd.row.data.出发地 === '深圳');
-  const rSelfDel = await api(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
-  ok('成员删负责人名下同队个人行 200(可审计纠错)', !!rSelfDel.message);
+  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain, 出发地: '深圳' } } });
+  ok('成员改负责人名下同队个人行 403(他人已填仅负责人可改)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删负责人名下同队个人行 403', got.ok);
+  const rSelfDel = await api(`/expense/o/${C}/row/${Number(rSelf.row.id)}`, { method: 'DELETE', token: ta });
+  ok('负责人删回自己的行(净零，不扰 §14 级联计数)', !!rSelfDel.message);
   got = await expect(`/expense/member/${mSelfId}/reset-claim`, 400, { method: 'POST', token: ta });
   ok('负责人条目 reset-claim 400(登录占用无 token 可重置)', got.ok);
   // 取消标记 → 回到可认领池（他人可认领 201）；重新标记 → 收回 token（旧 token 立即失效、认领再 403）
@@ -446,11 +451,14 @@ try {
 
   // ---------- 12.7 (2026-09-04) 单一身份约束：一账户(X-Claim-Token)一项目只占一个名字 ----------
   // 已认领着再 claim 他人 = 原子换名（旧名释放、同一 token 复用）；release=放弃回访客；占名冲突 409 原身份不变
-  // (a) 代录队友建行 → 队友行互删（净 0 行，不影响末尾级联计数）
-  const daiRow = await api(`/expense/o/${C}/row`, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '李小华2', data: { 金额: 77.7, 是否帮付: '否', 帮付人: '', 备注: '王小明代录' } } });
-  ok('成员代录本队队友(李小华2)行 201(归属=队友)', daiRow.row.owner_name === '李小华2' && Number(daiRow.row.data.金额) === 77.7);
-  const dDai = await api(`/expense/o/${C}/row/${Number(daiRow.row.id)}`, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
-  ok('成员删自己代录的队友行 200', !!dDai.message);
+  // (a) 2026-09-06 收紧：代录/队友行互删取消 —— 建他人名下队行 403；队友行删除/传附件同样 403
+  // （全部失败即净 0 行，不扰 §14 级联计数）
+  got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', owner_name: '李小华2', data: { 金额: 77.7, 是否帮付: '否', 帮付人: '', 备注: '王小明代录' } } });
+  ok('成员代录本队队友建行 403(2026-09-06 取消代录)', got.ok);
+  got = await expect(`/expense/o/${C}/row/${ridPropLi}`, 403, { method: 'DELETE', headers: { 'X-Claim-Token': M1 } });
+  ok('成员删队友(李小华2)名下 prop 行 403', got.ok);
+  got = await expect(`/expense/o/${C}/row/${ridPropLi}/file?slot=invoice`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('成员给队友行传附件 403(身份拦截先于落盘)', got.ok);
   // (b) 跨队行（§12 赵大强在 t2 的 10 元行）：成员改/删 403（仅负责人）
   const pldX = await api(`/expense/o/${C}`, { headers: { 'X-Claim-Token': M1 } });
   const rowT2 = pldX.rows.find((x) => x.team_id === t2 && x.owner_name === '赵大强');

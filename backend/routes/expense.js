@@ -65,20 +65,18 @@ function identity(req, p) {
   return { role: 'guest', member: null };
 }
 // member 可写行校验：返回 null=放行，否则 {status,error}
-// 2026-09-04 放开（第二波）：成员可操作「自己队伍」的全部行（代录/编辑/删附件不限行归属，创建时白名单=本队名单兜底），
-//   并可新增/编辑/删除「自己名下」的项目级行（team_id 空=全项目统一支付，出钱人=行归属人，创建时服务端强制自己）；
-//   他人名下的项目级行与跨队队伍行仍仅负责人。403 优先级：owner 放行 → guest 先认领 → closed 成员只读 →
-//   项目级他人名下 → 跨队
+// 2026-09-06 收紧（第三波）：成员只能新增/改/删/传附件「自己名下」的行 —— 队伍行与项目级行
+//   （team_id 空=全项目统一支付）一视同仁：出钱人=行归属人，各人自理各人的账；
+//   本队队友行、公用（"队伍"）行、跨队行、他人名下项目级行一律仅负责人可动（他人已填的费用信息非负责人不可删改）。
+//   项目内姓名唯一（新增/改名 409），owner_name 即精确归属，无重名歧义。
+//   403 优先级：owner 放行 → guest 先认领 → closed 成员只读 → 非本人名下（队级/项目级统一拦截）
 function rowWriteError(ctx, p, row) {
   if (ctx.role === 'owner') return null;
   if (ctx.role === 'guest') return { status: 403, error: '请先认领你的身份（打开链接后选自己姓名）' };
   if (String(p.status) !== 'open') return { status: 403, error: '该项目已截止填报，如需修改请联系负责人' };
-  if (row && row.team_id == null) {
-    // 项目级行：成员只能操作自己名下（closed 已被上一分支先拦 → 成员闭幕后对项目级行仍只读）
-    if (String(row.owner_name) === String(ctx.member.name)) return null;
-    return { status: 403, error: '全项目区的记录只能操作自己名下（他人的行请找该出钱人本人或负责人处理）' };
+  if (row && String(row.owner_name) !== String(ctx.member.name)) {
+    return { status: 403, error: '只能操作自己名下的记录 —— 他人已填的费用信息仅负责人可删改（代垫付/公用开销/纠错请联系负责人）' };
   }
-  if (row && Number(row.team_id) !== Number(ctx.member.team_id)) return { status: 403, error: '只能操作自己队伍里的记录（跨队记录请找该队成员或负责人）' };
   return null;
 }
 // 审计（匿名成员动作 user 字段为空照记，detail 带 code 便于排查）
@@ -204,9 +202,10 @@ function touch(p) {
 }
 
 // POST /o/:code/row —— 新增费用行
-// 队伍行：member 可给本队名单任意成员代录（归属=所选本队成员，默认自己）；prop 公共行（归属"队伍"）仅负责人
+// 队伍行：member 服务端强制归属=本人（空默认自己、填他人 403、prop 购买人=自己）——2026-09-06 取消本队代录；
+//   prop 公用行（归属"队伍"）仅负责人可建
 // project_pay 项目级行：全项目统一支付（不属任何队伍，标签页第一块）——owner 可记任一名单成员/本人；
-//   member 只能记自己名下（服务端强制：空默认自己、填他人 403、prop 购买人=自己）；misc ⑥零散票据同为项目级
+//   member 同样只能记自己名下（服务端强制：空默认自己、填他人 403、prop 购买人=自己）；misc ⑥零散票据同为项目级
 o.post('/:code/row', (req, res) => {
   const got = loadRowForWrite(req, res, false);
   if (!got) return;
@@ -276,18 +275,18 @@ o.post('/:code/row', (req, res) => {
   if (ctx.role === 'guest') return res.status(403).json({ error: '请先认领你的身份' });
   if (ctx.role === 'member' && String(p.status) !== 'open') return res.status(403).json({ error: '该项目已截止填报' });
   if (ctx.role === 'member' && Number(team_id) !== Number(ctx.member.team_id)) {
-    return res.status(403).json({ error: '只能给本队录入' });
+    return res.status(403).json({ error: '只能给自己所在的队伍录入' });
   }
-  // 服务端注入归属，payload 无法伪装 —— member 可代录本队名单任意成员（2026-09-04 放开），跨队名单 403
+  // 服务端注入归属，payload 无法伪装 —— member 只能记自己名下（2026-09-06 收紧：取消本队代录，各人各账）
   let owner_name;
   if (ctx.role === 'member') {
-    owner_name = String(body.owner_name || '').trim().slice(0, 20) || String(ctx.member.name);
-    const inRoster = db.prepare('SELECT id FROM expense_member WHERE project_id = ? AND name = ? AND team_id = ?').get(p.id, owner_name, team_id);
-    if (!inRoster) {
-      return res.status(403).json({ error: '只能给本队名单成员录入（出钱人需是本队成员或你本人；代录他人选其名字即可）' });
+    const given = String(body.owner_name || '').trim().slice(0, 20);
+    if (given && given !== String(ctx.member.name)) {
+      return res.status(403).json({ error: `队内记录只能记自己名下 —— 出钱人须是「${ctx.member.name}」本人；替队友垫付或公用开销请找负责人录入` });
     }
-    if (category === 'prop' && String(data.购买人 || '') !== String(owner_name)) {
-      return res.status(403).json({ error: '耗材道具的购买人需与归属成员一致（公用物品请找负责人录入）' });
+    owner_name = String(ctx.member.name);
+    if (category === 'prop' && String(data.购买人 || '') !== owner_name) {
+      return res.status(403).json({ error: '耗材道具的购买人须是你本人（公用物品请找负责人录入）' });
     }
   } else {
     owner_name = String(body.owner_name || '').trim().slice(0, 20);
@@ -314,7 +313,7 @@ o.post('/:code/row', (req, res) => {
   res.status(201).json({ row: rowOut(row, attsOf(row.id)), warnings: norm.warnings });
 });
 
-// PUT /o/:code/row/:rid —— 改行（类别与归属不可改；member 仅本队行或自己名下项目级行、仅 data；负责人可移队）
+// PUT /o/:code/row/:rid —— 改行（类别与归属不可改；member 仅自己名下、队级与项目级统一口径，仅 data；负责人可移队）
 o.put('/:code/row/:rid', (req, res) => {
   const got = loadRowForWrite(req, res);
   if (!got) return;
@@ -325,9 +324,9 @@ o.put('/:code/row/:rid', (req, res) => {
   if (!norm.ok) return res.status(400).json({ error: norm.error });
   const data = norm.data;
   if (row.category === 'prop') {
-    // member 可代录本队行，但购买人不可改归属：须与该行归属成员一致（公用行=“队伍”）
+    // member 只能改自己名下行 → 购买人不可改归属：须=自己（即行归属）；公用“队伍”行成员到不了这里（rowWriteError 已拦）
     if (ctx.role === 'member' && String(data.购买人 || '') !== String(row.owner_name)) {
-      return res.status(403).json({ error: `耗材道具的购买人须与该行归属成员一致（归属：${row.owner_name}；公用物品请找负责人）` });
+      return res.status(403).json({ error: '耗材道具的购买人须是你本人（公用物品请找负责人录入）' });
     }
     if (ctx.role === 'owner' && String(row.owner_name) === '队伍' && String(data.购买人 || '') !== '队伍') {
       return res.status(403).json({ error: '公用物品行的购买人应为“队伍”' });

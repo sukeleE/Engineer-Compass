@@ -1,9 +1,9 @@
 <script setup>
 // 报销整理主视图（/expense）：三态 ——
 // 1) 无 code：落地页（说明 + 邀请码直达 + 登录用户的"我的报销项目"管理）
-// 2) 有 code：填报页（负责人登录=管理态 / 成员认领=可写本队含代录 / 访客=只读）
-// 2026-09-04：一个账户一项目只占一个名字（认领=占名，可放弃换名）；成员可操作本队所有行（不限行归属），
-//   并可新增/编辑/删除自己名下的项目级行（全项目统一支付区 = 横向标签第一个）；主体按「横向标签」切换查看
+// 2) 有 code：填报页（负责人登录=管理态 / 成员认领=只可写自己名下 / 访客=只读）
+// 2026-09-06：一个账户一项目只占一个名字（认领=占名，可放弃换名）；成员只能新增/改/删/传附件「自己名下」的行
+//   （队伍行与全项目统一支付区同一口径，出钱人=本人）；他人已填的信息——本队队友/跨队/项目级一律只读；主体按「横向标签」切换查看
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -102,14 +102,15 @@ onMounted(() => {
 });
 
 // ---- 身份 ----
-// 2026-09-04 放开：成员可操作「自己队伍」的全部行 —— 录入/编辑/删附件不限行归属（代录队友的行也行），
-// 并可新增/编辑/删除「自己名下」的项目级行（team_id 空 = 全项目统一支付；出钱人创建时服务端强制=自己）；
-// 跨队行与他人名下的项目级行仍仅负责人 —— 服务端 rowWriteError 同规则兜底
+// 2026-09-06 收紧：成员只能操作「自己名下」的行 —— 队伍行与项目级行（全项目统一支付）同一口径：
+//   新增时出钱人=本人（服务端强制），改/删/传附件仅限自己名下；本队队友已填的、公用行、跨队行一律只读；
+//   他人已填的费用信息只有负责人能删改 —— 服务端 rowWriteError 同规则兜底
 const open = () => status.value === 'open';
 const myTeamId = computed(() => myMember.value?.team_id || null);
+const myName = computed(() => myMember.value?.name || '');
 const canEditRow = (row) =>
-  row.team_id != null && (isOwner.value || (myRole.value === 'member' && open() && Number(row.team_id) === myTeamId.value));
-const canEditMemberRow = (row) => canEditRow(row) && myRole.value === 'member'; // 成员态同队行（prop 购买人字段冻结用）
+  row.team_id != null && (isOwner.value || (myRole.value === 'member' && open() && String(row.owner_name) === String(myName.value)));
+const canEditMemberRow = (row) => canEditRow(row) && myRole.value === 'member'; // 成员态自己的行（prop 购买人字段冻结用）
 // 能否在某队名下新增记录（负责人 or 本队已认领成员；同队级"＋ 添加记录"按钮口径）
 const canAddIn = (t) => isOwner.value || (myRole.value === 'member' && myTeamId.value === t.id && open());
 // 全项目统一支付 pane 可见：owner 恒可见（代录/纠错）；成员 open 可见（需自理入口）；有行即可见（含读他人行）
@@ -127,7 +128,7 @@ const projPaneVisible = computed(() => isOwner.value || projPayRows.value.length
 const projCanAdd = computed(() => isOwner.value || (myRole.value === 'member' && open()));
 // 项目级行可写：owner 全行；成员仅自己名下且 open（closed 后只读 —— 与服务端 rowWriteError 一致）
 const canEditProjRow = (row) => isOwner.value
-  || (myRole.value === 'member' && open() && String(row.owner_name) === String(myMember.value?.name || ''));
+  || (myRole.value === 'member' && open() && String(row.owner_name) === String(myName.value));
 
 // 认领（一账户一项目只占一个名字）：request 带已有 token 且名字不同 = 后端原子换名（旧名自动释放）
 async function claim(name) {
@@ -136,7 +137,7 @@ async function claim(name) {
     api.expenseSaveClaim(code.value, d.token);
     ElMessage.success(d.switchedFrom
       ? `已放弃「${d.switchedFrom}」、换认领为「${name}」`
-      : `你好，${name}！现在可以填报/代录本队记录，也能在全项目统一支付区录自己名下`);
+      : `你好，${name}！现在可以填报/管理自己名下的记录了（出钱人自动=你本人，本队与全项目统一支付区都能录）`);
     await load(code.value);
   } catch (e) {
     ElMessage.error(e.message);
@@ -147,7 +148,7 @@ async function releaseClaim() {
   if (!myMember.value) return;
   const nm = myMember.value.name;
   try {
-    await ElMessageBox.confirm(`放弃认领「${nm}」？\n\n放弃后本浏览器/账户在该项目里不再占任何名字：不能填报、代录或编辑记录（回到只读），随时可以重新认领任意空名字。`, '放弃认领', { type: 'warning', confirmButtonText: '放弃认领', cancelButtonText: '再想想' });
+    await ElMessageBox.confirm(`放弃认领「${nm}」？\n\n放弃后本浏览器/账户在该项目里不再占任何名字：不能填报或编辑记录（回到只读），随时可以重新认领任意空名字。`, '放弃认领', { type: 'warning', confirmButtonText: '放弃认领', cancelButtonText: '再想想' });
   } catch { return; }
   try {
     await api.expenseRelease(code.value);
@@ -553,10 +554,10 @@ onMounted(() => loadMine());
         <div v-if="claimState === 'owner' && myMember" class="who card">
           <span class="ok-dot"></span>
           你的队员身份：<b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）· 已占用
-          <el-tag v-if="open()" size="small" type="success">可填报/代录本队记录</el-tag>
+          <el-tag v-if="open()" size="small" type="success">登录态可代录/纠错任意记录</el-tag>
           <el-tag size="small" type="danger" effect="plain">队员不能认领你的名字</el-tag>
           <span class="grow"></span>
-          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 队员可互录互编本队记录、自理全项目区自己名下；跨队行与他人项目级行由你代录/纠错</span>
+          <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 队员各记各的、只可自理自己名下；他人已填的行（本队队友/跨队/项目级）由你代录/纠错</span>
         </div>
 
         <!-- 身份条（成员/访客） -->
@@ -564,9 +565,9 @@ onMounted(() => loadMine());
           <template v-if="claimState === 'member'">
             <span class="ok-dot"></span>
             <b>{{ myMember.name }}</b>（{{ teamNameOf(myMember.team_id) }}队）已认领
-            <el-tag v-if="open()" size="small" type="success">可录/编本队行 · 全项目区可录自己名下</el-tag>
+            <el-tag v-if="open()" size="small" type="success">可录/改/删自己名下（出钱人=本人）</el-tag>
             <span class="grow"></span>
-            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 本队互编，全项目区可自理自己名下（他人项目级行/跨队只读）</span>
+            <span class="sub2">本人合计 <b class="my-total">¥{{ fmt(myTotal) }}</b> · 你只能新增/改/删自己名下的记录 —— 队友已填、跨队与项目级他人行一律只读；代录/纠错请找负责人</span>
             <el-button size="small" type="danger" plain @click="releaseClaim" title="放弃后回到只读，可重新认领其他名字">放弃认领（换名）</el-button>
           </template>
           <template v-else-if="claimState === 'guest'">
@@ -630,7 +631,7 @@ onMounted(() => loadMine());
             <p v-if="isOwner" class="dim-tip">
               点「＋ 添加记录」：选类别 → 出钱人（任一队成员或你本人）→ 涵盖的人可勾选（可跨队）、选整个项目全体，或先不选人只存档；⑥ 零散票据（一张含多人/跨队的散票）也在这里添加。<template v-if="!pld.teams.length">还没有队伍 —— 可先点上方「＋ 添加队伍」建队预录名单；成员认领后也能自理自己名下的项目级记录。</template>
             </p>
-            <p v-else class="dim-tip">你可以添加自己名下（出钱人自动=你本人）的统一支付或 ⑥ 零散票据；他人的项目级行只读，代他人垫付/公用开销请找负责人录。</p>
+            <p v-else class="dim-tip">认领后可以添加自己名下的统一支付或 ⑥ 零散票据（出钱人自动=你本人）；他人已填的行 —— 无论本队队友/跨队/项目级 —— 一律只读，代他人垫付/公用开销请找负责人录。</p>
           </el-empty>
         </section>
 
@@ -705,7 +706,7 @@ onMounted(() => loadMine());
           </el-empty>
         </section>
 
-        <p class="foot-note">队员可互录互编本队记录、全项目区自理自己名下（他人项目级行/跨队只读）· 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
+        <p class="foot-note">队员各记各的：只能录/改/删「自己名下」的行（队友已填、跨队、项目级他人行均只读，代录/纠错找负责人）· 附件原件上传后按队打包 · 导出 Excel 每队一个工作表（块小计/总计为公式）</p>
 
         <!-- 录入/编辑弹窗 -->
         <RowFormDialog v-if="dlg.open" v-model="dlg.open" :mode="dlg.mode" :row="dlg.row" :team-id="dlg.teamId"
