@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
-import { normalizePlan } from './schedule.js';
+import { normalizePlan, isOwnSchedule } from './schedule.js';
 import { optionalAuth, teamCtx, hasPerm, logAudit } from './middleware.js';
 
 const r = Router();
@@ -87,6 +87,10 @@ r.post('/', optionalAuth, async (req, res) => {
       if (!(ctx.isOwner || hasPerm(ctx, 'team'))) return res.status(403).json({ error: '仅组长可生成/修改小组计划' });
     }
   }
+  // 个人模式（竞赛/学习日程）：2026-09-05 起登录私有 —— 登录必需；edit 计划必须归属本人（404 不泄露存在性）
+  if (SCHEDULE_MODES.includes(mode) || STUDY_MODES.includes(mode)) {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+  }
 
   // —— 加载上下文（竞赛 / 现有计划 / 现有部门）——
   const comp = comp_id ? db.prepare('SELECT * FROM competition WHERE id = ? AND status = ?').get(Number(comp_id), 'active') : null;
@@ -98,12 +102,12 @@ r.post('/', optionalAuth, async (req, res) => {
   let schedRow = null;
   if (mode === 'schedule-edit') {
     schedRow = db.prepare('SELECT * FROM user_schedule WHERE id = ?').get(Number(schedule_id));
-    if (!schedRow) return res.status(404).json({ error: '日程不存在' });
+    if (!isOwnSchedule(schedRow, req.user.id)) return res.status(404).json({ error: '日程不存在' });
   }
   let studyRow = null;
   if (mode === 'study-edit') {
     studyRow = db.prepare('SELECT * FROM user_study WHERE id = ?').get(Number(study_id));
-    if (!studyRow) return res.status(404).json({ error: '学习日程不存在' });
+    if (!studyRow || String(studyRow.user_id) !== String(req.user.id)) return res.status(404).json({ error: '学习日程不存在' });
   }
 
   // —— 组装系统提示（模式说明 + 上下文 + 输出协议）——
@@ -256,8 +260,9 @@ async function finalize(mode, parsed, o) {
     mergeDone(norm, old);
     const planJson = { comp_id: comp?.id ?? schedRow?.comp_id ?? null, comp_name: comp?.name ?? old.comp_name ?? null, ...norm };
     if (mode === 'schedule') {
+      // 个人私有：个人模式入口已强制登录，归属必为本人（不再落 'local' 匿名池）
       const rr = db.prepare('INSERT INTO user_schedule (comp_id, user_id, is_custom, plan_json) VALUES (?,?,0,?)')
-        .run(comp.id, uid ?? 'local', JSON.stringify(planJson));
+        .run(comp.id, uid, JSON.stringify(planJson));
       return { action: 'plan', reply, plan: planJson, plan_id: rr.lastInsertRowid };
     }
     db.prepare('UPDATE user_schedule SET plan_json = ?, is_custom = 0 WHERE id = ?').run(JSON.stringify(planJson), schedRow.id);
@@ -277,6 +282,7 @@ async function finalize(mode, parsed, o) {
   if (!norm.summary) norm.summary = `${topic || studyRow.topic}（学习日程）`;
   const finalTopic = topic || studyRow.topic;
   if (mode === 'study') {
+    // 个人私有：个人模式入口已强制登录，归属必为本人（不再落 NULL 匿名池）
     const rr = db.prepare('INSERT INTO user_study (user_id, topic, level, goal, hours, plan_json) VALUES (?,?,?,?,?,?)')
       .run(uid, finalTopic, parsed.level ?? null, parsed.goal ?? null, Number(parsed.hours) || 10, JSON.stringify(norm));
     return { action: 'plan', reply, plan: { topic: finalTopic, ...norm }, plan_id: rr.lastInsertRowid };

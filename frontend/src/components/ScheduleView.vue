@@ -290,7 +290,12 @@ const progress = (s) => {
   return { done: tasks.filter((t) => t.done).length, total: tasks.length };
 };
 
-onMounted(load);
+// 未登录引导：跳登录页并在成功后回跳当前 tab（个人日程三页均为登录私有，服务端 401 兜底）
+function goLogin(tab) {
+  router.push(`/login?redirect=/schedule?tab=${tab}`);
+}
+
+onMounted(() => { if (auth.token) load(); }); // 未登录不再请求个人日程列表（后端已 authRequired）
 </script>
 
 <template>
@@ -305,6 +310,8 @@ onMounted(load);
     </el-tab-pane>
 
     <el-tab-pane :label="lab('🏆 竞赛日程', '竞赛')" name="comp">
+    <!-- 2026-09-05 收紧：竞赛/学习日程与月历均为登录私有（服务端 authRequired + 归属校验），未登录只给引导 -->
+    <template v-if="auth.token">
     <div class="page-head">
       <h2>📋 我的备赛日程</h2>
       <div class="head-right">
@@ -472,16 +479,30 @@ onMounted(load);
         </el-tabs>
       </div>
     </div>
+    </template>
+    <el-empty v-else description="登录后创建自己的备赛日程（现按账号私有，仅本人可见）" :image-size="80">
+      <el-button type="primary" @click="goLogin('comp')">去登录</el-button>
+    </el-empty>
     </el-tab-pane>
 
     <el-tab-pane :label="lab('📚 学习日程', '学习')" name="study">
-      <div class="study-wrap">
-        <StudyView />
-      </div>
+      <template v-if="auth.token">
+        <div class="study-wrap">
+          <StudyView />
+        </div>
+      </template>
+      <el-empty v-else description="登录后创建自己的学习日程（现按账号私有，仅本人可见）" :image-size="80">
+        <el-button type="primary" @click="goLogin('study')">去登录</el-button>
+      </el-empty>
     </el-tab-pane>
 
     <el-tab-pane :label="lab('🗓️ 月历', '月历')" name="calendar">
-      <CalendarView />
+      <template v-if="auth.token">
+        <CalendarView />
+      </template>
+      <el-empty v-else description="登录后查看自己完成任务的月历（按账号私有）" :image-size="80">
+        <el-button type="primary" @click="goLogin('calendar')">去登录</el-button>
+      </el-empty>
     </el-tab-pane>
     </el-tabs>
 

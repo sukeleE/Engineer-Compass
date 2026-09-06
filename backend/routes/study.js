@@ -4,11 +4,15 @@ import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
 import { normalizePlan } from './schedule.js';
-import { optionalAuth } from './middleware.js';
+import { authRequired } from './middleware.js';
 import { SEARCH, PLATFORM_META, KNOWLEDGE_PLATFORMS } from './platforms.js';
 
 const r = Router();
 const enc = encodeURIComponent;
+
+// 学习日程归属：user_id 列 INTEGER（NULL=旧匿名遗留，登录认领后不再产生）；
+// 非本人一律按 404 处理（不暴露计划是否存在）
+const ownStudy = (row, uid) => !!row && String(row.user_id) === String(uid);
 
 // 兜底方案：无 AI key 时生成通用学习路径（基础→进阶→项目→复盘）
 function templateStudyPlan(topic, level = '零基础') {
@@ -71,8 +75,8 @@ function finalizePlan(raw, topic, level, hours) {
 }
 
 // POST /api/study/plan — 生成学习日程（主题/水平/目标/每周小时 → AI 计划 + 资料推荐）
-// 登录用户创建的计划绑定 user_id（小组计划同步可见）；匿名创建为 NULL（仅本机可见）
-r.post('/plan', optionalAuth, async (req, res) => {
+// 2026-09-05 收紧：学习日程登录私有，登录必需、归属=本人（旧匿名 NULL 行不再产生，靠登录认领兜底）
+r.post('/plan', authRequired, async (req, res) => {
   const { topic, level, goal, hours } = req.body || {};
   if (!topic || !String(topic).trim()) return res.status(400).json({ error: 'topic（学习主题）必填' });
   const h = Number(hours) || 10;
@@ -88,12 +92,12 @@ r.post('/plan', optionalAuth, async (req, res) => {
   try { resources = buildResources(plan.topic || String(topic).trim(), plan.resource_keywords); } catch { resources = []; }
   const r2 = db.prepare(
     'INSERT INTO user_study (user_id, topic, level, goal, hours, plan_json) VALUES (?,?,?,?,?,?)'
-  ).run(req.user?.id ?? null, String(topic).trim(), level ?? null, goal ?? null, h, JSON.stringify(plan));
+  ).run(req.user.id, String(topic).trim(), level ?? null, goal ?? null, h, JSON.stringify(plan));
   res.status(201).json({ id: r2.lastInsertRowid, topic: String(topic).trim(), plan, resources, note: plan.note });
 });
 
-// POST /api/study/manual — 自编学习计划（不依赖 AI：用户手写阶段/日期/任务）
-r.post('/manual', optionalAuth, (req, res) => {
+// POST /api/study/manual — 自编学习计划（不依赖 AI：用户手写阶段/日期/任务；登录必需，归属本人）
+r.post('/manual', authRequired, (req, res) => {
   const { topic, goal, hours, phases } = req.body || {};
   if (!String(topic || '').trim()) return res.status(400).json({ error: 'topic（学习主题）必填' });
   if (!Array.isArray(phases) || !phases.length) return res.status(400).json({ error: '至少填写一个阶段' });
@@ -112,16 +116,15 @@ r.post('/manual', optionalAuth, (req, res) => {
   const plan = { summary: `${t}（自编学习计划）`, phases: normPhases, resource_keywords: [t] };
   const rr = db.prepare(
     'INSERT INTO user_study (user_id, topic, level, goal, hours, plan_json) VALUES (?,?,?,?,?,?)'
-  ).run(req.user?.id ?? null, t, null, goal ? String(goal).trim() : null, Number(hours) || 10, JSON.stringify(plan));
+  ).run(req.user.id, t, null, goal ? String(goal).trim() : null, Number(hours) || 10, JSON.stringify(plan));
   res.status(201).json({ id: rr.lastInsertRowid, topic: t, plan, message: '自编学习计划已保存' });
 });
 
-// GET /api/study/list — 学习日程列表（登录后只看自己的 + 匿名遗留数据；匿名看全部）
-r.get('/list', optionalAuth, (req, res) => {
-  const rows = (req.user
-    ? db.prepare('SELECT id, user_id, topic, level, goal, hours, plan_json, create_time FROM user_study WHERE user_id = ? OR user_id IS NULL ORDER BY create_time DESC')
-    : db.prepare('SELECT id, user_id, topic, level, goal, hours, plan_json, create_time FROM user_study ORDER BY create_time DESC'))
-    .all(...(req.user ? [req.user.id] : []));
+// GET /api/study/list — 我的学习日程列表（2026-09-05 收紧：仅本人，登录必需）
+r.get('/list', authRequired, (req, res) => {
+  const rows = db.prepare(
+    'SELECT id, user_id, topic, level, goal, hours, plan_json, create_time FROM user_study WHERE user_id = ? ORDER BY create_time DESC'
+  ).all(req.user.id);
   res.json(rows.map((row) => {
     const plan = normalizePlan(JSON.parse(row.plan_json || '{}'));
     const all = plan.phases.flatMap((p) => p.tasks || []);
@@ -130,33 +133,35 @@ r.get('/list', optionalAuth, (req, res) => {
   }));
 });
 
-// GET /api/study/:id — 详情（计划 + 实时生成的平台资料推荐）
-r.get('/:id', (req, res) => {
+// GET /api/study/:id — 详情（计划 + 实时生成的平台资料推荐；仅本人）
+r.get('/:id', authRequired, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   const row = db.prepare('SELECT * FROM user_study WHERE id = ?').get(id);
-  if (!row) return res.status(404).json({ error: '学习日程不存在' });
+  if (!ownStudy(row, req.user.id)) return res.status(404).json({ error: '学习日程不存在' });
   const plan = normalizePlan(JSON.parse(row.plan_json || '{}'));
   res.json({ ...row, plan, resources: buildResources(row.topic, plan.resource_keywords) });
 });
 
-// POST /api/study/:id — 更新计划（勾选保存）
-r.post('/:id', (req, res) => {
+// POST /api/study/:id — 更新计划（勾选保存；仅本人）
+r.post('/:id', authRequired, (req, res) => {
   const id = Number(req.params.id);
   const { plan_json } = req.body || {};
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   if (!plan_json) return res.status(400).json({ error: 'plan_json 必填' });
-  const r2 = db.prepare('UPDATE user_study SET plan_json = ? WHERE id = ?').run(JSON.stringify(plan_json), id);
-  if (r2.changes === 0) return res.status(404).json({ error: '学习日程不存在' });
+  const row = db.prepare('SELECT user_id FROM user_study WHERE id = ?').get(id);
+  if (!ownStudy(row, req.user.id)) return res.status(404).json({ error: '学习日程不存在' });
+  db.prepare('UPDATE user_study SET plan_json = ? WHERE id = ?').run(JSON.stringify(plan_json), id);
   res.json({ id, message: '已保存' });
 });
 
-// DELETE /api/study/:id — 删除
-r.delete('/:id', (req, res) => {
+// DELETE /api/study/:id — 删除（仅本人）
+r.delete('/:id', authRequired, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
-  const r2 = db.prepare('DELETE FROM user_study WHERE id = ?').run(id);
-  if (r2.changes === 0) return res.status(404).json({ error: '学习日程不存在' });
+  const row = db.prepare('SELECT user_id FROM user_study WHERE id = ?').get(id);
+  if (!ownStudy(row, req.user.id)) return res.status(404).json({ error: '学习日程不存在' });
+  db.prepare('DELETE FROM user_study WHERE id = ?').run(id);
   res.json({ id, message: '已删除' });
 });
 

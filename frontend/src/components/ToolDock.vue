@@ -38,8 +38,10 @@ function pick(t) {
 function onClosePanel() { activeTool.value = null; }
 
 // 日程笔记「关联备赛」数据（原 ScheduleView 传入，提升全局后自拉）
+// 2026-09-05 收紧：备赛日程登录私有（后端 authRequired），未登录不再请求
 async function loadSchedules() {
-  try { schedules.value = await api.scheduleList(); } catch { /* 未登录/失败 → 空 */ }
+  if (!auth.token) return;
+  try { schedules.value = await api.scheduleList(); } catch { /* 失败 → 空 */ }
 }
 
 onMounted(() => {

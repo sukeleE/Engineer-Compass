@@ -1,7 +1,9 @@
 <script setup>
 // 竞赛详情弹窗：4个Tab（基础信息 / 备赛流程 / 树状技术栈 / 参赛选择）
 import { ref, computed, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import auth from '../auth.js';
 import { api } from '../api.js';
 import { exportPlanToFeishu } from '../utils/planExport.js';
 import TechTreeChart from './TechTreeChart.vue';
@@ -10,6 +12,7 @@ import ImportPlanDialog from './ImportPlanDialog.vue';
 
 const props = defineProps({ open: Boolean, compId: Number });
 const emit = defineEmits(['close']);
+const router = useRouter();
 
 const comp = ref(null);
 const loading = ref(false);
@@ -289,15 +292,21 @@ function lab(full, short) { return isNarrow.value ? short : full; }
           <!-- Tab5 参赛选择 -->
           <el-tab-pane :label="lab('参赛选择', '参赛')" name="join">
             <template v-if="!joined">
-              <div class="join-intro">
-                <p>确认要参加 <b>{{ comp.name }}</b> 吗？</p>
-                <p class="join-tip">💬 对话：AI 先确认基础与周期再出日程；⚡ 一键：按当前日期直接生成</p>
-              </div>
-              <div class="join-actions">
-                <el-button type="primary" size="large" @click="showChat = true">💬 AI 对话生成备赛日程</el-button>
-                <el-button size="large" :loading="joining" @click="join">⚡ 一键生成</el-button>
-                <el-button size="large" plain @click="importDlg = true">📄 导入计划</el-button>
-              </div>
+              <!-- 2026-09-05 收紧：备赛日程登录私有（后端 authRequired），未登录只给登录引导 -->
+              <template v-if="auth.token">
+                <div class="join-intro">
+                  <p>确认要参加 <b>{{ comp.name }}</b> 吗？</p>
+                  <p class="join-tip">💬 对话：AI 先确认基础与周期再出日程；⚡ 一键：按当前日期直接生成</p>
+                </div>
+                <div class="join-actions">
+                  <el-button type="primary" size="large" @click="showChat = true">💬 AI 对话生成备赛日程</el-button>
+                  <el-button size="large" :loading="joining" @click="join">⚡ 一键生成</el-button>
+                  <el-button size="large" plain @click="importDlg = true">📄 导入计划</el-button>
+                </div>
+              </template>
+              <el-empty v-else description="登录后生成备赛日程（按账号私有，仅本人可见）" :image-size="80">
+                <el-button type="primary" @click="router.push('/login?redirect=/')">去登录</el-button>
+              </el-empty>
             </template>
             <template v-else>
               <div class="plan-head">

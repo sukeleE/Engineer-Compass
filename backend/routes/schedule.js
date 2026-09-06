@@ -2,10 +2,20 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { callDeepSeek } from './ai.js';
-import { optionalAuth, logAudit } from './middleware.js';
+import { authRequired, logAudit } from './middleware.js';
 import { sanitizeStars, sanitizeLinks, sanitizeTarget, sanitizeCompletions, deriveMultiDone } from './taskMeta.js';
 
 const r = Router();
+
+// user_schedule.user_id 存 TEXT（'local' 或历史遗留 REAL 文本如 '36.0'）→ 归属比较一律数值化；
+// 空/'local'/'null' 等非本人标识返回 false。2026-09-05 起收紧为「登录私有」：无匿名池
+export function isOwnSchedule(row, uid) {
+  if (!row) return false;
+  const s = String(row.user_id || '').trim().toLowerCase();
+  if (!s || s === 'local' || s === 'null') return false;
+  const n = Number(s);
+  return Number.isFinite(n) && n === Number(uid);
+}
 
 // 兜底方案：无 AI key 时用子赛项表生成基础计划
 function templatePlan(compId) {
@@ -82,11 +92,11 @@ export function normalizePlan(plan) {
 }
 
 // POST /api/schedule/add — 为某竞赛生成备赛日程
-// 登录用户生成的计划绑定 user_id（小组计划同步可见）；匿名保持 'local' 标识
-r.post('/add', optionalAuth, async (req, res) => {
-  const { comp_id, user_id = 'local' } = req.body || {};
+// 2026-09-05 起个人私有：必须登录，计划归属=本人（不再接受 body.user_id / 'local' 匿名池）
+r.post('/add', authRequired, async (req, res) => {
+  const { comp_id } = req.body || {};
   if (!comp_id) return res.status(400).json({ error: 'comp_id 必填' });
-  const uid = req.user ? req.user.id : user_id;
+  const uid = req.user.id;
   const comp = db.prepare('SELECT * FROM competition WHERE id = ? AND status = ?').get(Number(comp_id), 'active');
   if (!comp) return res.status(404).json({ error: '竞赛不存在或未转正' });
 
@@ -104,12 +114,12 @@ r.post('/add', optionalAuth, async (req, res) => {
   res.status(201).json({ id: r2.lastInsertRowid, plan, note: plan.note });
 });
 
-// POST /api/schedule/:id/optimize — AI 优化现有计划（保留已完成勾选）
-r.post('/:id/optimize', async (req, res) => {
+// POST /api/schedule/:id/optimize — AI 优化现有计划（保留已完成勾选；仅本人，他人 404）
+r.post('/:id/optimize', authRequired, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   const row = db.prepare('SELECT * FROM user_schedule WHERE id = ?').get(id);
-  if (!row) return res.status(404).json({ error: '日程不存在' });
+  if (!isOwnSchedule(row, req.user.id)) return res.status(404).json({ error: '日程不存在' });
 
   const cur = normalizePlan(JSON.parse(row.plan_json || '{}'));
   const comp = db.prepare('SELECT * FROM competition WHERE id = ?').get(row.comp_id);
@@ -154,19 +164,18 @@ ${progress.join('\n') || '（全部未开始）'}
   }
 });
 
-// GET /api/schedule/list — 用户全部日程
-// 登录：显示自己的（user_id=账号）+ 历史匿名计划（'local'）；匿名：仅 'local'
-r.get('/list', optionalAuth, (req, res) => {
-  const base = `SELECT s.id, s.comp_id, s.is_custom, s.plan_json, s.create_time, c.name AS comp_name, c.short_name
-     FROM user_schedule s LEFT JOIN competition c ON c.id = s.comp_id`;
-  const rows = req.user
-    ? db.prepare(`${base} WHERE s.user_id = ? OR s.user_id = 'local' ORDER BY s.create_time DESC`).all(req.user.id)
-    : db.prepare(`${base} WHERE s.user_id = 'local' ORDER BY s.create_time DESC`).all();
+// GET /api/schedule/list — 我的备赛日程列表（2026-09-05 收紧：仅本人，登录必需）
+r.get('/list', authRequired, (req, res) => {
+  const rows = db.prepare(
+    `SELECT s.id, s.comp_id, s.is_custom, s.plan_json, s.create_time, c.name AS comp_name, c.short_name
+     FROM user_schedule s LEFT JOIN competition c ON c.id = s.comp_id
+     WHERE s.user_id = ? ORDER BY s.create_time DESC`
+  ).all(req.user.id);
   res.json(rows.map((row) => ({ ...row, plan: normalizePlan(JSON.parse(row.plan_json || '{}')) })));
 });
 
-// POST /api/schedule/manual — 自编备赛计划（不依赖 AI：用户手写阶段/日期/任务）
-r.post('/manual', optionalAuth, (req, res) => {
+// POST /api/schedule/manual — 自编备赛计划（不依赖 AI：用户手写阶段/日期/任务；登录必需，归属本人）
+r.post('/manual', authRequired, (req, res) => {
   const { comp_id, title, phases } = req.body || {};
   const comp = comp_id ? db.prepare('SELECT * FROM competition WHERE id = ? AND status = ?').get(Number(comp_id), 'active') : null;
   const planTitle = String(title || '').trim() || comp?.name || '我的自编计划';
@@ -183,40 +192,41 @@ r.post('/manual', optionalAuth, (req, res) => {
   const totalTasks = normPhases.reduce((s, p) => s + p.tasks.length, 0);
   if (!normPhases.length || !totalTasks) return res.status(400).json({ error: '阶段内容为空，请至少写一个阶段和任务' });
   const plan = { summary: `${planTitle}（自编计划）`, phases: normPhases };
-  const uid = req.user ? req.user.id : 'local';
   const rr = db.prepare(
     'INSERT INTO user_schedule (comp_id, user_id, is_custom, plan_json) VALUES (?,?,1,?)'
-  ).run(comp?.id ?? null, uid, JSON.stringify(plan));
+  ).run(comp?.id ?? null, req.user.id, JSON.stringify(plan));
   logAudit(req, 'plan-manual', planTitle);
   res.status(201).json({ id: rr.lastInsertRowid, plan, message: '自编计划已保存' });
 });
 
-// POST /api/schedule/:id/edit — 手动修改日程（标记 is_custom=1）
-r.post('/:id/edit', (req, res) => {
+// POST /api/schedule/:id/edit — 手动修改日程（标记 is_custom=1；仅本人）
+r.post('/:id/edit', authRequired, (req, res) => {
   const id = Number(req.params.id);
   const { plan_json } = req.body || {};
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   if (!plan_json) return res.status(400).json({ error: 'plan_json 必填（修改后的计划对象，前端序列化）' });
-  const r2 = db.prepare(
+  const row = db.prepare('SELECT user_id FROM user_schedule WHERE id = ?').get(id);
+  if (!isOwnSchedule(row, req.user.id)) return res.status(404).json({ error: '日程不存在' });
+  db.prepare(
     'UPDATE user_schedule SET plan_json = ?, is_custom = 1 WHERE id = ?'
   ).run(JSON.stringify(plan_json), id);
-  if (r2.changes === 0) return res.status(404).json({ error: '日程不存在' });
   res.json({ id, is_custom: 1, message: '已保存（is_custom=1）' });
 });
 
-// DELETE /api/schedule/:id — 删除日程
-r.delete('/:id', (req, res) => {
+// DELETE /api/schedule/:id — 删除日程（仅本人）
+r.delete('/:id', authRequired, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
-  const r2 = db.prepare('DELETE FROM user_schedule WHERE id = ?').run(id);
-  if (r2.changes === 0) return res.status(404).json({ error: '日程不存在' });
+  const row = db.prepare('SELECT user_id FROM user_schedule WHERE id = ?').get(id);
+  if (!isOwnSchedule(row, req.user.id)) return res.status(404).json({ error: '日程不存在' });
+  db.prepare('DELETE FROM user_schedule WHERE id = ?').run(id);
   res.json({ id, message: '已删除' });
 });
 
 // GET /api/schedule/calendar?month=YYYY-MM — 月历聚合：当月完成事项（竞赛/学习/小组）+ 当月笔记
 // 任务完成时由前端（竞赛/学习 plan_json）或后端（小组 team_plan）记录 done_at=YYYY-MM-DD，按完成日聚合
-// 注册在 /:id/export 之前（express 按注册顺序匹配）
-r.get('/calendar', optionalAuth, (req, res) => {
+// 2026-09-05 收紧：个人日程登录私有 → 月历登录必需（注册在 /:id/export 之前，express 按注册顺序匹配）
+r.get('/calendar', authRequired, (req, res) => {
   const month = String(req.query.month || '').match(/^\d{4}-\d{2}$/)?.[0];
   if (!month) return res.status(400).json({ error: 'month 必填，格式 YYYY-MM' });
   const collect = (plan, planName) => {
@@ -238,43 +248,37 @@ r.get('/calendar', optionalAuth, (req, res) => {
     return out;
   };
 
-  // 竞赛日程：登录=自己的 + 历史匿名 'local'；匿名=仅 'local'（与 /list 同规则）
-  const compBase = `SELECT s.id, s.plan_json, c.name AS comp_name FROM user_schedule s
-     LEFT JOIN competition c ON c.id = s.comp_id`;
-  const compRows = req.user
-    ? db.prepare(`${compBase} WHERE s.user_id = ? OR s.user_id = 'local'`).all(req.user.id)
-    : db.prepare(`${compBase} WHERE s.user_id = 'local'`).all();
+  // 竞赛日程（仅本人）
+  const compRows = db.prepare(
+    `SELECT s.id, s.plan_json, c.name AS comp_name FROM user_schedule s
+     LEFT JOIN competition c ON c.id = s.comp_id WHERE s.user_id = ?`
+  ).all(req.user.id);
   const comp = compRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.comp_name || '我的日程'));
 
-  // 学习日程：仅登录（匿名为空）
-  const studyRows = req.user
-    ? db.prepare('SELECT id, plan_json, topic FROM user_study WHERE user_id = ?').all(req.user.id)
-    : [];
+  // 学习日程（仅本人）
+  const studyRows = db.prepare('SELECT id, plan_json, topic FROM user_study WHERE user_id = ?').all(req.user.id);
   const study = studyRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.topic || '学习日程'));
 
   // 小组计划：我所在小组的全部计划
-  const teamRows = req.user
-    ? db.prepare(
-        `SELECT tp.id, tp.title, tp.plan_json FROM team_plan tp
-         JOIN team_member tm ON tm.team_id = tp.team_id WHERE tm.user_id = ?`
-      ).all(req.user.id)
-    : [];
+  const teamRows = db.prepare(
+    `SELECT tp.id, tp.title, tp.plan_json FROM team_plan tp
+     JOIN team_member tm ON tm.team_id = tp.team_id WHERE tm.user_id = ?`
+  ).all(req.user.id);
   const team = teamRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.title || '小组计划'));
 
   // 当月笔记（与 notes.js 同归属规则）
-  const uid = req.user ? String(req.user.id) : 'local';
   const notes = db.prepare(
     'SELECT id, note_date, status, content FROM daily_note WHERE user_id = ? AND substr(note_date, 1, 7) = ? ORDER BY note_date DESC'
-  ).all(uid, month);
+  ).all(String(req.user.id), month);
 
   res.json({ month, comp, study, team, notes });
 });
 
-// GET /api/schedule/:id/export?format=md|excel — 导出计划
-r.get('/:id/export', (req, res) => {
+// GET /api/schedule/:id/export?format=md|excel — 导出计划（仅本人）
+r.get('/:id/export', authRequired, (req, res) => {
   const id = Number(req.params.id);
   const row = db.prepare('SELECT * FROM user_schedule WHERE id = ?').get(id);
-  if (!row) return res.status(404).json({ error: '日程不存在' });
+  if (!isOwnSchedule(row, req.user.id)) return res.status(404).json({ error: '日程不存在' });
   const plan = normalizePlan(JSON.parse(row.plan_json || '{}'));
   const comp = db.prepare('SELECT name FROM competition WHERE id = ?').get(row.comp_id);
   const fmt = req.query.format || 'md';
