@@ -21,3 +21,29 @@ export const firstImage = (p) => atts(p).find((a) => String(a.mime || '').starts
 
 // 附件展示 URL：base64 内嵌（data）或引用型公开分享链接（url，我的资源引用）
 export const attDataURL = (a) => (a?.data ? `data:${a.mime};base64,${a.data}` : a?.url || '');
+
+// 帖子「类型」→ 决定文件表格首列选哪个图标（GitHub 文件列表风）。看首个附件：
+// 图片/视频/音频/压缩包/外链各归一档，其余（含纯文字帖、文档类附件）都是 file。
+// 依据优先级：mime > 引用型 url（我的资源引用 / 飞书云盘）> 扩展名兜底（历史数据 mime 可能为空）。
+const ARCHIVE_EXT = /\.(zip|rar|7z|tar|gz|bz2|xz)$/i;
+export const postKind = (p) => {
+  const a = atts(p)[0];
+  if (!a) return 'file';
+  const mime = String(a.mime || '');
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (a.url) return 'link'; // 引用型附件（我的资源分享链接 / 飞书文档）——点开是页面不是文件
+  const name = String(a.name || '');
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(name)) return 'image';
+  if (/\.(mp4|mov|webm|avi|mkv)$/i.test(name)) return 'video';
+  if (/\.(mp3|wav|flac|aac|m4a|ogg)$/i.test(name)) return 'audio';
+  if (ARCHIVE_EXT.test(name)) return 'archive';
+  return 'file';
+};
+
+// postKind → GhIcon 的图标名
+export const KIND_ICON = {
+  image: 'file-media', video: 'video', audio: 'audio',
+  archive: 'file-zip', link: 'link', file: 'file',
+};

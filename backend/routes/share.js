@@ -60,6 +60,16 @@ function normTags(raw) {
   return out;
 }
 
+// 幽灵帖隔离条件（服务端强制）：scope 查看自己数据时全量；否则——
+// 管理员：ghost=1 只看幽灵帖，否则全看；幽灵用户：ghost=1 只看幽灵帖，否则只普通帖；普通用户：永远只普通帖
+// alias：帖子表在该查询里的别名（列表主查询 'p'，stats 聚合里 'sp'）—— 原实现硬编码 p.，聚合查询复用不了
+function ghostClause(req, scope, ghostOnly, alias = 'p') {
+  if (scope) return '';
+  if (req.user?.is_admin) return ghostOnly ? `AND ${alias}.is_ghost = 1` : '';
+  if (req.user?.is_ghost) return ghostOnly ? `AND ${alias}.is_ghost = 1` : `AND ${alias}.is_ghost = 0`;
+  return `AND ${alias}.is_ghost = 0`;
+}
+
 // 幽灵帖可见性：普通用户对幽灵帖一律 404（防 ID 探测，与"帖子不存在"同语义）
 function ghostVisible(req, p) {
   return !p?.is_ghost || req.user?.is_ghost || req.user?.is_admin;
@@ -84,15 +94,8 @@ r.get('/posts', optionalAuth, (req, res) => {
   const scope = String(req.query.scope || '');
   if (scope && !req.user) return res.status(401).json({ error: '请先登录' });
 
-  // 幽灵帖隔离（服务端强制）：scope 查看自己数据时全量；否则——
-  // 管理员：ghost=1 只看幽灵帖，否则全看；幽灵用户：ghost=1 只看幽灵帖，否则只普通帖；普通用户：永远只普通帖
   const ghostOnly = req.query.ghost === '1';
-  let ghostCond = '';
-  if (!scope) {
-    if (req.user?.is_admin) ghostCond = ghostOnly ? 'AND p.is_ghost = 1' : '';
-    else if (req.user?.is_ghost) ghostCond = ghostOnly ? 'AND p.is_ghost = 1' : 'AND p.is_ghost = 0';
-    else ghostCond = 'AND p.is_ghost = 0';
-  }
+  const ghostCond = ghostClause(req, scope, ghostOnly, 'p');
   const where = [
     tag ? 'AND p.id IN (SELECT pt.post_id FROM share_post_tag pt JOIN share_tag t ON t.id = pt.tag_id WHERE t.name = ?)' : '',
     scope === 'mine' ? 'AND p.user_id = ?' : '',
@@ -122,7 +125,19 @@ r.get('/posts', optionalAuth, (req, res) => {
      LIMIT ? OFFSET ?`
   ).all(me, me, ...params, size, (page - 1) * size);
 
-  res.json({ rows: rows.map(decorate), total, page, size, sort, tag, scope });
+  // 仓库页顶部徽标：全站聚合。跟随幽灵身份（普通用户不计幽灵帖、幽灵页只算幽灵帖），
+  // 但**不跟随 scope/tag** —— 徽标表示"这个板块有多大"，不该因切到「我的收藏」而缩水。
+  // 四张表都很小，一条聚合可忽略。
+  const gcS = ghostClause(req, '', ghostOnly, 'sp');
+  const stats = db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM share_post sp WHERE 1=1 ${gcS}) AS posts,
+       (SELECT COUNT(*) FROM share_like l JOIN share_post sp ON sp.id = l.post_id WHERE 1=1 ${gcS}) AS likes,
+       (SELECT COUNT(*) FROM share_fav f JOIN share_post sp ON sp.id = f.post_id WHERE 1=1 ${gcS}) AS favs,
+       (SELECT COUNT(*) FROM share_comment c JOIN share_post sp ON sp.id = c.post_id WHERE 1=1 ${gcS}) AS comments`
+  ).get();
+
+  res.json({ rows: rows.map(decorate), total, page, size, sort, tag, scope, stats });
 });
 
 // GET /api/share/posts/:id — 详情（含评论）

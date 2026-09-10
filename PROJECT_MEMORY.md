@@ -244,6 +244,8 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 
 ## 2026-08-25 资源分享模块（贴吧式）
 
+> ⚠️ 本节的**界面形态已被 2026-09-10 重构取代**（卡片流+详情弹窗 → GitHub 仓库页；表/接口/权限均未变），现行口径见文末「2026-09-10 资源分享页重构」。
+
 - **入口**：顶部导航第 4 项「📤 资源分享」/share；移动端汉堡菜单同步
 - **能力**：楼主开楼（标题≤60 + 富文本 + 附件图片/视频/音频/文件 base64 ≤25MB）、索引标签子板块（≤5 个/帖，自建即成为子板块）、点赞/收藏/评论（纯文本，删评限本人/楼主/管理员）、三种排序（最热门=点赞+评论权重 / 最新 / 收藏最高）、标签过滤、分页
 - **表**：share_post / share_tag / share_post_tag / share_like / share_fav / share_comment（schema.sql 表 23~28，外键级联删除）
@@ -253,7 +255,7 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 ## 2026-08-25 用户管理页增强：我的帖子/收藏 + 好友私聊
 
 - **入口**：/me 用户管理页改为四个标签：📊 概览（原有内容）/ 📝 我的帖子 / ⭐ 我的收藏 / 👥 好友私聊
-- **我的帖子/收藏**：复用 share 列表接口加 `scope=mine|favs`（需登录，未登录 401）；点卡片 → `/share?post=ID` 深链自动打开详情弹窗（ShareView onMounted deepLink）
+- **我的帖子/收藏**：复用 share 列表接口加 `scope=mine|favs`（需登录，未登录 401）；点卡片 → `/share?post=ID` 深链自动选中该帖（2026-09-10 起落在下方 README 区，不再是详情弹窗）
 - **好友**：搜索用户（用户名/昵称 LIKE，排除自己）→ 发申请；对方已申请过自己时再发直接互为好友（双向自动接受）；申请接受写 friend 表双向行（A-B 与 B-A 各一行）；删除好友双向清；重复申请被拦截、被拒后重发
 - **私聊**：dm_message 表，GET /friends/dm/:uid 拉最近 100 条升序并顺带把对方发来的标已读（轮询一次往返）；前端弹窗 3s 轮询、关闭即停；好友列表带未读红点 + 最近消息预览（关联子查询）
 - **表**：friend_request（status pending/accepted/rejected）/ friend（双向行 PK user_id+friend_id）/ dm_message（is_read，idx_dm_pair + idx_dm_unread）——schema.sql 表 29~31
@@ -319,3 +321,23 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **前端（ExpenseView.vue / RowFormDialog.vue / api.js / ExpenseGuide.vue）**：canEditRow 成员分支 `String(row.owner_name)===String(myName())`（移除同队比较，新增 myName computed；队行与项目级行共用同一判断）；RowFormDialog 成员态无出钱人下拉=固定姓名 + 「本人」tag + create「只能记自己名下（他人开销/公用请找负责人代录）」/ edit「归属不可改」；身份条/引导卡/toast/FAQ 文案同步（"代录"字样清除）
 - **冒烟**：scripts/smoke_expense.mjs **160 项断言全绿**（沿革 115→156→160）：翻转 §7/§8/§12.6/§12.7a 为 403——成员建本队队友名行、改/删本队队友行、给队友行补传附件、改/删负责人名下同队个人行、删队友名下 prop 行、代录本队队友建行；§14 行数不变（owner 事后删除自己的行净零）；前端 build 通过
 - **注意**：上一会话（09-05）工作区遗留未提交变更（backend/routes/planChat.js、schedule.js、study.js + frontend CompDialog/ScheduleView/ToolDock + scripts/smoke_privacy.mjs）——与报销无关，勿混入本批提交
+
+## 2026-09-10 资源分享页重构：GitHub 仓库页形态（现行口径，取代 08-25 贴吧式）
+
+- **需求**：用户「把资源分享页做成类似 GitHub 页面」→ 先调研现成方案（结论：**没有能直接用的**——文件管理器组件库是网盘外观且要接 driver 协议捆 Uppy/CodeMirror；GitHub 克隆项目全是 React 只能当参考；真正可复用的只有 github-markdown-css / @primer/octicons 两个零件。**GitHub 仓库页本质是三块布局 + 一套灰阶，不是组件**，手写反而白吃本项目已有的 CSS 变量双主题）→ 用户确认五项：整页重排成仓库页 / 一条帖子=一行文件 / 零新增依赖手写 / tabs=资源·我的帖子·我的收藏 / 配色跟随 var(--primary)
+- **形态**：面包屑仓库头（owner/板块名 + 公开·仅怪奇可见 pill + 描述 + 4 个统计徽标 + 开楼按钮）→ 标签页条（tabs 左、排序 el-dropdown 右，压在底边线上）→ 两栏主体 `minmax(0,1fr) 288px`（左＝筛选框+文件表+分页+README 框；右＝About+Topics）。**详情弹窗整体删除**（`detailDlg` → `selId`/`cur`），点行改为在下方 README 框展开正文/附件/讨论，README 里的评论按 GitHub issue 风排版（左头像 + 右「昵称 commented 相对时间」头栏）
+- **后端（`routes/share.js`，四处改动全是增量）**：把原来硬编码别名 `p.` 的 `ghostCond` 抽成 `ghostClause(req, scope, ghostOnly, alias = 'p')`（聚合查询要用 `sp`，复用不了原实现）；列表处理器在 rows 之后追加一条四张表聚合 SQL，随响应新增**顶层 `stats`** `{posts,likes,favs,comments}`。**口径**：stats 跟随幽灵身份（普通用户不计幽灵帖、幽灵页只算幽灵帖），但**不跟随 scope/tag**——徽标表示「这个板块有多大」，不该因切到「我的收藏」而缩水。查询参数（sort/tag/page/size/scope/ghost）一个没动，`stats` 是纯增量 → ghost/friends/notifications 三个冒烟零改动通过
+- **主题变量（`styles/main.scss`，新增 4 个）**：`:root` 与 `html.ghost-mode` **两处都必须声明**——`html.ghost-mode` 只覆盖 `:root` 里已有的同名变量，组件里写死 hex 会在暗色下出白块。取值从本项目自己的 slate 色阶往两端推，**不抄 GitHub 的 hex**（GitHub 的 `#d0d7de`/`#161b22` 偏蓝，与本项目冷灰蓝、幽灵主题中性紫调都不是一路）：`--surface-1`（表头底/行悬停）、`--border-2`（比 `--border` 深/亮一档 → 文件框外框）、`--text-3`（三级文字）、`--font-mono`（README 正文 pre 用）
+- **工具函数**：`utils/time.js` 新增 `fmtRelative`（刚刚/N 分钟前/N 小时前/N 天前/N 个月前，超一年回落 `fmtDateOnly`）——**必须经 `toLocal()`**，后端存的是无时区标记的 UTC 串，裸 `new Date('2026-09-10 08:00:00')` 会被浏览器当本地时间差 8 小时；`utils/share.js` 新增 `postKind(p)`（image/video/audio/link/archive/file，看首个附件的 mime > 引用型 url > 扩展名兜底）+ `KIND_ICON` 映射
+- **新组件 `components/share/`**：`GhIcon.vue`（内联 Octicons 19.11.0，21 个图标以字符串字面量存 `<script setup>`，`fill="currentColor"` → 颜色由父级 CSS 决定，双主题自动跟随；**Octicons 没有 audio/music，实测 404**——音频键映射到 `unmute` 喇叭图标）；`ShareFileTable.vue`（表头 名称/作者/互动/更新时间，行图标随 `postKind` 变，≤768px 用 `display:none` 藏作者与互动列）；`ShareReadme.vue`（三态：加载/错误就地渲染/内容；错误态不弹 toast 不整页清空，深链指向已删帖时用得上）
+- **选中链路（`ShareView.vue`）**：`?post=ID` 是选中态的持久化载体，`selId`/`cur` 为唯一来源；**`watch(() => route.query.post, …, { immediate: true })`** 统一深链/站内二次跳转/前进后退（旧 `deepLink()` 只在 `onMounted` 读一次 → 第二次点行不生效，本次顺手修掉）；点行时若目标 URL 与当前完全相同，vue-router 会去重、watch 不触发 → 必须**先本地 `selectPost(id)` 再 replace**（`pickRow`，否则表现为「点了没反应」）；选中帖一律按 id 直拉详情（`api.sharePost`），**不能改成从列表行取**——帖子可能不在当前页/当前 tab 里，且评论只有详情接口返回
+- **两个数据持有者**：`rows`（列表）与 `cur`（README）是同一份数据的两个副本，任何计数/标志变更**必须经 `applyActs(id, patch)` 同时写**，否则列表行与 README 的数字会对不上（点赞是典型）——`normAtts` 对数组入参返回**同一引用**，详情对象是「活」的，同步才有意义
+- **`openEdit` 必须浅拷贝附件**：`.map(a => ({...a}))`——`normAtts` 对数组入参返回同一引用，直接赋值会让编辑器的附件数组与 README/列表里那份是同一个，删个 chip 就当场改掉了背后的帖子，取消也回滚不了
+- **幽灵页 `/ghost-share` 只留一个静态标签**：`scope` 非空会绕过幽灵隔离（后端有意为之：查看自己数据时全量），摆到秘密分享页上会混进普通帖 → 幽灵页不渲染「我的帖子/我的收藏」两个 tab，tabs 条渲染成单静态标签；发帖恒为幽灵帖
+- **探针 `scripts/probe_share.mjs`（46 项，`npm run probe:share`）**：DOM 级守护重做后的核心链路——徽标=API `stats`、行数=min(total,每页10)、行图标随附件类型变、点行→README 出标题正文、点赞三处同步（README 按钮/表格行=帖子级 like_count，头部徽标=全站 stats.likes，**两者口径不同不能混用同一基准数**）、发评论、我的收藏 tab 只剩收藏帖、深链 `?post=ID` 直达、深链指向不存在帖就地报错、连续点两行、标签过滤、幽灵页单标签+反向过滤+暗色类、375px 折叠、普通用户看不到幽灵帖。`PROBE_API`/`PROBE_WEB` 可覆盖（对着临时实例跑不必动用户的 :3000）；截图落 `os.tmpdir()`（不进仓库、不脏 git status）
+- **坑（本次踩到）**：
+  - **后端进程不热重载**——改了 `routes/*.js` 必须重启 `:3000`，否则探针/冒烟测的是**旧代码**。症状：`stats` 全 `undefined`、徽标恒 0、而 API 直连另一端口一切正常。改后端后先重启再跑测试
+  - **`fullPage: true` 截图前必须等页面重排结束**（`waitForTimeout(800)`）：文档高度在拼接过程中变化会拼出**白色空带**，看着像暗色主题漏白块，实为截图假告警（本次据此误判过一次，用 `getComputedStyle` 实测各层背景色才排除）
+  - **断言「列被藏掉」要看可见性，不能数节点**：窄屏是 `display:none`，DOM 里 4 列仍在 → `locator.count()` 恒为 4
+  - 幽灵页 Topics 侧的标签计数**不做幽灵过滤**（`shareTags` 既有行为，混合计数），本次未改
+- **验证**：`probe_share.mjs` **46/46**；回归 `smoke_ghost` 30/30、`smoke_friends` 25/25、`smoke_notifications` 10/10、`smoke_privacy` 36/36、`smoke_expense` 170/170（1 跳过=上游限流）；前端 build 通过；浅色+暗色(`html.ghost-mode`)+375px 三张截图人工过目

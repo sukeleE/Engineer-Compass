@@ -1,51 +1,71 @@
 <script setup>
-// 资源分享（贴吧式板块）：楼主开楼（富文本 + 多媒介附件 + 索引标签子板块）
-// 三种排序视图：最热门 / 最新 / 收藏最高；标签 chips 构成子板块；点赞 / 收藏 / 评论
-import { ref, onMounted } from 'vue';
+// 资源分享（GitHub 仓库页形态）：仓库头 + 标签页 + 文件表 + README 框 + About 侧栏
+// 一条帖子 = 文件表里的一行；点行 → 下方 README 框展开该帖正文/附件/讨论（不再弹详情弹窗）
+// tabs：资源(全部) / 我的帖子 / 我的收藏 —— 复用后端已有的 scope=mine|favs
+// 幽灵页（/ghost-share）：只留「资源」一个静态标签 + 排序，不发 scope（scope 会绕过幽灵隔离）
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
-import { openImage } from '../utils/imageViewer.js';
-import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import RichEditor from './team/RichEditor.vue';
 import DocPicker from './team/DocPicker.vue';
-import AttachmentList, { normAtts } from './team/AttachmentList.vue';
+import { normAtts } from './team/AttachmentList.vue';
 import ResourcePicker from './ResourcePicker.vue';
-import { fmtDateTime, fmtShort } from '../utils/time.js';
+import ShareFileTable from './share/ShareFileTable.vue';
+import ShareReadme from './share/ShareReadme.vue';
+import GhIcon from './share/GhIcon.vue';
 
 const router = useRouter();
 const route = useRoute();
 // ghost 模式（/ghost-share 秘密分享页）：只显示幽灵帖、发帖恒为幽灵帖；普通分享页幽灵用户发帖默认也发幽灵帖
 const props = defineProps({ ghost: { type: Boolean, default: false } });
-const toProfile = (uid) => router.push(uid === auth.user?.id ? '/me' : `/user/${uid}`);
+const toProfile = (uid) => router.push(Number(uid) === Number(auth.user?.id) ? '/me' : `/user/${uid}`);
 
-// —— 列表状态：排序视图 + 标签子板块 + 分页 ——
-const sort = ref('hot'); // hot 最热门 | new 最新 | fav 收藏最高
-const tag = ref('');
-const page = ref(1);
-const size = 10;
-const rows = ref([]);
-const total = ref(0);
-const loading = ref(false);
-const tagList = ref([]);
-
+// —— 视图：标签页 + 排序 + 标签子板块 + 分页 ——
+const TABS = [
+  { key: 'all', full: '📄 资源', short: '资源' },
+  { key: 'mine', full: '📝 我的帖子', short: '帖子' },
+  { key: 'favs', full: '⭐ 我的收藏', short: '收藏' },
+];
+const tab = ref('all');
+const scope = computed(() => (props.ghost || tab.value === 'all' ? '' : tab.value)); // 幽灵页恒不发 scope
 const SORTS = [
   { key: 'hot', full: '🔥 最热门', short: '最热' },
   { key: 'new', full: '🕐 最新', short: '最新' },
   { key: 'fav', full: '⭐ 收藏最高', short: '收藏' },
 ];
+const sort = ref('hot');
+const tag = ref('');
+const page = ref(1);
+const size = 10;
+const rows = ref([]);
+const total = ref(0);
+const stats = ref({ posts: 0, likes: 0, favs: 0, comments: 0 }); // 仓库头徽标；首屏 load 前即可安全渲染
+const loading = ref(false);
+const tagList = ref([]);
+const filterText = ref(''); // 文件表筛选框（只筛当前页，后端无搜索接口）
+
+// matchMedia 监听用具名函数 + onBeforeUnmount 移除（旧实现传匿名函数，切路由会累积监听器）
 const mqNarrow = window.matchMedia('(max-width: 768px)');
 const isNarrow = ref(mqNarrow.matches);
-mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
+const onMq = (e) => { isNarrow.value = e.matches; };
+onMounted(() => mqNarrow.addEventListener('change', onMq));
+onBeforeUnmount(() => mqNarrow.removeEventListener('change', onMq));
+const tabLabel = (t) => (isNarrow.value ? t.short : t.full);
 const sortLabel = (s) => (isNarrow.value ? s.short : s.full);
 
 async function load() {
   loading.value = true;
   try {
-    const data = await api.sharePosts({ sort: sort.value, tag: tag.value, page: page.value, size, ...(props.ghost ? { ghost: 1 } : {}) });
+    const data = await api.sharePosts({
+      sort: sort.value, tag: tag.value, page: page.value, size,
+      ...(scope.value ? { scope: scope.value } : {}),
+      ...(props.ghost ? { ghost: 1 } : {}),
+    });
     rows.value = data.rows;
     total.value = data.total;
+    if (data.stats) stats.value = data.stats;
   } catch (e) {
     ElMessage.error(e.message);
   } finally {
@@ -55,14 +75,18 @@ async function load() {
 async function loadTags() {
   try { tagList.value = await api.shareTags(); } catch { /* 标签加载失败不阻塞列表 */ }
 }
-function changeSort(s) { sort.value = s; page.value = 1; load(); }
-function pickTag(t) { tag.value = t; page.value = 1; load(); }
-// 深链：/share?post=ID 自动打开详情（用户管理页「我的帖子/收藏」跳转过来）
-function deepLink() {
-  const id = Number(route.query.post);
-  if (id) openPost({ id });
+
+// 切「我的帖子/我的收藏」：未登录后端必 401 → 提前拦截并引导，且**不切 tab**（否决式）
+function changeTab(k) {
+  if (k === tab.value) return;
+  if (k !== 'all' && needLogin()) return;
+  tab.value = k;
+  page.value = 1;
+  load();
 }
-onMounted(() => { load(); loadTags(); deepLink(); });
+function changeSort(v) { sort.value = v; page.value = 1; load(); }
+function pickTag(t) { tag.value = t; page.value = 1; load(); }
+function onPage(v) { page.value = v; load(); }
 
 const isMine = (p) => !!auth.user && (Number(p.author_id) === Number(auth.user.id) || auth.user.is_admin);
 const needLogin = () => {
@@ -72,9 +96,137 @@ const needLogin = () => {
   return true;
 };
 
-// 富文本里的图片点击 → 全屏预览
-function onRichClick(e) {
-  if (e.target.tagName === 'IMG') openImage(e.target.currentSrc || e.target.src, '帖子图片');
+// —— 选中态（README 区）——
+// 选中帖一律按 id 直拉详情：它可能不在当前页/当前 tab 的列表里（消息通知、我的收藏点进来），
+// 评论也只有详情接口返回 —— 所以不能改成「从列表行取」。
+const selId = ref(null);
+const cur = ref(null);
+const curLoading = ref(false);
+const curError = ref('');
+const feishuUrl = ref('');
+const readmeRef = ref(null);
+
+// 唯一 api.sharePost + 唯一 normAtts 调用点（4 处刷新都走它，漏一处附件就变回 JSON 字符串）
+// normAtts 对数组入参返回同一引用 → 详情对象是「活」的，父层 applyActs 同步计数才有意义
+async function fetchPost(id) {
+  const d = await api.sharePost(id);
+  d.attachments = normAtts(d.attachments);
+  return d;
+}
+async function selectPost(id) {
+  selId.value = Number(id);
+  curLoading.value = true;
+  curError.value = '';
+  feishuUrl.value = '';
+  try {
+    cur.value = await fetchPost(id);
+    // 嵌入式查看：查该帖是否已关联飞书文档（有则显示直达链接）
+    if (auth.token) {
+      api.feishuBizStatus('share_post', id).then((s) => { if (s?.mapped) feishuUrl.value = s.doc_url; }).catch(() => {});
+    }
+    await nextTick();
+    scrollToReadme();
+  } catch (e) {
+    cur.value = null;
+    curError.value = e.message; // 就地渲染（深链指向已删/无权帖），不弹 toast、不整页清空
+  } finally {
+    curLoading.value = false;
+  }
+}
+function scrollToReadme() {
+  const el = readmeRef.value?.$el;
+  if (!el) return;
+  // 只在 README 大半在屏幕外时才滚，避免小幅跳动
+  if (el.getBoundingClientRect().top > window.innerHeight * 0.5) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 点行：URL 是选中态的持久化载体，但必须「先本地生效」——
+// 目标 URL 与当前完全相同时 vue-router 会去重、watch 不触发，此时要能刷新/重试（否则像「点了没反应」）
+function pickRow(id) {
+  if (Number(route.query.post) === Number(id)) { selectPost(id); return; }
+  router.replace({ query: { ...route.query, post: String(id) } }).catch(() => {});
+}
+function closeReadme() {
+  selId.value = null;
+  cur.value = null;
+  curError.value = '';
+  feishuUrl.value = '';
+  router.replace({ query: { ...route.query, post: undefined } }).catch(() => {});
+}
+// 深链 / 站内二次跳转 / 浏览器前进后退统一入口（immediate 覆盖首次挂载）
+function applyQueryPost(v) {
+  const id = Number(v);
+  if (!id) {
+    selId.value = null; cur.value = null; curError.value = ''; feishuUrl.value = '';
+    return;
+  }
+  if (Number(selId.value) === id && cur.value) { scrollToReadme(); return; }
+  selectPost(id);
+}
+watch(() => route.query.post, applyQueryPost, { immediate: true });
+
+// —— 列表与 README 是两个数据持有者，任何计数/标志变更必须同时写，否则两处数字会对不上 ——
+function applyActs(id, patch) {
+  const n = Number(id);
+  const r = rows.value.find((x) => Number(x.id) === n);
+  if (r) Object.assign(r, patch);
+  if (Number(cur.value?.id) === n) Object.assign(cur.value, patch);
+}
+
+// —— 点赞 / 收藏（toggle，乐观更新） ——
+async function toggleLike(p, ev) {
+  if (ev?.stopPropagation) ev.stopPropagation();
+  if (needLogin()) return;
+  try {
+    const r = await api.shareLike(p.id);
+    applyActs(p.id, { is_liked: r.liked ? 1 : 0, like_count: r.count });
+    stats.value.likes += r.liked ? 1 : -1; // 头部徽标同步
+  } catch (e) { ElMessage.error(e.message); }
+}
+async function toggleFav(p, ev) {
+  if (ev?.stopPropagation) ev.stopPropagation();
+  if (needLogin()) return;
+  try {
+    const r = await api.shareFav(p.id);
+    applyActs(p.id, { is_faved: r.faved ? 1 : 0, fav_count: r.count });
+    stats.value.favs += r.faved ? 1 : -1;
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// —— 评论 ——
+const commentSending = ref(false);
+async function sendComment(text) {
+  if (!cur.value || needLogin()) return;
+  commentSending.value = true;
+  try {
+    const c = await api.shareComment(cur.value.id, text);
+    (cur.value.comments ||= []).push(c);
+    applyActs(cur.value.id, { comment_count: (cur.value.comment_count || 0) + 1 });
+    stats.value.comments += 1;
+  } catch (e) { ElMessage.error(e.message); } finally { commentSending.value = false; }
+}
+async function delComment(c) {
+  try {
+    await api.shareCommentDelete(c.id);
+    cur.value.comments = cur.value.comments.filter((x) => x.id !== c.id);
+    applyActs(cur.value.id, { comment_count: Math.max(0, (cur.value.comment_count || 0) - 1) });
+    stats.value.comments = Math.max(0, stats.value.comments - 1);
+    ElMessage.success('评论已删除');
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+async function delPost(p) {
+  try {
+    await ElMessageBox.confirm(`删除帖子「${p.title}」？评论与点赞收藏将一并删除`, '删除帖子', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.shareDelete(p.id);
+    // 选中态与 URL 一起清：否则刷新还会去拉一个已删帖
+    if (Number(selId.value) === Number(p.id)) closeReadme();
+    ElMessage.success('帖子已删除');
+    await load(); await loadTags();
+    stats.value.posts = Math.max(0, stats.value.posts - 1);
+  } catch (e) { ElMessage.error(e.message); }
 }
 
 // —— 发帖 / 编辑弹窗 ——
@@ -91,8 +243,8 @@ const attPick = (e) => {
     const reader = new FileReader();
     reader.onload = () => {
       const data = String(reader.result).split(',')[1];
-      const total = form.value.atts.reduce((s, a) => s + a.data.length, 0) + data.length;
-      if (total > MAX_ATT_TOTAL) { ElMessage.warning('附件总量超限（≤25MB）'); return; }
+      const total2 = form.value.atts.reduce((s, a) => s + (a.data || '').length, 0) + data.length;
+      if (total2 > MAX_ATT_TOTAL) { ElMessage.warning('附件总量超限（≤25MB）'); return; }
       form.value.atts.push({ name: f.name, size: f.size, mime: f.type || 'application/octet-stream', data });
     };
     reader.readAsDataURL(f);
@@ -116,8 +268,9 @@ function openEdit(p) {
   if (!isMine(p)) return;
   editingId.value = p.id;
   feishuOpened.value = false;
-  let atts = [];
-  try { atts = typeof p.attachments === 'string' ? JSON.parse(p.attachments) : p.attachments || []; } catch {}
+  // 必须浅拷贝：normAtts 对数组入参返回**同一引用**，直接赋值会让编辑器的附件数组
+  // 与 README/列表里那份是同一个 —— 删个 chip 就当场改掉了背后的帖子，取消也回滚不了
+  const atts = normAtts(p.attachments).map((a) => ({ ...a }));
   form.value = { title: p.title, content: p.content, atts, tags: [...(p.tags || [])], isGhost: true };
   postDlg.value = true;
 }
@@ -134,40 +287,18 @@ async function submit() {
       const isGhost = props.ghost ? 1 : (auth.user?.is_ghost ? (form.value.isGhost ? 1 : 0) : 0);
       await api.shareCreate({ title: form.value.title, content: form.value.content, attachments: form.value.atts, tags: form.value.tags, is_ghost: isGhost });
       ElMessage.success(props.ghost ? '👻 秘密帖子发布成功' : '🚀 开楼成功');
+      stats.value.posts += 1;
     }
     postDlg.value = false;
     await load(); await loadTags();
-    // 详情弹窗开着时同步刷新（编辑的正是当前查看的帖子）
-    if (detailDlg.value && editingId.value && cur.value?.id === editingId.value) {
-      cur.value = await api.sharePost(editingId.value);
-    }
-  } catch (e) { ElMessage.error(e.message); }
-}
-
-// —— 点赞 / 收藏（toggle，乐观更新） ——
-async function toggleLike(p, ev) {
-  if (ev?.stopPropagation) ev.stopPropagation();
-  if (needLogin()) return;
-  try {
-    const r = await api.shareLike(p.id);
-    p.is_liked = r.liked ? 1 : 0;
-    p.like_count = r.count;
-  } catch (e) { ElMessage.error(e.message); }
-}
-async function toggleFav(p, ev) {
-  if (ev?.stopPropagation) ev.stopPropagation();
-  if (needLogin()) return;
-  try {
-    const r = await api.shareFav(p.id);
-    p.is_faved = r.faved ? 1 : 0;
-    p.fav_count = r.count;
+    // README 正显示这条帖时同步刷新（编辑的正是当前查看的）
+    if (cur.value?.id === editingId.value) cur.value = await fetchPost(editingId.value);
   } catch (e) { ElMessage.error(e.message); }
 }
 
 // —— 飞书编辑（P1）：分享帖 ↔ 飞书文档 ——
 // 「飞书编辑」= 创建/打开飞书文档（新建自动带存量内容 + 自动同步回库）；「从飞书同步」= 手动拉取最新
 const feishuBusy = ref(false);
-const feishuUrl = ref(''); // 当前详情帖已关联的飞书文档链接（嵌入式查看徽标）
 const feishuOpened = ref(false); // 本次编辑已打开飞书（显示「飞书编辑中」状态条）
 async function feishuEdit(p) {
   let pid = p?.id || editingId.value;
@@ -191,7 +322,7 @@ async function feishuEdit(p) {
     feishuOpened.value = true;
     window.open(r.url, '_blank');
     ElMessage.success(r.created ? '已创建飞书文档并打开，可在飞书里完善内容' : '已同步最新内容，飞书文档已打开');
-    if (detailDlg.value && cur.value?.id === pid) cur.value = await api.sharePost(pid);
+    if (cur.value?.id === pid) cur.value = await fetchPost(pid);
   } catch (e) { ElMessage.error(e.message); }
   finally { feishuBusy.value = false; }
 }
@@ -209,116 +340,114 @@ async function feishuSync(p) {
   try {
     const r = await api.feishuBizSync('share_post', pid);
     ElMessage.success(r.message || '✅ 已从飞书同步');
-    if (detailDlg.value && cur.value?.id === p.id) cur.value = await api.sharePost(p.id);
+    if (cur.value?.id === pid) cur.value = await fetchPost(pid);
   } catch (e) { ElMessage.error(e.message); }
   finally { feishuBusy.value = false; }
 }
 
-// —— 详情弹窗（含评论） ——
-const detailDlg = ref(false);
-const cur = ref(null);
-const commentInput = ref('');
-const commentSending = ref(false);
-async function openPost(p) {
-  try {
-    cur.value = await api.sharePost(p.id);
-    cur.value.attachments = normAtts(cur.value.attachments); // 库存储为 JSON 字符串，详情模板按数组用（AttachmentList 也内部容错）
-    detailDlg.value = true;
-    // 嵌入式查看：查询该帖是否已关联飞书文档（有则显示「在飞书打开」徽标）
-    feishuUrl.value = '';
-    api.feishuBizStatus('share_post', p.id).then((s) => { if (s?.mapped) feishuUrl.value = s.doc_url; }).catch(() => {});
-  } catch (e) { ElMessage.error(e.message); }
-}
-async function sendComment() {
-  if (!cur.value) return;
-  if (needLogin()) return;
-  const text = commentInput.value.trim();
-  if (!text) return ElMessage.warning('写点评论内容');
-  commentSending.value = true;
-  try {
-    const c = await api.shareComment(cur.value.id, text);
-    cur.value.comments.push(c);
-    cur.value.comment_count = (cur.value.comment_count || 0) + 1;
-    commentInput.value = '';
-  } catch (e) { ElMessage.error(e.message); } finally { commentSending.value = false; }
-}
-async function delComment(c) {
-  try {
-    await api.shareCommentDelete(c.id);
-    cur.value.comments = cur.value.comments.filter((x) => x.id !== c.id);
-    cur.value.comment_count = Math.max(0, (cur.value.comment_count || 0) - 1);
-    ElMessage.success('评论已删除');
-  } catch (e) { ElMessage.error(e.message); }
-}
-async function delPost(p) {
-  try {
-    await ElMessageBox.confirm(`删除帖子「${p.title}」？评论与点赞收藏将一并删除`, '删除帖子', { type: 'warning' });
-  } catch { return; }
-  try {
-    await api.shareDelete(p.id);
-    detailDlg.value = false;
-    ElMessage.success('帖子已删除');
-    await load(); await loadTags();
-  } catch (e) { ElMessage.error(e.message); }
-}
+const emptyText = computed(() => (tag.value
+  ? `「${tag.value}」子板块还没有帖子，来开第一楼`
+  : (props.ghost ? '还没有秘密帖子，来开第一座幽灵楼' : '还没有帖子，点「开楼发帖」分享第一个资源')));
+const inList = computed(() => !!cur.value && rows.value.some((r) => Number(r.id) === Number(cur.value.id)));
+
+onMounted(() => { load(); loadTags(); });
 </script>
 
 <template>
   <main class="share-page">
-    <!-- 头部：标题 + 开楼按钮 -->
-    <div class="sp-head">
-      <div>
-        <h2>{{ props.ghost ? '👻 秘密分享' : '📤 资源分享' }}</h2>
-        <p class="sp-sub">{{ props.ghost ? '怪奇小队专属领地：幽灵帖仅幽灵可见，普通世界完全无痕' : '贴吧式交流区：分享资料/经验/作品，图文视频音频文件' }}</p>
+    <!-- 仓库头：面包屑 + 标题 + 描述 + 徽标 + 主按钮 -->
+    <header class="gh-repohead">
+      <div class="gh-crumb">
+        <GhIcon name="book" :size="16" />
+        <span class="gh-owner">Engineer-Compass</span>
+        <span class="gh-sep">/</span>
+        <b>{{ props.ghost ? '秘密分享' : '资源分享' }}</b>
+        <span class="gh-vis">{{ props.ghost ? '🔒 仅怪奇可见' : '公开' }}</span>
       </div>
-      <el-button type="primary" size="large" @click="openNew">{{ props.ghost ? '👻 开幽灵帖' : '📝 开楼发帖' }}</el-button>
+      <p class="gh-desc">{{ props.ghost ? '怪奇小队专属领地：幽灵帖仅幽灵可见，普通世界完全无痕' : '贴吧式交流区：分享资料/经验/作品，图文视频音频文件' }}</p>
+      <div class="gh-headrow">
+        <div class="gh-badges">
+          <span class="gh-badge"><GhIcon name="file" :size="14" /> {{ stats.posts }} 个资源</span>
+          <span class="gh-badge"><GhIcon name="thumbsup" :size="14" /> {{ stats.likes }}</span>
+          <span class="gh-badge"><GhIcon name="star" :size="14" /> {{ stats.favs }}</span>
+          <span class="gh-badge"><GhIcon name="comment" :size="14" /> {{ stats.comments }}</span>
+          <span class="gh-badge"><GhIcon name="tag" :size="14" /> {{ tagList.length }} 个标签</span>
+        </div>
+        <el-button type="primary" @click="openNew">{{ props.ghost ? '👻 开幽灵帖' : '📝 开楼发帖' }}</el-button>
+      </div>
+    </header>
+
+    <!-- 标签页条（幽灵页只留一个静态标签：scope 非空会绕过幽灵隔离，混进普通帖） -->
+    <div class="gh-tabbar">
+      <nav class="gh-tabs" role="tablist">
+        <template v-if="props.ghost">
+          <span class="gh-tab on static" role="tab" aria-selected="true">👻 秘密帖子</span>
+        </template>
+        <template v-else>
+          <button
+            v-for="t in TABS" :key="t.key" class="gh-tab" :class="{ on: tab === t.key }"
+            role="tab" :aria-selected="tab === t.key" @click="changeTab(t.key)"
+          >{{ tabLabel(t) }}</button>
+        </template>
+      </nav>
+      <el-dropdown trigger="click" @command="changeSort">
+        <button class="gh-sortbtn">{{ sortLabel(SORTS.find((s) => s.key === sort)) }} <GhIcon name="chevron-down" :size="14" /></button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="s in SORTS" :key="s.key" :command="s.key" :disabled="s.key === sort">{{ sortLabel(s) }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
 
-    <!-- 排序子板块 + 标签子板块 -->
-    <div class="sp-boards">
-      <el-radio-group v-model="sort" size="small" @change="changeSort">
-        <el-radio-button v-for="s in SORTS" :key="s.key" :value="s.key">{{ sortLabel(s) }}</el-radio-button>
-      </el-radio-group>
-      <div class="sp-tags">
-        <span class="sp-tag-label">子板块：</span>
-        <span class="chip" :class="{ active: tag === '' }" @click="pickTag('')">全部</span>
-        <span v-for="t in tagList" :key="t.name" class="chip" :class="{ active: tag === t.name }" @click="pickTag(t.name)">
-          #{{ t.name }} <i>{{ t.count }}</i>
-        </span>
-      </div>
-    </div>
+    <!-- 两栏主体：左 = 文件表 + README；右 = About -->
+    <div class="gh-body">
+      <div class="gh-main">
+        <!-- 标签过滤条（选中标签时出现，可一键清除） -->
+        <div v-if="tag" class="gh-filterbar">
+          正在筛选子板块 <b>#{{ tag }}</b>
+          <button class="gh-filterx" @click="pickTag('')">清除 ×</button>
+        </div>
 
-    <!-- 帖子列表 -->
-    <div v-loading="loading" class="sp-list">
-      <div v-for="p in rows" :key="p.id" class="post-card" @click="openPost(p)">
-        <img v-if="firstImage(p)" :src="attDataURL(firstImage(p))" class="pc-thumb" alt="" loading="lazy" />
-        <div class="pc-main">
-          <div class="pc-title">
-            <b>{{ p.title }}</b>
-            <el-tag v-for="t in p.tags" :key="t" size="small" effect="plain" class="pc-tag">#{{ t }}</el-tag>
-          </div>
-          <div class="pc-ex">{{ excerpt(p.content) || '（纯附件帖）' }}</div>
-          <div class="pc-meta">
-            <span class="pc-author u-link" @click.stop="toProfile(p.author_id)">
-              <img v-if="p.avatar" :src="p.avatar" alt="" class="pc-ava" />{{ p.nickname }}
-            </span>
-            <span class="pc-time">{{ fmtDateTime(p.create_time) }}</span>
-            <span class="pc-actions">
-              <button class="act" :class="{ on: p.is_liked }" title="点赞" @click.stop="toggleLike(p, $event)">👍 {{ cnt(p.like_count) }}</button>
-              <button class="act" :class="{ on: p.is_faved }" title="收藏" @click.stop="toggleFav(p, $event)">⭐ {{ cnt(p.fav_count) }}</button>
-              <span class="act plain" title="评论">💬 {{ cnt(p.comment_count) }}</span>
-            </span>
-          </div>
+        <ShareFileTable
+          v-model:filter="filterText" :rows="rows" :selected-id="selId" :loading="loading"
+          :empty-text="emptyText"
+          @select="pickRow" @like="toggleLike" @fav="toggleFav"
+        />
+
+        <el-pagination v-if="total > size" class="gh-pager" background layout="prev, pager, next" :total="total"
+          :page-size="size" :current-page="page" @current-change="onPage" />
+
+        <div ref="readmeRef">
+          <ShareReadme
+            :post="cur" :loading="curLoading" :error="curError" :in-list="inList" :sending="commentSending"
+            :feishu-busy="feishuBusy" :feishu-url="feishuUrl" :ghost-page="props.ghost"
+            @like="toggleLike" @fav="toggleFav" @comment="sendComment" @del-comment="delComment"
+            @edit="openEdit" @del="delPost" @feishu-edit="feishuEdit" @feishu-sync="feishuSync" @close="closeReadme"
+          />
         </div>
       </div>
 
-      <el-empty v-if="!loading && !rows.length" :description="tag ? `「${tag}」子板块还没有帖子，来开第一楼` : (props.ghost ? '还没有秘密帖子，来开第一座幽灵楼' : '还没有帖子，点「开楼发帖」分享第一个资源')" />
+      <!-- About 侧栏：说明 + Topics（标签过滤的唯一入口） -->
+      <aside class="gh-aside">
+        <div class="gh-abox">
+          <div class="gh-ahead">About</div>
+          <p class="gh-atext">{{ props.ghost ? '幽灵帖仅幽灵账号可见，普通用户完全看不到这里的内容。' : '分享备赛资料、经验与作品。一条帖子就是一行资源，点行在下方展开正文与讨论。' }}</p>
+        </div>
+        <div class="gh-abox">
+          <div class="gh-ahead">Topics</div>
+          <div class="gh-topics">
+            <button class="gh-topic" :class="{ on: tag === '' }" @click="pickTag('')">全部</button>
+            <button v-for="t in tagList" :key="t.name" class="gh-topic" :class="{ on: tag === t.name }" @click="pickTag(t.name)">
+              {{ t.name }} <i>{{ t.count }}</i>
+            </button>
+          </div>
+          <p v-if="!tagList.length" class="gh-atext dim">还没有标签，发帖时填一个即成为子板块</p>
+        </div>
+      </aside>
     </div>
 
-    <el-pagination v-if="total > size" class="sp-pager" background layout="prev, pager, next" :total="total"
-      :page-size="size" :current-page="page" @current-change="(v) => { page = v; load(); }" />
-
-    <!-- 发帖 / 编辑弹窗 -->
+    <!-- 发帖 / 编辑弹窗（结构保持原样：App.vue 的 .editor-dlg .el-dialog__body > .el-select 是直接子元素选择器） -->
     <el-dialog v-model="postDlg" :title="editingId ? '✏️ 编辑帖子' : '📝 开楼发帖'" width="720px" top="3vh"
       class="editor-dlg" :close-on-click-modal="false" destroy-on-close append-to-body>
       <el-input v-model="form.title" maxlength="60" show-word-limit placeholder="帖子标题（≤60 字）" class="sh-title" />
@@ -360,134 +489,96 @@ async function delPost(p) {
     <DocPicker v-model="impDlg" biz-type="share_post" :biz-id="editingId ?? null"
       :extra="{ title: form.title }" @imported="onImported" />
     <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
-
-    <!-- 帖子详情弹窗 -->
-    <el-dialog v-model="detailDlg" width="760px" top="3vh" class="sh-detail-dlg" :close-on-click-modal="true"
-      destroy-on-close append-to-body>
-      <template v-if="cur">
-        <h3 class="pd-title">{{ cur.title }}</h3>
-        <div class="pd-meta">
-          <span class="u-link pd-author" @click="toProfile(cur.author_id)">
-            <img v-if="cur.avatar" :src="cur.avatar" alt="" class="pc-ava" />{{ cur.nickname }}
-          </span>
-          <span class="pd-time">{{ fmtDateTime(cur.create_time) }}</span>
-          <el-tag v-for="t in cur.tags" :key="t" size="small" effect="plain">#{{ t }}</el-tag>
-          <span v-if="isMine(cur)" class="pd-own">
-            <el-button size="small" text type="primary" :loading="feishuBusy" @click="feishuEdit(cur)">📄 飞书编辑</el-button>
-            <el-button size="small" text type="primary" :loading="feishuBusy" @click="feishuSync(cur)">🔄 同步</el-button>
-            <el-button size="small" text @click="openEdit(cur)">✏️ 本地编辑</el-button>
-            <el-button size="small" text type="danger" @click="delPost(cur)">🗑 删除</el-button>
-          </span>
-        </div>
-
-        <!-- 已关联飞书文档 → 直达链接（点「飞书编辑」后出现） -->
-        <div v-if="feishuUrl" class="pd-feishu">
-          <a :href="feishuUrl" target="_blank" rel="noopener">📄 打开飞书文档编辑 →</a>
-        </div>
-
-        <!-- 正文（富文本，图片点击全屏预览） -->
-        <div v-if="cur.content" class="pd-body" v-html="cur.content" @click="onRichClick"></div>
-        <div v-else class="pd-empty">（纯附件帖）</div>
-        <AttachmentList v-if="cur.attachments?.length" :attachments="cur.attachments" />
-
-        <!-- 点赞 / 收藏 -->
-        <div class="pd-acts">
-          <el-button :type="cur.is_liked ? 'primary' : 'default'" round @click="toggleLike(cur)">
-            {{ cur.is_liked ? '👍 已点赞' : '👍 点赞' }} {{ cnt(cur.like_count) }}
-          </el-button>
-          <el-button :type="cur.is_faved ? 'warning' : 'default'" round @click="toggleFav(cur)">
-            {{ cur.is_faved ? '⭐ 已收藏' : '⭐ 收藏' }} {{ cnt(cur.fav_count) }}
-          </el-button>
-        </div>
-
-        <!-- 评论 -->
-        <div class="pd-comments">
-          <div class="pd-c-head">💬 评论（{{ cnt(cur.comment_count) }}）</div>
-          <div v-if="cur.comments.length" class="c-list">
-            <div v-for="c in cur.comments" :key="c.id" class="c-item">
-              <div class="c-top">
-                <span class="u-link c-author" @click="toProfile(c.user_id)">
-                  <img v-if="c.avatar" :src="c.avatar" alt="" class="pc-ava" />{{ c.nickname }}
-                </span>
-                <span class="c-time">{{ fmtShort(c.create_time) }}</span>
-                <el-button v-if="Number(c.user_id) === Number(auth.user?.id) || auth.user?.is_admin"
-                  size="small" text type="danger" class="c-del" @click="delComment(c)">删除</el-button>
-              </div>
-              <div class="c-text">{{ c.content }}</div>
-            </div>
-          </div>
-          <div v-else class="c-empty">还没有评论，来抢沙发</div>
-          <div class="c-input">
-            <el-input v-model="commentInput" placeholder="友善评论，Enter 发送" @keyup.enter="sendComment" />
-            <el-button type="primary" :loading="commentSending" @click="sendComment">评论</el-button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
   </main>
 </template>
 
 <style lang="scss" scoped>
-.share-page { padding: 20px 24px 60px; max-width: 980px; margin: 0 auto; }
+.share-page { padding: 20px 24px 60px; max-width: 1180px; margin: 0 auto; }
 
-.sp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
-  h2 { margin: 0; font-size: 22px; }
-  .sh-ghost-chk { margin: 8px 0 2px; font-size: 13px; color: var(--primary); }
-  .sp-sub { color: var(--text-2); font-size: 13px; margin: 4px 0 0; }
-}
-
-.sp-boards { margin-bottom: 14px;
-  .sp-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px;
-    .sp-tag-label { font-size: 13px; color: var(--text-2); }
-    .chip {
-      border: 1px solid var(--border); background: var(--card-bg); border-radius: 999px;
-      padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--text-2);
-      transition: all .15s;
-      i { font-style: normal; font-size: 11px; color: #94a3b8; margin-left: 3px; }
-      &:hover { border-color: #93c5fd; color: var(--primary); }
-      &.active { background: var(--primary); border-color: var(--primary); color: #fff; i { color: #dbeafe; } }
-    }
+// —— 仓库头 ——
+.gh-repohead { margin-bottom: 14px; }
+.gh-crumb {
+  display: flex; align-items: center; gap: 7px; font-size: 18px; color: var(--text-2);
+  .gh-owner { color: var(--primary); cursor: default; }
+  .gh-sep { color: var(--text-3); }
+  b { color: var(--primary); font-weight: 600; }
+  .gh-vis {
+    margin-left: 6px; font-size: 11.5px; color: var(--text-2);
+    border: 1px solid var(--border-2); border-radius: 999px; padding: 1px 9px;
   }
 }
-
-.sp-list { display: flex; flex-direction: column; gap: 10px; min-height: 200px; }
-.post-card {
-  display: flex; gap: 12px; background: var(--card-bg); border: 1px solid var(--border);
-  border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: all .15s;
-  &:hover { border-color: #93c5fd; box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 8%, transparent); }
-  .pc-thumb {
-    width: 110px; height: 78px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
-    border: 1px solid var(--border); background: var(--surface-2);
-  }
-  .pc-main { flex: 1; min-width: 0; }
-  .pc-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    b { font-size: 15px; }
-    .pc-tag { font-size: 11px; }
-  }
-  .pc-ex {
-    color: var(--text-2); font-size: 13px; margin: 5px 0 8px; line-height: 1.6;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  .pc-meta { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-2);
-    flex-wrap: wrap;
-    .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
-    .u-link { cursor: pointer; &:hover { color: var(--primary); } }
-    .pc-actions { margin-left: auto; display: flex; gap: 4px; align-items: center;
-      .act {
-        border: 1px solid var(--border); background: var(--card-bg); border-radius: 999px;
-        padding: 3px 10px; font-size: 12px; cursor: pointer; color: var(--text-2); line-height: 1.6;
-        transition: all .15s;
-        &:hover { border-color: #93c5fd; color: var(--primary); }
-        &.on { background: var(--primary-tint); border-color: var(--primary); color: var(--primary); font-weight: 600; }
-        &.plain { cursor: default; &:hover { border-color: var(--border); color: var(--text-2); } }
-      }
-    }
-  }
+.gh-desc { margin: 6px 0 10px; color: var(--text-2); font-size: 13px; }
+.gh-headrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gh-badges { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.gh-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; color: var(--text-2);
+  b { color: var(--text); }
 }
 
-.sp-pager { margin-top: 16px; justify-content: center; }
+// —— 标签页条：底边线通栏，页签压在线上（GitHub 的 repo 导航形态） ——
+.gh-tabbar {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
+  border-bottom: 1px solid var(--border-2); margin-bottom: 16px;
+}
+.gh-tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+.gh-tab {
+  border: 0; background: transparent; cursor: pointer; font-family: inherit;
+  padding: 8px 12px; font-size: 13.5px; color: var(--text-2); white-space: nowrap;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s;
+  &:hover { color: var(--text); }
+  &.on { color: var(--text); font-weight: 600; border-bottom-color: var(--primary); }
+  &.static { cursor: default; }
+}
+.gh-sortbtn {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  border: 1px solid var(--border-2); background: var(--card-bg); color: var(--text-2);
+  border-radius: 6px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; font-family: inherit;
+  margin-bottom: 8px;
+  &:hover { border-color: var(--primary); color: var(--primary); }
+}
 
-// —— 发帖弹窗 ——
+// —— 两栏主体 ——
+.gh-body { display: grid; grid-template-columns: minmax(0, 1fr) 288px; gap: 20px; align-items: start; }
+.gh-main { min-width: 0; }
+
+.gh-filterbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  font-size: 12.5px; color: var(--text-2);
+  b { color: var(--primary); }
+  .gh-filterx {
+    margin-left: auto; border: 1px solid var(--border-2); background: var(--card-bg);
+    color: var(--text-2); border-radius: 6px; padding: 3px 9px; font-size: 12px;
+    cursor: pointer; font-family: inherit;
+    &:hover { border-color: var(--primary); color: var(--primary); }
+  }
+}
+.gh-pager { margin-top: 14px; justify-content: center; }
+
+// —— About 侧栏 ——
+.gh-aside { display: flex; flex-direction: column; gap: 14px; }
+.gh-abox {
+  border: 1px solid var(--border-2); border-radius: 6px; background: var(--card-bg);
+  padding: 12px 14px;
+}
+.gh-ahead { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.gh-atext { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--text-2);
+  &.dim { color: var(--text-3); margin-top: 8px; }
+}
+.gh-topics { display: flex; flex-wrap: wrap; gap: 6px; }
+.gh-topic {
+  border: 1px solid var(--border-2); background: var(--card-bg); color: var(--primary);
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  transition: all .15s;
+  i { font-style: normal; color: var(--text-3); margin-left: 3px; font-size: 11px; }
+  &:hover { background: var(--primary-tint); border-color: var(--primary); }
+  &.on { background: var(--primary); border-color: var(--primary); color: #fff;
+    i { color: color-mix(in srgb, #fff 75%, transparent); } }
+}
+
+// —— 发帖弹窗（沿用原有样式） ——
 .sh-title { margin-bottom: 10px; }
 .sh-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;
   .att-chips { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -501,50 +592,22 @@ async function delPost(p) {
   }
 }
 .sh-tags { width: 100%; margin-top: 10px; }
+.sh-ghost-chk { margin: 8px 0 2px; font-size: 13px; color: var(--primary); }
 
-// —— 详情弹窗 ——
-.pd-title { margin: 0 0 8px; font-size: 19px; }
-.pd-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
-  color: var(--text-2); font-size: 12.5px;
-  .pd-author { cursor: pointer; &:hover { color: var(--primary); } font-weight: 600; color: var(--text); }
-  .pc-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; margin-right: 4px; vertical-align: middle; }
-  .pd-own { margin-left: auto; display: flex; gap: 2px; }
-}
 // 编写留窗状态条：飞书打开后提示回站同步
 .pd-feishu-open {
   font-size: 12.5px; color: var(--success-fg); background: var(--success-tint); border: 1px solid var(--success-border);
   border-radius: 8px; padding: 6px 12px; margin-bottom: 6px;
 }
-.pd-feishu { margin-bottom: 10px;
-  a { display: inline-block; font-size: 12.5px; color: var(--primary); background: var(--primary-tint); border: 1px solid color-mix(in srgb, var(--primary) 30%, white);
-    border-radius: 8px; padding: 5px 12px; text-decoration: none; &:hover { background: var(--primary-tint); } }
-}
-.pd-body { line-height: 1.9; font-size: 14px; overflow-wrap: anywhere; /* 长串/URL 强制断行，防竖排 */
-  :deep(img) { max-width: 100%; border-radius: 8px; cursor: zoom-in; }
-  :deep(video) { max-width: 100%; border-radius: 8px; }
-  :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
-  :deep(a) { color: var(--primary); }
-}
-.pd-empty { color: #94a3b8; font-size: 13px; padding: 10px 0; }
-.pd-acts { display: flex; gap: 10px; margin: 14px 0; }
 
-.pd-comments { border-top: 1px solid var(--border); padding-top: 12px;
-  .pd-c-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
-  .c-list { display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto; }
-  .c-item { background: var(--surface-3); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
-    .c-top { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2);
-      .c-author { font-weight: 600; color: var(--text); cursor: pointer; &:hover { color: var(--primary); } }
-      .pc-ava { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-right: 3px; vertical-align: middle; }
-      .c-del { margin-left: auto; }
-    }
-    .c-text { font-size: 13.5px; margin-top: 4px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
-  }
-  .c-empty { color: #94a3b8; font-size: 13px; padding: 12px 0; }
-  .c-input { display: flex; gap: 8px; margin-top: 10px; .el-input { flex: 1; } }
+// 窄屏：两栏折单栏，About 提到表格上方（保证标签过滤仍可达）
+@media (max-width: 900px) {
+  .gh-body { grid-template-columns: minmax(0, 1fr); }
+  .gh-aside { order: -1; }
 }
-
 @media (max-width: 768px) {
   .share-page { padding: 14px 12px 60px; }
-  .post-card { .pc-thumb { width: 84px; height: 60px; } .pc-ex { -webkit-line-clamp: 2; } }
+  .gh-crumb { font-size: 16px; }
+  .gh-badge:nth-child(n + 4) { display: none; } /* 徽标瘦身，留资源数/赞/藏 */
 }
 </style>

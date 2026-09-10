@@ -7,7 +7,8 @@
   "scripts": {
     "smoke:expense": "node scripts/smoke_expense.mjs",
     "probe:claimlost": "node scripts/probe_claimlost.mjs",
-    "probe:vision": "node scripts/probe_vision.mjs"
+    "probe:vision": "node scripts/probe_vision.mjs",
+    "probe:share": "node scripts/probe_share.mjs"
   },
   "devDependencies": {
     "playwright": "1.63.0"

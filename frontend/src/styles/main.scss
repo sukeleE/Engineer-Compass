@@ -21,6 +21,12 @@
   --primary-tint: #eff6ff;       // 淡蓝底（今日高亮等）
   --surface-2: #f1f5f9;          // 次级表面（气泡/拖拽占位/hover 底）
   --surface-3: #f8fafc;          // 页面底色浅一级（面板内底）
+  // 资源分享页（GitHub 仓库页形态）新增：表头底/行悬停、框线、三级文字
+  // 取值从本项目 slate 系往两端推（不是抄 GitHub 的 hex —— 那套偏蓝，与幽灵模式的中性紫调打架）
+  --surface-1: #f6f8fa;          // 表头底 / 表格行 hover（比 --surface-2 略浅一档）
+  --border-2: #cbd5e1;           // = slate-300，比 --border(slate-200) 深一档 → 文件框/表格外框
+  --text-3: #94a3b8;             // = slate-400，比 --text-2(slate-500) 浅一档 → 行内次要信息
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --badge-fg: #b45309;           // 徽章黄褐字（官方/管理员/提示）
   --badge-tint: #fef3c7;         // 徽章浅黄底
   --badge-border: #fde68a;       // 徽章浅黄边
@@ -141,7 +147,7 @@ td, th {
   .el-tabs__item { font-size: 12px; padding: 0 8px; }
 
   // 页面容器收紧左右内边距（各页 max-width 容器）
-  .timeline-page, .schedule-page, .team-page, .me-page, .profile-page, .admin-page, .study-page, .expense-page {
+  .timeline-page, .schedule-page, .team-page, .me-page, .profile-page, .admin-page, .study-page, .expense-page, .share-page {
     padding-left: 12px;
     padding-right: 12px;
   }
@@ -181,9 +187,12 @@ html.ghost-mode {
   --card-bg: #16161b;     // 卡片 深灰黑
   --surface-3: #101015;   // 面板内底
   --surface-2: #1d1d24;   // 气泡/hover 底
+  --surface-1: #1a1a20;   // 表头底 / 表格行 hover（夹在 card-bg 与 surface-2 之间，保持中性紫调）
   --border: #2b2b33;      // 边框
+  --border-2: #3a3a44;    // 文件框/表格外框（比 --border 亮一档）
   --text: #e7e7ec;        // 主文字 亮灰白
   --text-2: #8b8b96;      // 次文字
+  --text-3: #63636e;      // 三级文字（比 --text-2 暗一档）
   // —— 主强调色 蓝→红 ——
   --primary: #dc2626;
   --primary-dark: #991b1b;

@@ -33,3 +33,18 @@ export const fmtDateOnly = (t) => {
 
 // 本地 'MM-DD HH:MM'（消息气泡等短格式）
 export const fmtShort = (t) => fmtDateTime(t).slice(5);
+
+// 相对时间（GitHub 文件表「3 天前」风）：刚刚 / N 分钟前 / N 小时前 / N 天前 / N 个月前，
+// 超过一年回落成绝对日期。**必须经 toLocal()** —— 后端存的是无时区标记的 UTC 串，
+// 裸 new Date('2026-09-10 08:00:00') 会被浏览器当本地时间，结果整整差 8 小时（见本文件 L1-2）。
+export const fmtRelative = (t) => {
+  const d = toLocal(t);
+  if (!d) return t || '';
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return '刚刚';                       // 含轻微时钟偏差导致的负数
+  if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
+  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)} 天前`;
+  if (sec < 86400 * 365) return `${Math.floor(sec / 86400 / 30)} 个月前`;
+  return fmtDateOnly(t);
+};
