@@ -25,9 +25,11 @@ import resource, { publicR } from './routes/resource.js';
 import importPlan from './routes/importPlan.js';
 import feishu from './routes/feishu.js';
 import expense from './routes/expense.js';
+import honor, { adminR as adminHonor } from './routes/honor.js';
 import { hasSMTP } from './routes/mailer.js';
 import { accessLog } from './routes/middleware.js';
 import { sweepStaging } from './lib/shareFiles.js';
+import { sweepOrphanHonorFiles } from './lib/honorFiles.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -55,7 +57,9 @@ app.use('/api/share', share);
 app.use('/api/friends', friends);
 app.use('/api/ghost', ghost);
 app.use('/api/notifications', notifications);
+app.use('/api/admin/honors', adminHonor); // 必须排在 /api/admin 之前（否则要先白跑一遍 admin 的鉴权）
 app.use('/api/admin', admin);
+app.use('/api/honor', honor); // 荣誉墙：前台公开只读（无需登录）
 app.use('/api/announcements', publicAnnounce);
 app.use('/api/resource', publicR); // 公开分享下载先声明（无鉴权，token 即钥匙）；主 router 挂在后
 app.use('/api/resource', resource);
@@ -95,6 +99,12 @@ try {
   const n = sweepStaging();
   if (n) console.log(`🧹 已清理 ${n} 个超期未发布的分享文件夹暂存文件`);
 } catch (e) { console.error('暂存清理失败（不影响启动）:', e.message); }
+
+// 荣誉墙孤儿图：已落盘但没写进 DB 的（配额校验不过、进程被杀在中间），盘上会永久占着
+try {
+  const n = sweepOrphanHonorFiles();
+  if (n) console.log(`🧹 已清理 ${n} 张无主的荣誉墙奖状图`);
+} catch (e) { console.error('荣誉墙清理失败（不影响启动）:', e.message); }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

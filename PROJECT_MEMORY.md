@@ -364,3 +364,35 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
   - 弹窗里的文件清单**默认收起**，探针要先点 `.fol-sum` 展开再断言行数
 - **探针**：`probe:share` 46→**56**（新增子路由/滚动还原/幽灵详情页暗色）；**新增 `probe:share-folder` 39 项**（树层次/缩进分档/展开收起/文本与图片预览/XSS/恶意 `../` 被拒/幽灵文件 404/ZIP 结构/暗色面板不发白/375px 不横向溢出）；**新增 `probe:share-gitee` 34 项**（假 Gitee 全程离线：路径集合逐一相等、SSRF、错误映射、缓存命中、代理预览、blob 图片、浏览器零直连 gitee.com、三态字段、非作者同步 403）
 - **验证**：`probe_share` 56/56、`probe_share_folder` 39/39、`probe_share_gitee` 34/34（连跑两次证明幂等）；回归 `smoke_ghost` 30/30、`smoke_friends` 25/25、`smoke_notifications` 10/10、`smoke_privacy` 36/36、`smoke_expense` 170/170（1 跳过=上游限流）、`probe_claimlost` 15/15；前端 build 通过；浅色 + 幽灵暗色 + 375px 截图人工过目（新面板无白块、无横向溢出）
+
+## 2026-09-10 荣誉墙 /honor：奖状多行反向跑马灯（公开免登录，后台维护）
+
+- **需求**：用户「再做一个荣誉墙页，让各种奖状图片不断滚动」。产品口径五项确认：**管理员后台维护**（普通用户只读）/ 一条 = **图片 + 奖项信息**（不是纯图瀑布流）/ **多行反向**跑马灯 / **公开免登录** / **逐个录入 + 批量多选**
+- **「公开免登录」是贯穿全局的那条口径**，不是一句 UI 文案：它决定了图片能走普通 `<img src>`、能吃浏览器缓存、**天然绕开「session token 绝不进 URL」的全站硬规矩**（token 进 URL 会落进 `access_log.originalUrl`）。若将来要改成登录可见，唯一要动的是 `routes/honor.js` 里那一行 `if (!h.is_active && !req.user?.is_admin) return 404`（注释已就地写明），前端需同步改成 blob 取图
+- **数据模型（schema.sql 表44 `honor`）**：`store_name`（磁盘 basename）/ `image_name`（原始文件名）**任何接口都不返回**；`admin_id` **故意不加外键**（同 `announcement.admin_id`：挂 ON DELETE CASCADE 的话删个测试账号就把荣誉墙清空）；`image_*` 可空 → **允许纯文字荣誉**（口头表彰/图还没拍），卡片渲染 🏅 占位符；列表口径 `sort_order DESC, id DESC`（大的在前），新建缺省 `maxSort()+10`（排最前），批量按选中顺序 +10 递增
+- **`image_ver` 是缓存键，不能用 `update_time` 兼职**：`CURRENT_TIMESTAMP` 只有**秒级**精度，同一秒内连换两次会算出同一个版本号 → 浏览器一直吃旧图。改为每次写图 `randomBytes(4).toString('hex')` 重新随机，列表拼成 `/api/honor/{id}/image?v={ver}`，出图侧配 `res.sendFile(abs, { maxAge:'365d', immutable:true })`
+- **`lib/honorFiles.js` 把「删盘 + 改库」封成函数**（`setImageOf`/`clearImageOf`/`purgeHonor`）——磁盘文件不随 DB 级联消失，三个清盘点散在路由里迟早漏一个 → 永久占盘（`shareFiles.js` 同教训）。替换图是**先写库成功再 unlink 旧文件**，顺序反了会在更新失败时同时丢掉旧图。另：`HONOR_DIR` **启动即 `mkdirSync`**——`uploads/` 被 gitignore，生产首次部署目录不存在，不建则第一张图 ENOENT
+- **图片类型校验的权威是文件头魔数**（`sniffImage`，只读前 16 字节，别 readFileSync 整个 8MB）：`file.mimetype` 是客户端自己写的、扩展名可以随便改。**SVG 是 XML 文本、没有魔数，天然死在这一关**——它能在本站源下执行脚本，是全站硬拒的一类。`isInlineOk` 是第二道闸门（将来有人放宽 `ALLOW_MIME` 时它还在）。出图用嗅探时定下的 mime `res.type(...)`，不按扩展名猜
+- **元数据走 JSON、图片走独立 multipart 端点（`POST`/`DELETE /:id/image`），绝不混在一个请求里**：① multipart 里字段全是字符串（`'true'` → `Number('true')` = NaN）；②「没选文件」与「传了个空的」长得一模一样，拿 `''` 兼职表示"删图"必然歧义；③ 混装会让"图传上去了但标题校验失败"变成说不清的中间态。拆开后图片三态就是三个动作：**不动 = 不调 image 端点 / 删除 = DELETE / 新增替换 = POST**
+- **`is_active`/`sort_order` 必须显式判 `!== undefined`**（写成 `b.is_active || h.is_active` 会让「下架」永远失败，`0` 是 falsy）——与 `share.js` 的 `tags`/`gitee_repo` 是同一类「一个值兼职表示缺省与非法」的病
+- **批量上传是全批校验后再落库**（有任何一个非图片就整体 400 + 清盘），不留「传 10 张成功 7 张」的半成功态；标题取文件名去扩展名（截 60），排序按选中顺序递增
+- **上传错误要在路由级兜**：全局 handler（`server.js`）把 `LIMIT_FILE_SIZE` 硬编码成「单文件 ≤128MB」，那是资源分享的额度，对 8MB 的奖状图是错的提示 → `uploadErr` 本地转成「图片过大（单张 ≤8MB）」。`limits` 用 `MAX_IMAGE + 1`（busboy 在**等值**处就触发）
+- **前端 `utils/imageCompress.js`**（普通 .js 模块，不是 `<script setup>` 顶层——那没有模块作用域，且后台多个上传点要复用）：`createImageBitmap(file, { imageOrientation:'from-image' })` 解码（按 EXIF 摆正，手机竖拍不躺倒，**顺带剥掉含 GPS 的 EXIF**）→ 长边 ≤1600 → `toBlob('image/jpeg', 0.85)`。**GIF 不压**（压了丢动画）、失败一律回落原图不阻断上传（HEIC 这类浏览器解不了的交给服务端魔数去拒）。后端无任何图像处理库（依赖只有 cors/express/mammoth/multer/pdf-parse/xlsx），**这是唯一一道缩图防线，不是优化**
+- **跑马灯的无缝数学（`HonorView.vue`，本功能最大风险点）**：轨道**恰好两份等宽副本**，`@keyframes` 从 0 位移到 -50%。两条必须守住的线——
+  - **★ 卡片间距做在每张卡的 `margin-right`，绝不能用容器的 flex `gap`**：gap 只在相邻项之间插入、**不在两份副本的接缝处出现**，轨道宽会变成 `2kh·W + G` 而不是 `2kh·W`，`-50%` 就差了半个间距 → **每滚一圈画面横跳一下**（典型症状：看着在动，其实是坏的）。用 `margin-right` 后半份宽精确等于 `n·(w+gap)`
+  - **★ 半份必须铺满视口**，否则滚到接缝处露出一段空白。重复次数由**实测视口宽**算（`ResizeObserver` 观察行容器，不要用 `innerWidth` 减 padding 去猜）：`k = max(1, ceil((vw + W) / (b·W)))`
+  - 各行用**恒定像素速度**（`dur = halfW / speed`，各行 ±10% 微扰），**不能给所有行同一个 duration**——条目多的行会明显跑得更快、像在互相追
+  - 反向 = 第二条 `@keyframes`（`honor-ltr` 从 -50% 回到 0）；`hover` 与 `:focus-within` 都暂停（卡片是按钮，Tab 过去时不停根本点不到）；两份副本同 `src`（浏览器按 URL 去重，只 1 次请求），故**不加 `loading="lazy"`**（跑马灯里图始终在视口带内，lazy 只会在边缘闪白）；`:key` 必须带副本序号，只用 `h.id` 会撞 key
+  - **`prefers-reduced-motion: reduce` 必须降级**：JS `matchMedia` 判定 → **只渲染单份 + 无动画 + 行改 `overflow-x:auto` 可手动横滚**，内容一张不少（**内容不可达才是最坏的降级**）
+  - 卡片高固定为 `min-height: calc(var(--bh) + 101px)`：不固定的话同一行内被 flex 拉伸看不出来，但**行与行**会参差（某行恰好有条两行标题，整行比邻行高一截，一面墙的基线全散）
+- **探针 `scripts/probe_honor.mjs` 81 项（`npm run probe:honor`）**：自带零依赖 PNG 编码器（每张卡一张颜色不同的真图）+ 一段真 JPEG；断言分五段——① 后端契约 31 项（前台匿名 200；后台写接口匿名 401、普通用户 403、中文文件名、图片字节与原文件逐一相等、`immutable` + 长 `max-age`、路径穿越、**SVG 改名 .jpg → 400**、文本改名 .png → 400、>8MB → 413 且不留残文件、失败替换不毁旧图、下架对匿名 404 对管理员 200）② 页面与跑马灯 29 项 ③ 客户端压缩 ④ 后台 tab ⑤ 清理
+  - **判别力是验证过的**：往 `.track` 里**加回 `gap:16px`**（保留 `margin-right`，即最像"好心写错"的那种形状）→ 81 项掉到 **77**（②⑪ 轨道宽 ≠ 2×半份宽、②⑫、②⑭ 位移比半份宽少 7.8px、②⑮ 空隙带宽 16~32px 不齐），撤掉mutant 后 81/81 → **那四条断言真的在守着接缝**
+  - ②⑭ 的写法是「把动画推到 0.9999 个周期，量 `translateX` 是否恰好等于 `.half` 的宽」——**不要用"相位 0 与相位 0.5 画面相同"**（那种写法只在 `k·n` 为偶数时成立，会假红）
+  - **不要用 WAAPI `pause()`/`play()` 去控自己正在测 CSS hover 暂停的那一行**：`pause()` 会让该 CSSAnimation 与 CSS `animation-play-state` 脱钩（computed style 报 `paused` 而元素继续动）。命令式操作只碰第 1 行，hover/点击在第 2、3 行上验
+  - **点卡片要先让它进视口**：跑马灯会把首张卡平移出屏（`element is outside of the viewport` 超时），正确姿势是先 hover 某行（CSS 暂停）再算一个在视口内的下标
+  - 探针截图里就 **`.iv-overlay`**（`ImageViewer.vue` 的类名）；断言"查看器打开了"要 `locator.waitFor({state:'visible'})`——Vue DOM 更新是异步的，`click()` 后立刻 `isVisible()` 是竞态
+- **坑（本轮踩到）**：
+  - **`probe:share-gitee` 必须对着「带假 Gitee 环境变量启动的后端」跑**：`GITEE_BASE_URL=http://127.0.0.1:3199/api/v5 GITEE_RAW_BASE=http://127.0.0.1:3199`。忘了就会打真 gitee.com → 第 2 项就 `502 仓库或分支不存在`，**看着像回归、其实是测试台架搭错**。`/api/health` 的 `gitee` 布尔是 **`GITEE_ACCESS_TOKEN` 是否存在**（配额高低），与假 Gitee 无关，别拿它判断台架对不对
+  - `smoke_expense` 那批冒烟同样认 `PROBE_API`，对隔离栈跑时 `PROBE_DB` 必须一起给（`openProbeDb` 的强制闸门）
+- **验证**：`probe_honor` **81/81**；回归 `probe_share` 56/56、`probe_share_folder` 39/39、`probe_share_gitee` 34/34（这三条必跑——`App.vue`/`main.scss` 是被共享的文件）、`smoke_ghost` 30/30、`smoke_friends` 25/25、`smoke_notifications` 10/10、`smoke_privacy` 36/36；前端 build 通过；浅色 + `html.ghost-mode` 暗色 + 375px 三张截图人工过目（暗色无白块、375px 无横向溢出、两行仍在跑）
+- **上线注意**：`uploads/` 被 gitignore 且 `deploy.sh` 只备份 `compass.db` → **线上图片要管理员在服务器后台重传一次**（不随 git 走）

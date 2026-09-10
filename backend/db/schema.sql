@@ -550,3 +550,31 @@ CREATE TABLE IF NOT EXISTS expense_attach (
 );
 CREATE INDEX IF NOT EXISTS idx_expense_attach_p ON expense_attach(project_id);
 CREATE INDEX IF NOT EXISTS idx_expense_attach_r ON expense_attach(row_id);
+
+-- 表44 荣誉墙（后台管理员维护；奖状图片落盘 backend/uploads/honor/，DB 只存元数据）
+-- 前台 /honor 多行反向跑马灯；一行 = 一张奖状，image_* 可空 —— 允许纯文字荣誉（口头表彰/图还没拍）
+-- store_name/image_name 只进 DB，**任何接口都不返回**（磁盘文件名不外泄）
+-- image_ver：缓存键（每次换图重新随机）。**不能用 update_time 兼职** —— CURRENT_TIMESTAMP 只有秒级
+--   精度，同一秒内连换两次会算出同一个版本号，浏览器就一直吃旧图
+-- admin_id 故意不加外键（同 announcement.admin_id）：挂 ON DELETE CASCADE 的话，
+--   删个测试账号就会把荣誉墙一起清空
+-- sort_order DESC, id DESC（大的在前）
+CREATE TABLE IF NOT EXISTS honor (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,              -- 奖项名称（必填）
+  winner      TEXT DEFAULT '',            -- 获奖者/团队
+  award_level TEXT DEFAULT '',            -- 级别：国家级/省级/校级…（自由文本，前台据此着色）
+  award_date  TEXT DEFAULT '',            -- 获奖年月 'YYYY-MM'（纯文本，不做时区换算）
+  description TEXT DEFAULT '',            -- 一句话说明
+  image_name  TEXT,                       -- 原始文件名（下载/alt 用）
+  store_name  TEXT,                       -- 磁盘文件名（仅 basename）；NULL = 无图
+  image_size  INTEGER DEFAULT 0,
+  image_mime  TEXT DEFAULT '',            -- 服务端按**文件头魔数**判定的规范 mime（不信客户端）
+  image_ver   TEXT,                       -- 缓存键 8 位 hex；NULL = 无图
+  is_active   INTEGER DEFAULT 1,          -- 1=上架 0=下架（下架不进前台，后台仍可见）
+  sort_order  INTEGER DEFAULT 0,
+  admin_id    INTEGER,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_honor_show ON honor(is_active, sort_order, id);

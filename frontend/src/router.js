@@ -9,6 +9,7 @@ import ShareView from './components/ShareView.vue';
 import SharePostView from './components/SharePostView.vue';
 import ExpenseView from './components/ExpenseView.vue';
 import ExpenseGuide from './components/ExpenseGuide.vue';
+import HonorView from './components/HonorView.vue';
 import MyView from './components/MyView.vue';
 import ProfileView from './components/ProfileView.vue';
 import AuthView from './components/AuthView.vue';
@@ -75,6 +76,9 @@ const router = createRouter({
     { path: '/expense', name: 'expense', component: ExpenseView },
     // 报销整理使用教程（静态文档页，任何人可看）
     { path: '/expense/guide', name: 'expense-guide', component: ExpenseGuide },
+    // 荣誉墙（公开免登录；内容由管理员在后台维护。复数路径只做重定向，全站单数口径）
+    { path: '/honor', name: 'honor', component: HonorView },
+    { path: '/honors', redirect: '/honor' },
     // 秘密分享（幽灵模式专属，仅 is_ghost 可进；前端守卫 + 后端 share 过滤双重校验）
     {
       path: '/ghost-share', name: 'ghost-share', component: ShareView, props: { ghost: true },

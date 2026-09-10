@@ -5,6 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
 import { fmtDateTime, fmtDateTimeS } from '../utils/time.js';
+import { compressImage, shrinkHint } from '../utils/imageCompress.js';
+import { openImage } from '../utils/imageViewer.js';
 
 const tab = ref('users');
 
@@ -21,6 +23,8 @@ const ACTION_LABELS = {
   'resource-upload': '上传资源', 'resource-delete': '删除资源', 'resource-admin-delete': '管理员删资源',
   'resource-share': '分享资源', 'resource-unshare': '撤销分享',
   'plan-import': '导入计划',
+  'honor-create': '添加荣誉', 'honor-bulk': '批量上传奖状', 'honor-update': '编辑荣誉',
+  'honor-delete': '删除荣誉', 'honor-image-set': '上传奖状图', 'honor-image-clear': '删除奖状图',
 };
 const actionLabel = (a) => ACTION_LABELS[a] || a;
 const STATUS_LABELS = { 0: ['正常', 'success'], 1: ['封禁', 'danger'], 2: ['禁言', 'warning'] };
@@ -244,6 +248,135 @@ async function delResource(row) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
+// ==================== Tab7 荣誉墙（奖状图 + 奖项信息） ====================
+const honors = reactive({ loading: false, list: [] });
+async function loadHonors() {
+  honors.loading = true;
+  try { honors.list = (await api.adminHonors()).list || []; }
+  catch (e) { ElMessage.error(e.message); } finally { honors.loading = false; }
+}
+
+// 表单持有**图片三态**：没动（keepUrl 原样）/ 换成新图（file + preview）/ 勾了删除（removeImg）。
+// 三者对应三个不同的接口动作，互斥由 handleHonorPick / toggleHonorRemove 保证。
+const honorDlg = ref(false);
+const honorForm = reactive({
+  id: null, title: '', winner: '', award_level: '', award_date: '', description: '',
+  sort_order: '', is_active: true,
+  file: null, preview: '', hint: '', removeImg: false, keepUrl: '', imageName: '',
+});
+function honorReset() {
+  if (honorForm.preview) URL.revokeObjectURL(honorForm.preview);
+  Object.assign(honorForm, { file: null, preview: '', hint: '', removeImg: false });
+}
+function openHonorDlg(h) {
+  honorReset();
+  Object.assign(honorForm, {
+    id: h?.id ?? null,
+    title: h?.title || '', winner: h?.winner || '', award_level: h?.award_level || '',
+    award_date: h?.award_date || '', description: h?.description || '',
+    sort_order: h?.sort_order ?? '', is_active: h ? !!h.is_active : true,
+    keepUrl: h?.image_url || '', imageName: h?.image_name || '',
+  });
+  honorDlg.value = true;
+}
+
+// 选图 → 立刻压缩（3–8MB 的手机照压到 ~300KB，后端没有图像库，这里是唯一一道）
+async function handleHonorPick(e) {
+  const f = (e.target.files || [])[0];
+  e.target.value = ''; // 不清空则同一张图再选一次不触发 change
+  if (!f) return;
+  if (!f.type.startsWith('image/')) return ElMessage.warning('请选择图片文件');
+  const out = await compressImage(f);
+  if (honorForm.preview) URL.revokeObjectURL(honorForm.preview);
+  honorForm.file = out;
+  honorForm.preview = URL.createObjectURL(out);
+  honorForm.hint = shrinkHint(f, out);
+  honorForm.removeImg = false; // 选了新图就不再是"删除"
+}
+function toggleHonorRemove() {
+  honorForm.removeImg = !honorForm.removeImg;
+  if (honorForm.removeImg && honorForm.file) honorReset(); // 勾删除 → 丢掉刚选的新图
+}
+
+async function saveHonor() {
+  if (!honorForm.title.trim()) return ElMessage.warning('奖项名称不能为空');
+  const meta = {
+    title: honorForm.title.trim(), winner: honorForm.winner, award_level: honorForm.award_level,
+    award_date: honorForm.award_date, description: honorForm.description,
+    is_active: honorForm.is_active ? 1 : 0,
+  };
+  // 排序留空 = 交给后端自动排到最前（新建）/ 保持原值（编辑）：不能把空串塞成 Number('')=0
+  if (String(honorForm.sort_order).trim() !== '') meta.sort_order = Number(honorForm.sort_order);
+  let id = honorForm.id;
+  try {
+    if (id) await api.adminHonorUpdate(id, meta);
+    else id = (await api.adminHonorCreate(meta)).id;
+  } catch (e) { return ElMessage.error(e.message); }
+
+  // 第二步（独立端点）：图片。这里失败时**不关弹窗** —— 元数据已经存进去了，
+  // 提示出来让管理员原地重试即可，别让他以为整条都没保存。
+  let warn = '';
+  try {
+    if (honorForm.file) await api.adminHonorImageSet(id, honorForm.file);
+    else if (honorForm.removeImg && honorForm.keepUrl) await api.adminHonorImageClear(id);
+  } catch (e) { warn = e.message; }
+  loadHonors();
+  if (warn) {
+    honorForm.id = id; // 已建成了：再点保存就是编辑，不会重复建条
+    honorForm.keepUrl = honorForm.file ? honorForm.keepUrl : '';
+    return ElMessage.warning(`奖项信息已保存，但图片没处理成功：${warn}。可留在本窗口重试`);
+  }
+  ElMessage.success(honorForm.id ? '荣誉已更新' : '荣誉已添加');
+  honorDlg.value = false;
+}
+
+async function toggleHonorActive(h) {
+  try {
+    await api.adminHonorUpdate(h.id, { is_active: h.is_active ? 1 : 0 });
+    ElMessage.success(h.is_active ? '已上架，前台立即可见' : '已下架，前台不再展示');
+  } catch (e) {
+    h.is_active = !h.is_active; // 失败要把开关拨回去，否则界面在撒谎
+    ElMessage.error(e.message);
+  }
+}
+
+async function delHonor(h) {
+  try {
+    await ElMessageBox.confirm(
+      `删除荣誉「${h.title}」？${h.has_image ? '奖状图片会一并从磁盘删除，' : ''}不可恢复。`,
+      '删除荣誉', { type: 'warning' });
+  } catch { return; }
+  try {
+    await api.adminHonorDelete(h.id);
+    ElMessage.success('已删除');
+    loadHonors();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
+// 批量：一次多选 N 张 → 建 N 条（标题取文件名），之后再逐条补奖项信息
+// 注：不能用 $refs —— <script setup> 的模板 ref 不挂到 $refs 上，只有声明的 ref 本身（模板里自动解包）
+const bulkInput = ref(null);
+const honorFileInput = ref(null);
+const bulkLoading = ref(false);
+async function handleBulkPick(e) {
+  const picked = [...(e.target.files || [])];
+  e.target.value = '';
+  if (!picked.length) return;
+  if (picked.length > 20) return ElMessage.warning('一次最多上传 20 张');
+  bulkLoading.value = true;
+  try {
+    const imgs = [];
+    for (const f of picked) {
+      if (!f.type.startsWith('image/')) { ElMessage.warning(`「${f.name}」不是图片，已跳过`); continue; }
+      imgs.push(await compressImage(f));
+    }
+    if (!imgs.length) return;
+    const r = await api.adminHonorBulk(imgs);
+    ElMessage.success(r.message || `已创建 ${r.count} 条荣誉`);
+    loadHonors();
+  } catch (e) { ElMessage.error(e.message); } finally { bulkLoading.value = false; }
+}
+
 // ==================== Tab6 服务器状态 ====================
 const stat = ref(null);
 const statLoading = ref(false);
@@ -268,7 +401,7 @@ const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 // el-table 时间列 formatter：UTC 串 → 本地 'YYYY-MM-DD HH:MM'（DB CURRENT_TIMESTAMP 是 UTC）
 const fmtT = (_r, _c, v) => fmtDateTime(v);
 
-onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisits(); loadAnns(); loadResources(); loadStatus(); });
+onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisits(); loadAnns(); loadResources(); loadHonors(); loadStatus(); });
 </script>
 
 <template>
@@ -522,6 +655,55 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           :page-size="resources.size" v-model:current-page="resources.page" @current-change="loadResources" />
       </el-tab-pane>
 
+      <!-- ========== Tab7 荣誉墙（前台 /honor 公开可见） ========== -->
+      <el-tab-pane label="🏅 荣誉墙" name="honors">
+        <div class="toolbar">
+          <el-button type="primary" size="small" @click="openHonorDlg(null)">＋ 添加荣誉</el-button>
+          <el-button size="small" :loading="bulkLoading" @click="bulkInput?.click()">
+            📦 批量上传多张奖状
+          </el-button>
+          <input ref="bulkInput" type="file" accept="image/*" multiple hidden @change="handleBulkPick" />
+          <span class="tip">
+            共 {{ honors.list.length }} 条 · 奖状图会在上传前自动压缩 ·
+            批量上传后标题取文件名，请点「编辑」逐条补充奖项信息
+          </span>
+        </div>
+        <el-table :data="honors.list" v-loading="honors.loading" stripe>
+          <el-table-column label="奖状图" width="86">
+            <template #default="{ row }">
+              <img v-if="row.has_image" class="hon-thumb" :src="row.image_url" alt="" @click="openImage(row.image_url, row.title)" />
+              <span v-else class="cell-sub">无图</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="title" label="奖项名称" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="award_level" label="级别" width="90">
+            <template #default="{ row }">{{ row.award_level || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="winner" label="获奖者" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.winner || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="award_date" label="获奖时间" width="100" />
+          <el-table-column prop="sort_order" label="排序" width="70" />
+          <el-table-column label="上架" width="80">
+            <template #default="{ row }">
+              <el-switch v-model="row.is_active" size="small" @change="toggleHonorActive(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="admin_name" label="录入人" width="100" />
+          <el-table-column label="操作" width="130" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openHonorDlg(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="delHonor(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!honors.loading && !honors.list.length"
+          description="还没有荣誉 — 点「添加荣誉」或「批量上传多张奖状」" :image-size="60" />
+        <p class="tip" style="margin-top:10px">
+          下架的荣誉不会出现在前台，但其奖状图管理员仍可预览（方便确认后再上架）。
+        </p>
+      </el-tab-pane>
+
       <!-- ========== Tab5 服务器状态 ========== -->
       <el-tab-pane label="🖥️ 服务器状态" name="status">
         <div class="toolbar">
@@ -624,6 +806,59 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
         <el-button type="primary" @click="saveAnn">{{ annForm.id ? '保存' : '发布' }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 荣誉 添加 / 编辑弹窗（奖项信息与奖状图分开提交，见 routes/honor.js 注释） -->
+    <el-dialog v-model="honorDlg" :title="honorForm.id ? '编辑荣誉' : '添加荣誉'" width="560px"
+      :close-on-click-modal="false" @closed="honorReset">
+      <el-form label-width="80px">
+        <el-form-item label="奖项名称">
+          <el-input v-model="honorForm.title" maxlength="60" show-word-limit placeholder="如：全国大学生电子设计竞赛 一等奖（≤60 字）" />
+        </el-form-item>
+        <el-form-item label="级别">
+          <el-input v-model="honorForm.award_level" maxlength="20" placeholder="如：国家级 / 省级 / 校级（≤20 字）" />
+        </el-form-item>
+        <el-form-item label="获奖者">
+          <el-input v-model="honorForm.winner" maxlength="40" placeholder="如：张三、李四（≤40 字）" />
+        </el-form-item>
+        <el-form-item label="获奖时间">
+          <el-input v-model="honorForm.award_date" maxlength="20" placeholder="如：2025-08 或 2025 年 8 月（≤20 字）" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="honorForm.description" type="textarea" :rows="2" maxlength="200" show-word-limit
+            placeholder="一句话说明，可不填（≤200 字）" />
+        </el-form-item>
+        <el-form-item label="奖状图">
+          <div class="hon-pick">
+            <img v-if="honorForm.preview || (honorForm.keepUrl && !honorForm.removeImg)" class="hon-prev"
+              :src="honorForm.preview || honorForm.keepUrl" alt="" />
+            <div v-else class="hon-empty">{{ honorForm.removeImg ? '（保存后删除图片）' : '暂无图片' }}</div>
+            <div class="hon-acts">
+              <input ref="honorFileInput" type="file" accept="image/*" hidden @change="handleHonorPick" />
+              <el-button size="small" @click="honorFileInput?.click()">
+                {{ (honorForm.keepUrl || honorForm.preview) && !honorForm.removeImg ? '更换图片' : '选择图片' }}
+              </el-button>
+              <el-button v-if="honorForm.keepUrl && !honorForm.file" size="small"
+                :type="honorForm.removeImg ? 'info' : 'danger'" @click="toggleHonorRemove">
+                {{ honorForm.removeImg ? '取消删除' : '删除图片' }}
+              </el-button>
+              <span v-if="honorForm.hint" class="tip">{{ honorForm.hint }}</span>
+              <span v-else-if="honorForm.imageName" class="tip">当前：{{ honorForm.imageName }}</span>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input v-model="honorForm.sort_order" style="width:140px" placeholder="数字越大越靠前" />
+          <span class="tip" style="margin-left:8px">留空 = 自动排到最前</span>
+        </el-form-item>
+        <el-form-item label="上架">
+          <el-switch v-model="honorForm.is_active" active-text="显示在前台荣誉墙" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="honorDlg = false">取消</el-button>
+        <el-button type="primary" @click="saveHonor">{{ honorForm.id ? '保存' : '添加' }}</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -678,4 +913,23 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
   margin-top: 14px;
   .ud-res-title, .ud-logs-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 }
+
+/* 荣誉墙 */
+.hon-thumb {
+  width: 64px; height: 48px; object-fit: cover; border-radius: 6px; cursor: zoom-in;
+  border: 1px solid var(--border, #e2e8f0); display: block;
+}
+.hon-pick { display: flex; align-items: flex-start; gap: 12px; width: 100%; }
+.hon-prev {
+  width: 132px; height: 96px; object-fit: contain; border-radius: 8px;
+  border: 1px solid var(--border, #e2e8f0); background: var(--surface-2);
+  flex-shrink: 0;
+}
+.hon-empty {
+  width: 132px; height: 96px; border-radius: 8px; flex-shrink: 0;
+  border: 1px dashed var(--border, #e2e8f0); background: var(--surface-3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--text-2, #94a3b8); text-align: center; padding: 4px;
+}
+.hon-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
 </style>

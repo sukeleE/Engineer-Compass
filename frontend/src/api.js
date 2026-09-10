@@ -262,6 +262,28 @@ export const api = {
   // 后台：资源管理（全部用户上传）
   adminResources: (params) => req(`/admin/resources${qs(params)}`),
   adminResourceDelete: (id) => req(`/admin/resources/${id}`, { method: 'DELETE' }),
+  // 荣誉墙（前台公开只读：**不带 token**，出图走浏览器缓存；服务端已把 image_url 拼好并带 ?v= 缓存键）
+  honorList: () => req('/honor'),
+  // 后台：荣誉墙管理。元数据走 JSON、图片走独立的 multipart 端点 —— 不混在一个请求里（见后端 routes/honor.js 注释）
+  adminHonors: () => req('/admin/honors'),
+  adminHonorCreate: (b) => req('/admin/honors', { method: 'POST', body: JSON.stringify(b) }),
+  adminHonorUpdate: (id, b) => req(`/admin/honors/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  adminHonorDelete: (id) => req(`/admin/honors/${id}`, { method: 'DELETE' }),
+  // FormData：req() 的 ...opts 展开在 headers 之后会**整体覆盖** headers，必须显式重带 Authorization；
+  // 且不能手设 Content-Type（会丢 multipart boundary）。同 resourceUpload(api.js:217)
+  adminHonorImageSet: (id, file) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    const token = localStorage.getItem('ec_token');
+    return req(`/admin/honors/${id}/image`, { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 120000);
+  },
+  adminHonorImageClear: (id) => req(`/admin/honors/${id}/image`, { method: 'DELETE' }),
+  adminHonorBulk: (files) => {
+    const fd = new FormData();
+    for (const f of files) fd.append('images', f);
+    const token = localStorage.getItem('ec_token');
+    return req('/admin/honors/bulk', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
+  },
   // 后台：访问记录（含游客）
   adminVisits: (params) => req(`/admin/visits${qs(params)}`),
   serverStatus: () => req('/admin/server-status'),
