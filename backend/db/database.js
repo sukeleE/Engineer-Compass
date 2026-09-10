@@ -35,6 +35,8 @@ migCol('expense_member', 'is_owner', 'ALTER TABLE expense_member ADD COLUMN is_o
 migCol('user_resource', 'share_token', 'ALTER TABLE user_resource ADD COLUMN share_token TEXT'); // 公开分享 token（引用功能：可撤销下载链接）
 migCol('user_resource', 'feishu_token', 'ALTER TABLE user_resource ADD COLUMN feishu_token TEXT'); // 飞书分享：云盘 file_token（撤销分享时删除飞书文件）
 migCol('team_file', 'resource_ref', 'ALTER TABLE team_file ADD COLUMN resource_ref INTEGER'); // 引用型文件：指向 user_resource.id（data 为空）
+migCol('share_post', 'gitee_repo', "ALTER TABLE share_post ADD COLUMN gitee_repo TEXT DEFAULT ''"); // Gitee 仓库 owner/repo（空=非仓库帖）
+migCol('share_post', 'gitee_ref', "ALTER TABLE share_post ADD COLUMN gitee_ref TEXT DEFAULT ''");   // Gitee 分支/标签/sha
 
 // 飞书绑定表 v2：站级单绑定(id=1) → 每用户绑定(user_id 主键，一飞书账号可绑多个网页账号)
 // 老库旧表作废重建（旧数据仅一个测试绑定，需重新授权一次）；新库 schema.sql 已建新表，此处跳过

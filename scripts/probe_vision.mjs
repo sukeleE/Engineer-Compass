@@ -13,12 +13,11 @@
 //   本探针遇 429 自动退避重试；重试耗尽则判 SKIP（退出 0，打印跳过原因）而不是假失败 ——
 //   限流是上游容量问题，不是代码缺陷，不该污染回归结果。
 import { chromium } from 'playwright';
-import { DatabaseSync } from 'node:sqlite';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
 import { extractModelText } from '../backend/lib/vision.js';
 import { textUsable } from '../backend/lib/pdfDoc.js';
 
-const API = 'http://localhost:3000/api';
-const DB_PATH = 'D:\\desktop\\竞赛指导\\backend\\data\\compass.db';
+const API = process.env.PROBE_API || DEFAULT_API;
 const CATEGORY = 'train';
 
 let pass = 0, fail = 0;
@@ -201,7 +200,7 @@ try {
 
   // ---- 清理 ----
   await api(`/expense/${P}`, { method: 'DELETE', token: ta });
-  const db = new DatabaseSync(DB_PATH);
+  const db = openProbeDb(API);
   db.prepare('DELETE FROM user WHERE id = ?').run(uid);
   db.close();
   ok('自清理：探针项目与测试用户已删除', true);

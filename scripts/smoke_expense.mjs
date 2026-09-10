@@ -10,16 +10,15 @@
 //   此处曾只判 "fields 是对象"，响应解析整段失效恒返回 {} 时照样全绿（假阳性，功能坏了半个月没人发现）——
 //   内容正确性由 scripts/probe_vision.mjs 负责：渲染真实票据图，断言 车次/金额/日期/出发到达 必须对得上；§13 截止后成员传图识别 403 →
 // zip(含 team_id=0 全项目/06零散票据)/xlsx(=SUM 六列/注入转义/全项目统一支付独立 sheet) → 四级删除级联清盘
-// → 清理测试用户（DatabaseSync + fs.rmSync 自清理，process.exit(fail?1:0)）
-import { DatabaseSync } from 'node:sqlite';
+// → 清理测试用户（openProbeDb（lib/probeDb.mjs，库须与 BASE 同源）+ fs.rmSync 自清理，process.exit(fail?1:0)）
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
 // 视觉白名单真相源：直接引服务端同一模块（不抄一份，避免与其漂移）；只读常量，不触网不读 .env
 import { visionFieldList, VISION_EXTRA_KEYS } from '../backend/lib/vision.js';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
 
-const BASE = 'http://localhost:3000/api';
+const BASE = process.env.PROBE_API || DEFAULT_API;
 const UP = 'D:\\desktop\\竞赛指导\\backend\\uploads\\expense';
-const DB_PATH = 'D:\\desktop\\竞赛指导\\backend\\data\\compass.db';
 
 const jsonReq = async (path, opts = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}), ...(opts.headers || {}) };
@@ -614,7 +613,7 @@ try {
   ok('删项目后上传目录整夹清除', !existsSync(`${UP}\\${C}`));
 
   // DB 级联断言（项目下五表清空）
-  const db = new DatabaseSync(DB_PATH);
+  const db = openProbeDb(BASE);
   const zero = db.prepare(
     `SELECT (SELECT COUNT(*) FROM expense_project ep WHERE ep.code = ?) AS p,
             (SELECT COUNT(*) FROM expense_team et JOIN expense_project ep2 ON ep2.id = et.project_id WHERE ep2.code = ?) AS t,

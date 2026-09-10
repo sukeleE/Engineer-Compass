@@ -1,7 +1,9 @@
 // 幽灵模式（秘密通道）冒烟测试：
 // 注册A/B → A发普通帖B可见 → B enter(幽灵) → B发帖默认幽灵帖 → A完全不可见(列表/详情/点赞) →
 // B ghost=1 可见 → ghost/users 名单与权限 → 幽灵间零好友直聊 → exit 后 403 → 标签侧信道
-const BASE = 'http://localhost:3000/api';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
+
+const BASE = process.env.PROBE_API || DEFAULT_API;
 const j = (r) => r.json();
 const api = async (path, opts = {}) => {
   const res = await fetch(BASE + path, {
@@ -114,15 +116,12 @@ try {
   const listB3 = await api('/share/posts?ghost=1&size=50', { token: tb });
   ok('B 退出后 ghost=1 仍看不到幽灵帖', !listB3.rows.some((p) => p.id === postB.id));
 
-  // 清理：删测试用户（级联清 session/dm/share 等）
-  const cleanup = await import('node:sqlite').then(({ DatabaseSync }) => {
-    const d = new DatabaseSync('D:\\desktop\\竞赛指导\\backend\\data\\compass.db');
-    const info = d.prepare('SELECT id FROM user WHERE email IN (?, ?)').all(A, B);
-    for (const u of info) d.prepare('DELETE FROM user WHERE id = ?').run(u.id);
-    d.close();
-    return info.length;
-  });
-  ok(`清理测试用户 ×${cleanup}`, cleanup === 2);
+  // 清理：删测试用户（级联清 session/dm/share 等）；库必须属于所打的后端，见 lib/probeDb.mjs
+  const d = openProbeDb(BASE);
+  const info = d.prepare('SELECT id FROM user WHERE email IN (?, ?)').all(A, B);
+  for (const u of info) d.prepare('DELETE FROM user WHERE id = ?').run(u.id);
+  d.close();
+  ok(`清理测试用户 ×${info.length}`, info.length === 2);
 } catch (e) {
   fail++;
   console.log(`❌ 异常中断: ${e.message}`);

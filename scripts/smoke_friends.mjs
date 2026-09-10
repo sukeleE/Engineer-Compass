@@ -1,5 +1,7 @@
 // 好友+私信+帖子scope 冒烟测试：注册两人 → 搜索 → 加好友 → 同意 → 私聊 → 已读 → 帖子 mine/favs → 删好友
-const BASE = 'http://localhost:3000/api';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
+
+const BASE = process.env.PROBE_API || DEFAULT_API;
 const j = (r) => r.json();
 const api = async (path, opts = {}) => {
   const res = await fetch(BASE + path, {
@@ -95,15 +97,12 @@ try {
   const dmAfter = await api(`/friends/dm/${uidB}`, { method: 'POST', token: ta, body: { content: '不是好友也能发吗' } });
   ok('删好友后仍可发私信（记录保留）', !!dmAfter.id);
 
-  // 清理：删测试用户（级联清 session/friend/dm/share）
-  const cleanup = await import('node:sqlite').then(({ DatabaseSync }) => {
-    const d = new DatabaseSync('D:\\desktop\\竞赛指导\\backend\\data\\compass.db');
-    const info = d.prepare('SELECT id FROM user WHERE email IN (?, ?)').all(A, B);
-    for (const u of info) d.prepare('DELETE FROM user WHERE id = ?').run(u.id);
-    d.close();
-    return info.length;
-  });
-  ok(`清理测试用户 ×${cleanup}`, cleanup === 2);
+  // 清理：删测试用户（级联清 session/friend/dm/share）；库必须属于所打的后端，见 lib/probeDb.mjs
+  const d = openProbeDb(BASE);
+  const info = d.prepare('SELECT id FROM user WHERE email IN (?, ?)').all(A, B);
+  for (const u of info) d.prepare('DELETE FROM user WHERE id = ?').run(u.id);
+  d.close();
+  ok(`清理测试用户 ×${info.length}`, info.length === 2);
 } catch (e) {
   fail++;
   console.log(`❌ 异常中断: ${e.message}`);

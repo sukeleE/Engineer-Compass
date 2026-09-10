@@ -21,6 +21,9 @@ const props = defineProps({
   feishuBusy: { type: Boolean, default: false },
   feishuUrl: { type: String, default: '' },
   ghostPage: { type: Boolean, default: false },
+  // 独立详情页（/share/:id）用：列表页是「下方展开的框」，独立页是页面主体，
+  // 两者的关闭按钮、「不在当前列表视图」提示、未选中空态都只有列表页语境才成立
+  standalone: { type: Boolean, default: false },
 });
 const emit = defineEmits(['like', 'fav', 'comment', 'del-comment', 'edit', 'del', 'feishu-edit', 'feishu-sync', 'close']);
 
@@ -74,12 +77,13 @@ watch(() => props.post?.comment_count, () => { commentInput.value = ''; });
             <el-button size="small" text @click="emit('edit', post)">编辑</el-button>
             <el-button size="small" text type="danger" @click="emit('del', post)">删除</el-button>
           </template>
-          <button class="gh-x" title="关闭" @click="emit('close')">×</button>
+          <button v-if="!standalone" class="gh-x" title="关闭" @click="emit('close')">×</button>
         </span>
       </div>
 
-      <!-- 该帖不在当前列表视图（来自消息通知 / 我的收藏 / 别的标签或页码）→ 明说，免得用户找不到高亮行 -->
-      <div v-if="!inList" class="gh-rhint">
+      <!-- 该帖不在当前列表视图（来自消息通知 / 我的收藏 / 别的标签或页码）→ 明说，免得用户找不到高亮行。
+           独立页没有「列表」这个语境，冷启动深链会恒真，必须屏蔽 -->
+      <div v-if="!inList && !standalone" class="gh-rhint">
         该帖不在当前列表视图（可能来自消息通知、我的收藏或其它标签/页码）
       </div>
 
@@ -148,8 +152,8 @@ watch(() => props.post?.comment_count, () => { commentInput.value = ''; });
       </div>
     </template>
 
-    <!-- 未选中：给个入口提示，别留一块空白 -->
-    <div v-else class="gh-rstate hint">
+    <!-- 未选中：给个入口提示，别留一块空白（独立页无「未选中」状态，不渲染） -->
+    <div v-else-if="!standalone" class="gh-rstate hint">
       <GhIcon name="comment-discussion" :size="20" />
       <p>点上方任意一行，在这里查看帖子正文、附件与讨论</p>
     </div>

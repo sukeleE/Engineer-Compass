@@ -255,7 +255,7 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 ## 2026-08-25 用户管理页增强：我的帖子/收藏 + 好友私聊
 
 - **入口**：/me 用户管理页改为四个标签：📊 概览（原有内容）/ 📝 我的帖子 / ⭐ 我的收藏 / 👥 好友私聊
-- **我的帖子/收藏**：复用 share 列表接口加 `scope=mine|favs`（需登录，未登录 401）；点卡片 → `/share?post=ID` 深链自动选中该帖（2026-09-10 起落在下方 README 区，不再是详情弹窗）
+- **我的帖子/收藏**：复用 share 列表接口加 `scope=mine|favs`（需登录，未登录 401）；点卡片 → `/share?post=ID` 深链（2026-09-10 二次重构后正式形态是 `/share/:id` 独立详情子路由，`?post=` 只剩兼容层）
 - **好友**：搜索用户（用户名/昵称 LIKE，排除自己）→ 发申请；对方已申请过自己时再发直接互为好友（双向自动接受）；申请接受写 friend 表双向行（A-B 与 B-A 各一行）；删除好友双向清；重复申请被拦截、被拒后重发
 - **私聊**：dm_message 表，GET /friends/dm/:uid 拉最近 100 条升序并顺带把对方发来的标已读（轮询一次往返）；前端弹窗 3s 轮询、关闭即停；好友列表带未读红点 + 最近消息预览（关联子查询）
 - **表**：friend_request（status pending/accepted/rejected）/ friend（双向行 PK user_id+friend_id）/ dm_message（is_read，idx_dm_pair + idx_dm_unread）——schema.sql 表 29~31
@@ -270,7 +270,7 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **通知来源**：他人对分享帖的点赞/收藏/评论（自己操作自己的帖子不通知）；私信未读沿用 dm_message.is_read
 - **表**：notification（user_id 接收者 / actor_id 触发者 / type like|fav|comment / post_id / comment_id / is_read）——schema.sql 表 32；帖删级联清通知
 - **接口**：/api/notifications/*（routes/notifications.js 新建）：GET /（comments/likes/favs 三组各 ≤50 条，JOIN actor 与帖子，LEFT JOIN 评论内容）、GET /unread-count（含 dm 聚合）、POST /read {types} 批量标已读
-- **跳转**：通知 → `/share?post=ID`（ShareView 深链打开详情弹窗评论区回复）；私信 → `/me?tab=friends&dm=ID`（MyView deepLink 自动切好友 tab + 打开私聊弹窗 + router.replace 清 query）
+- **跳转**：通知 → `/share?post=ID`（2026-09-10 二次重构后通知直接 push `/share/:id` 详情子路由，`?post=` 由兼容层兜底）；私信 → `/me?tab=friends&dm=ID`（MyView deepLink 自动切好友 tab + 打开私聊弹窗 + router.replace 清 query）
 - **轮询**：红点 15s 全局常驻；面板打开时 3s 快轮询计数（列表只在打开时拉取，避免阅读中列表跳动）
 - **前端**：MessageCenter.vue（仿 AIChatBox 样式：fab 52px 圆形 / 面板 420×640 / 移动端铺满视口）；App.vue 挂载；api.js 新增 notifications*/notificationsUnread/notificationsRead
 - **冒烟**：scripts/smoke_notifications.mjs 10 项断言全绿（注册→发帖→赞/藏/评→计数/分组/标已读→私信未读→自操作不通知→删帖级联清空）
@@ -322,7 +322,9 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **冒烟**：scripts/smoke_expense.mjs **160 项断言全绿**（沿革 115→156→160）：翻转 §7/§8/§12.6/§12.7a 为 403——成员建本队队友名行、改/删本队队友行、给队友行补传附件、改/删负责人名下同队个人行、删队友名下 prop 行、代录本队队友建行；§14 行数不变（owner 事后删除自己的行净零）；前端 build 通过
 - **注意**：上一会话（09-05）工作区遗留未提交变更（backend/routes/planChat.js、schedule.js、study.js + frontend CompDialog/ScheduleView/ToolDock + scripts/smoke_privacy.mjs）——与报销无关，勿混入本批提交
 
-## 2026-09-10 资源分享页重构：GitHub 仓库页形态（现行口径，取代 08-25 贴吧式）
+## 2026-09-10 资源分享页重构：GitHub 仓库页形态（取代 08-25 贴吧式）
+
+> ⚠️ 本节的**「点行→下方展开 README」与 `?post=` 选中链路已被同日第二轮重构取代**（详情改独立子路由 `/share/:id`、`?post=` 降级为兼容层），现行口径见文末「2026-09-10 资源分享：项目文件夹 + Gitee 仓库树 + 详情子路由」。仓库页形态、表/接口/权限、主题变量、工具函数仍以本节为准。
 
 - **需求**：用户「把资源分享页做成类似 GitHub 页面」→ 先调研现成方案（结论：**没有能直接用的**——文件管理器组件库是网盘外观且要接 driver 协议捆 Uppy/CodeMirror；GitHub 克隆项目全是 React 只能当参考；真正可复用的只有 github-markdown-css / @primer/octicons 两个零件。**GitHub 仓库页本质是三块布局 + 一套灰阶，不是组件**，手写反而白吃本项目已有的 CSS 变量双主题）→ 用户确认五项：整页重排成仓库页 / 一条帖子=一行文件 / 零新增依赖手写 / tabs=资源·我的帖子·我的收藏 / 配色跟随 var(--primary)
 - **形态**：面包屑仓库头（owner/板块名 + 公开·仅怪奇可见 pill + 描述 + 4 个统计徽标 + 开楼按钮）→ 标签页条（tabs 左、排序 el-dropdown 右，压在底边线上）→ 两栏主体 `minmax(0,1fr) 288px`（左＝筛选框+文件表+分页+README 框；右＝About+Topics）。**详情弹窗整体删除**（`detailDlg` → `selId`/`cur`），点行改为在下方 README 框展开正文/附件/讨论，README 里的评论按 GitHub issue 风排版（左头像 + 右「昵称 commented 相对时间」头栏）
@@ -330,14 +332,35 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **主题变量（`styles/main.scss`，新增 4 个）**：`:root` 与 `html.ghost-mode` **两处都必须声明**——`html.ghost-mode` 只覆盖 `:root` 里已有的同名变量，组件里写死 hex 会在暗色下出白块。取值从本项目自己的 slate 色阶往两端推，**不抄 GitHub 的 hex**（GitHub 的 `#d0d7de`/`#161b22` 偏蓝，与本项目冷灰蓝、幽灵主题中性紫调都不是一路）：`--surface-1`（表头底/行悬停）、`--border-2`（比 `--border` 深/亮一档 → 文件框外框）、`--text-3`（三级文字）、`--font-mono`（README 正文 pre 用）
 - **工具函数**：`utils/time.js` 新增 `fmtRelative`（刚刚/N 分钟前/N 小时前/N 天前/N 个月前，超一年回落 `fmtDateOnly`）——**必须经 `toLocal()`**，后端存的是无时区标记的 UTC 串，裸 `new Date('2026-09-10 08:00:00')` 会被浏览器当本地时间差 8 小时；`utils/share.js` 新增 `postKind(p)`（image/video/audio/link/archive/file，看首个附件的 mime > 引用型 url > 扩展名兜底）+ `KIND_ICON` 映射
 - **新组件 `components/share/`**：`GhIcon.vue`（内联 Octicons 19.11.0，21 个图标以字符串字面量存 `<script setup>`，`fill="currentColor"` → 颜色由父级 CSS 决定，双主题自动跟随；**Octicons 没有 audio/music，实测 404**——音频键映射到 `unmute` 喇叭图标）；`ShareFileTable.vue`（表头 名称/作者/互动/更新时间，行图标随 `postKind` 变，≤768px 用 `display:none` 藏作者与互动列）；`ShareReadme.vue`（三态：加载/错误就地渲染/内容；错误态不弹 toast 不整页清空，深链指向已删帖时用得上）
-- **选中链路（`ShareView.vue`）**：`?post=ID` 是选中态的持久化载体，`selId`/`cur` 为唯一来源；**`watch(() => route.query.post, …, { immediate: true })`** 统一深链/站内二次跳转/前进后退（旧 `deepLink()` 只在 `onMounted` 读一次 → 第二次点行不生效，本次顺手修掉）；点行时若目标 URL 与当前完全相同，vue-router 会去重、watch 不触发 → 必须**先本地 `selectPost(id)` 再 replace**（`pickRow`，否则表现为「点了没反应」）；选中帖一律按 id 直拉详情（`api.sharePost`），**不能改成从列表行取**——帖子可能不在当前页/当前 tab 里，且评论只有详情接口返回
+- **选中链路（`ShareView.vue`）**：`?post=ID` 是选中态的持久化载体，`selId`/`cur` 为唯一来源；**`watch(() => route.query.post, …, { immediate: true })`** 统一深链/站内二次跳转/前进后退（旧 `deepLink()` 只在 `onMounted` 读一次 → 第二次点行不生效，本次顺手修掉）；点行时若目标 URL 与当前完全相同，vue-router 会去重、watch 不触发 → 必须**先本地 `selectPost(id)` 再 replace**（`pickRow`，否则表现为「点了没反应」）；选中帖一律按 id 直拉详情（`api.sharePost`），**不能改成从列表行取**——帖子可能不在当前页/当前 tab 里，且评论只有详情接口返回。**（同日第二轮已废：`selId`/`cur`/`selectPost` 全删，选中态改由 `/share/:id` 的路径参数承载，见文末新节）**
 - **两个数据持有者**：`rows`（列表）与 `cur`（README）是同一份数据的两个副本，任何计数/标志变更**必须经 `applyActs(id, patch)` 同时写**，否则列表行与 README 的数字会对不上（点赞是典型）——`normAtts` 对数组入参返回**同一引用**，详情对象是「活」的，同步才有意义
 - **`openEdit` 必须浅拷贝附件**：`.map(a => ({...a}))`——`normAtts` 对数组入参返回同一引用，直接赋值会让编辑器的附件数组与 README/列表里那份是同一个，删个 chip 就当场改掉了背后的帖子，取消也回滚不了
 - **幽灵页 `/ghost-share` 只留一个静态标签**：`scope` 非空会绕过幽灵隔离（后端有意为之：查看自己数据时全量），摆到秘密分享页上会混进普通帖 → 幽灵页不渲染「我的帖子/我的收藏」两个 tab，tabs 条渲染成单静态标签；发帖恒为幽灵帖
-- **探针 `scripts/probe_share.mjs`（46 项，`npm run probe:share`）**：DOM 级守护重做后的核心链路——徽标=API `stats`、行数=min(total,每页10)、行图标随附件类型变、点行→README 出标题正文、点赞三处同步（README 按钮/表格行=帖子级 like_count，头部徽标=全站 stats.likes，**两者口径不同不能混用同一基准数**）、发评论、我的收藏 tab 只剩收藏帖、深链 `?post=ID` 直达、深链指向不存在帖就地报错、连续点两行、标签过滤、幽灵页单标签+反向过滤+暗色类、375px 折叠、普通用户看不到幽灵帖。`PROBE_API`/`PROBE_WEB` 可覆盖（对着临时实例跑不必动用户的 :3000）；截图落 `os.tmpdir()`（不进仓库、不脏 git status）
+- **探针 `scripts/probe_share.mjs`（46 项，`npm run probe:share`；同日第二轮扩到 56 项）**：DOM 级守护重做后的核心链路——徽标=API `stats`、行数=min(total,每页10)、行图标随附件类型变、点行→README 出标题正文、点赞三处同步（README 按钮/表格行=帖子级 like_count，头部徽标=全站 stats.likes，**两者口径不同不能混用同一基准数**）、发评论、我的收藏 tab 只剩收藏帖、深链 `?post=ID` 直达（现改为断言它 302 式改写成 `/share/:id`）、深链指向不存在帖就地报错、连续点两行、标签过滤、幽灵页单标签+反向过滤+暗色类、375px 折叠、普通用户看不到幽灵帖。`PROBE_API`/`PROBE_WEB` 可覆盖（对着临时实例跑不必动用户的 :3000）；截图落 `os.tmpdir()`（不进仓库、不脏 git status）
 - **坑（本次踩到）**：
   - **后端进程不热重载**——改了 `routes/*.js` 必须重启 `:3000`，否则探针/冒烟测的是**旧代码**。症状：`stats` 全 `undefined`、徽标恒 0、而 API 直连另一端口一切正常。改后端后先重启再跑测试
   - **`fullPage: true` 截图前必须等页面重排结束**（`waitForTimeout(800)`）：文档高度在拼接过程中变化会拼出**白色空带**，看着像暗色主题漏白块，实为截图假告警（本次据此误判过一次，用 `getComputedStyle` 实测各层背景色才排除）
   - **断言「列被藏掉」要看可见性，不能数节点**：窄屏是 `display:none`，DOM 里 4 列仍在 → `locator.count()` 恒为 4
   - 幽灵页 Topics 侧的标签计数**不做幽灵过滤**（`shareTags` 既有行为，混合计数），本次未改
 - **验证**：`probe_share.mjs` **46/46**；回归 `smoke_ghost` 30/30、`smoke_friends` 25/25、`smoke_notifications` 10/10、`smoke_privacy` 36/36、`smoke_expense` 170/170（1 跳过=上游限流）；前端 build 通过；浅色+暗色(`html.ghost-mode`)+375px 三张截图人工过目
+
+## 2026-09-10 资源分享：项目文件夹 + Gitee 仓库树 + 详情子路由（现行口径，取代同节上一条的「点行展开 README」）
+
+- **需求**：用户三件事——①上传一整个文件夹并能看内部结构 ②把 Gitee 仓库的文件树拉进来展示 ③点一行跳独立详情页（不再在列表下方展开）。产品口径四选一确认：**一条帖子 = 一个项目 / 文件落盘、单帖上限 200MB / Gitee 拉文件树页内渲染 / 文件能在线预览**
+- **详情子路由（阶段一）**：新增 `/share/:id` 与 `/ghost-share/:id`（`SharePostView.vue`，照 `ProfileView` 的「computed 取参 + watch + onMounted」范式；**函数式 `props: () => ({ghost:true})` 是全站首例**——对象式 props 读不到 route.params）。`?post=ID` **降级为兼容层**：列表页 `watch(route.query.post, …, {immediate:true})` 直接 `router.replace` 成子路由，不在这里拉详情（详情页有自己的加载链路，重定向过去是唯一入口）；MyView/MessageCenter 已改为直接 push 新形状
+- **滚动行为必须自己记**（`router.js`）：**不能吃 vue-router 交来的 `saved`**——4.6.4 的 `saved` 就是 history entry 的 `state.scroll`，pop 时实测是 `{left:0,top:0}` 这类残值（entry 建好时页面还在顶上），采信它等于亲手把用户弹回顶部，比不写 `scrollBehavior` 还糟。现改为：`beforeEach` 里把 `from.fullPath → window.scrollY` 记进有界 Map（100 条），用 `history.state.position` 判方向，**后退才还原**。另：`to.path === from.path` 一律 `return false`——保护 `/schedule?tab=`、`/team?team=`、`/expense?code=`、`/share?post=` 这些同页 query 导航不被弹回顶部
+- **列表状态缓存搬进真模块**：`utils/shareKeep.js`（`shareKeep(ghost)`）。写在 `ShareView.vue` 顶层是 **per-instance** 的（`<script setup>` 顶层代码编译进 `setup()`，见「script-setup 无模块作用域」），后退回列表时 rows 为空 → 文档高度塌陷 → 滚动还原被钳回顶部
+- **阶段二 数据模型**：新表 `share_file`（schema.sql **表29**，非唯一索引与 `idx_share_post_user` 同处即可——「索引必须在迁移链之后」那条坑只针对给老表加列的索引）；`share_post` 走 `migCol` 加 `gitee_repo`/`gitee_ref`。**树用扁平 `path` 存、前端按前缀推导目录，不存空目录行**（`webkitdirectory` 本就产不出空目录，如实接受）。磁盘名一律 `{ts}_{12hex}{ext}`，`path` 只进 DB 与 ZIP 条目名 → 穿越风险被 basename 二次兜住，但 `sanitizeRelPath` 仍拒 `..`/反斜杠/前导斜杠/NUL/超长段
+- **`lib/shareFiles.js`**（纯 fs/db，不 import routes）两个清盘入口别用混：**`purgePostFiles(postId)` = 删帖时全清（含 Gitee 行）**——`share_file` 行会随外键级联消失但磁盘文件不会，`routes/admin.js` 的 `DELETE /posts/:id` 必须显式先调它；**`purgeUploads(postId)` = 改上传树时只清 `source != 'gitee'`**，让「上传文件夹」与「Gitee 仓库」各管各的。另有 `sweepStaging(hours=24)`（清超期未绑定的暂存行 + 文件，`server.js` 启动调一次）与 `usedOf(userId, stagedOnly)`（配额计量）
+- **阶段三 预览**：文本走 `api.shareFileText(fid)` → `<pre>{{ text }}</pre>`，**Vue 插值天然转义，绝不用 `v-html`**（本页最大的 XSS 面，探针里有 `<script>alert(1)</script>` 必须当文本显示的断言）；图片/PDF/音视频一律 **blob objectURL**，**不用 `?token=` 直链**——会话 token 进 URL 会被记进 `access_log.originalUrl`。`/files/:fid` 必须 **join `share_post` 走 `ghostVisible()`**，否则幽灵帖的附件能被匿名直取（探针断言普通用户/匿名取幽灵帖文件都 404）。ZIP 条目名用完整 `path`（不是 basename）才保留目录结构
+- **阶段四 Gitee（`lib/gitee.js`）**：三个要点——①**SSRF 闸门**：只接受 `owner`/`repo`/`ref` 三段，正则校验后 `encodeURIComponent` 拼进固定 gitee.com 路径，**永不接受客户端给的完整 URL**（`lib/vision.js` 同款风格，env 键**惰性读**：ESM 静态 import 早于 `process.loadEnvFile`）②**10 分钟内存缓存**（`Map`，键 `owner/repo@ref`，上限 50）——匿名配额只有 ~60 次/小时/IP，缓存 + 只在「预览/保存/同步」时拉，把浏览流量完全挡在 Gitee 之外 ③**保存时服务端自己重拉一遍**（走缓存），**绝不采信客户端传来的树数据**——否则任何人可伪造任意路径入库。大仓库只收前 `GITEE_MAX_FILES`（500）条并在响应里带 `truncated`，不静默截断
+- **`gitee_repo` 是三态字段**（与 `files` 同一口径）：`undefined` = 不动（老客户端/只改标题不能把仓库连文件一起抹掉）/ `''` = 解绑（清字段 + 删本帖 `source='gitee'` 行）/ 值 = 重拉整树替换。**拉取失败不推翻这次保存**：正文已经写进去了，带 `gitee_error`/`gitee_hint` 回去让前端提示，用户可在详情页点「↻ 同步仓库」重试（限流/断网这类瞬时故障不该让人重打一遍正文）
+- **Gitee 条目与上传文件正交**：`share_file.source` 区分 `'upload'`/`'gitee'`，上传树整组替换不会抹掉仓库绑定，反之亦然。ZIP 只打磁盘文件（Gitee 条目走仓库代理、不进包）；`/files/:fid/raw` 与 `/files/:fid/text` 按 `source` 分支，前者把 `gitee.com/{o}/{r}/raw/{ref}/{path}` 流式代理回来（不设上限；文本预览仍 512KB 截断）。两者共用 `readableFile()`：**`post_id` 为空（暂存态）只有本人能取**，否则走 `ghostVisible()`，不可见一律 404 不泄露存在性
+- **探针用 `GITEE_BASE_URL`/`GITEE_RAW_BASE` 指向本地假 Gitee**（`scripts/lib/fakeGitee.mjs`，离线确定性，`missing`→404 / `flood`→403 / `big`→truncated 三档错误映射）。`/api/health` 加 `gitee: !!GITEE_ACCESS_TOKEN` 布尔（可选增强而非功能开关——公开仓库不配 token 也能拉）
+- **坑（本轮踩到）**：
+  - **PUT 不带 `tags` 一律 400**（既有 bug，本次才暴露）：`normTags` 的 `null` 同时被当成「缺省」与「非法」，缺省必须用 `undefined` 单独区分。发现方式是 Gitee 测试里做了一次「只改标题」的 PUT。**三态字段（undefined/''/值）是本模块的通用口径，别再用 null 兼职表示缺省**
+  - **假 Gitee 的仓库名每轮必须换**（`demo${stamp}`）：固定仓库名会让第二次跑探针吃上后端 10 分钟缓存，测不到「真的去拉了」，还会把缓存断言测成假绿；同时补一条**「同一仓库重复拉不再打 Gitee」**的真断言
+  - **断言 toast 要按文案等**（`.el-message` + `hasText:'已同步'`）：直接读 `.el-message` 会抢到上一条还没消失的「🚀 开楼成功」
+  - 弹窗里的文件清单**默认收起**，探针要先点 `.fol-sum` 展开再断言行数
+- **探针**：`probe:share` 46→**56**（新增子路由/滚动还原/幽灵详情页暗色）；**新增 `probe:share-folder` 39 项**（树层次/缩进分档/展开收起/文本与图片预览/XSS/恶意 `../` 被拒/幽灵文件 404/ZIP 结构/暗色面板不发白/375px 不横向溢出）；**新增 `probe:share-gitee` 34 项**（假 Gitee 全程离线：路径集合逐一相等、SSRF、错误映射、缓存命中、代理预览、blob 图片、浏览器零直连 gitee.com、三态字段、非作者同步 403）
+- **验证**：`probe_share` 56/56、`probe_share_folder` 39/39、`probe_share_gitee` 34/34（连跑两次证明幂等）；回归 `smoke_ghost` 30/30、`smoke_friends` 25/25、`smoke_notifications` 10/10、`smoke_privacy` 36/36、`smoke_expense` 170/170（1 跳过=上游限流）、`probe_claimlost` 15/15；前端 build 通过；浅色 + 幽灵暗色 + 375px 截图人工过目（新面板无白块、无横向溢出）

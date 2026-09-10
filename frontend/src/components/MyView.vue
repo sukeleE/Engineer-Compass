@@ -191,8 +191,8 @@ async function loadPosts(scope) {
   } catch (e) { ElMessage.error(e.message); }
   finally { postsLoading.value = false; }
 }
-// 点卡片 → 资源分享页并自动打开详情弹窗
-const goPost = (p) => router.push(`/share?post=${p.id}`);
+// 点卡片 → 直接进该资源的详情子路由（?post= 老形态仍兼容，见 ShareView 的重定向）
+const goPost = (p) => router.push(`/share/${p.id}`);
 // 好友头像 → 公开主页
 const goUserPage = (id) => router.push(`/user/${id}`);
 

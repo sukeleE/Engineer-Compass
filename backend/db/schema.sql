@@ -333,6 +333,24 @@ CREATE TABLE IF NOT EXISTS share_comment (
 );
 CREATE INDEX IF NOT EXISTS idx_share_comment_post ON share_comment(post_id);
 
+-- 表29 share_file 项目文件夹（一条帖子 = 一个项目；文件落盘 backend/uploads/share/{user_id}/，DB 只存元数据）
+-- path 是 '/' 分隔的相对路径，**目录由 path 前缀推导，不单独存目录行**（webkitdirectory 本就产不出空目录）
+-- post_id 为 NULL = 暂存态（发帖弹窗里先传、提交时才绑帖）；store_name 为 NULL = Gitee 条目（不落盘，按需代理）
+CREATE TABLE IF NOT EXISTS share_file (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id     INTEGER REFERENCES share_post(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  path        TEXT NOT NULL,                 -- 'docs/a.md'（已消毒：无 .. / 无反斜杠 / 无前导斜杠）
+  name        TEXT NOT NULL,                 -- 末段
+  size        INTEGER DEFAULT 0,
+  mime        TEXT DEFAULT '',               -- 按扩展名推导，不信客户端
+  store_name  TEXT,                          -- 磁盘 basename（{ts}_{12hex}{ext}）
+  source      TEXT DEFAULT 'upload',         -- 'upload' | 'gitee'
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_share_file_post ON share_file(post_id);
+CREATE INDEX IF NOT EXISTS idx_share_file_staging ON share_file(user_id, post_id);
+
 -- 表29~31 好友与私聊：好友申请 + 好友关系（双向行，A-B 与 B-A 各一行）+ 私聊消息
 CREATE TABLE IF NOT EXISTS friend_request (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

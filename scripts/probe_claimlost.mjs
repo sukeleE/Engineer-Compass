@@ -15,11 +15,10 @@
 //   运行：node scripts/probe_claimlost.mjs   （或 npm run probe:claimlost）
 // 自清理：探针自建项目/名单/行/附件，跑完自删项目与测试用户，可反复运行、可并发于冒烟之后。
 import { chromium } from 'playwright';
-import { DatabaseSync } from 'node:sqlite';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
 
-const API = 'http://localhost:3000/api';
-const WEB = 'http://localhost:5173';
-const DB_PATH = 'D:\\desktop\\竞赛指导\\backend\\data\\compass.db';
+const API = process.env.PROBE_API || DEFAULT_API;
+const WEB = process.env.PROBE_WEB || 'http://localhost:5173';
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { cond ? (pass++, console.log(`✅ ${name}`)) : (fail++, console.log(`❌ ${name}`)); };
@@ -128,7 +127,7 @@ try {
   // ---------- 清理 ----------
   await browser.close(); browser = null;
   await api(`/expense/${P}`, { method: 'DELETE', token: ta });
-  const db = new DatabaseSync(DB_PATH);
+  const db = openProbeDb(API);
   db.prepare('DELETE FROM user WHERE id = ?').run(uid);
   db.close();
   ok('自清理：探针项目与测试用户已删除', true);

@@ -3,9 +3,9 @@
 //   plan-chat 个人模式（schedule/study 及 edit）在登录与归属检查通过前不得触达 AI（404 先于 502/AI 调用）。
 // 自建数据全部走 API 并即时清理；最后直接落库删除两个冒烟账号及其 session/审计行。
 // 运行：node scripts/smoke_privacy.mjs（需后端 :3000 已启动）
-import { DatabaseSync } from 'node:sqlite';
+import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
 
-const API = 'http://localhost:3000/api';
+const API = process.env.PROBE_API || DEFAULT_API;
 const EMAILS = ['prv.smoke.a@ec.test', 'prv.smoke.b@ec.test'];
 let fails = 0;
 const line = (n, s, c, x = '') => { if (!c) fails++; console.log(`${c ? 'OK  ' : 'FAIL'} ${n}) ${s}${x ? ' | ' + x : ''}`); };
@@ -24,7 +24,7 @@ const planBody = (title) => ({ title, phases: [{ phase: '阶段1', date: '2026-0
 let n = 0;
 const ok = (s, c, x = '') => line(++n, s, c, x);
 
-const db = new DatabaseSync('backend/data/compass.db');
+const db = openProbeDb(API);
 const reg = async (email) => {
   const { status, data } = await japi('/auth/register', 'POST', { email, password: 'privacysmoke1' });
   if (status !== 201) throw new Error(`注册失败 ${email}: ${status} ${JSON.stringify(data)}`);

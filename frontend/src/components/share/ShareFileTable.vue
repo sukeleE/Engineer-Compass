@@ -1,7 +1,7 @@
 <script setup>
 // 资源分享页的「文件列表」表格（GitHub 仓库页的文件表形态）
-// 一行 = 一条帖子；行点击 = 选中并在下方 README 区展开（不再弹详情弹窗）
-// 点赞/收藏按钮保留内联可点（@click.stop 阻止冒泡到行选中），行为与旧卡片流一致
+// 一行 = 一条帖子；行点击 = 跳该帖的详情子路由 /share/:id（选中态由 URL 承载，表格自己不持有）
+// 点赞/收藏按钮保留内联可点（@click.stop 阻止冒泡到行跳转），行为与旧卡片流一致
 import { computed } from 'vue';
 import { cnt, postKind, KIND_ICON } from '../../utils/share.js';
 import { fmtDateTime, fmtRelative } from '../../utils/time.js';
@@ -9,7 +9,6 @@ import GhIcon from './GhIcon.vue';
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
-  selectedId: { type: [Number, String, null], default: null },
   loading: { type: Boolean, default: false },
   emptyText: { type: String, default: '' }, // 由父层按 标签/幽灵页 分支算好传入
 });
@@ -53,13 +52,19 @@ const stamp = (p) => p.update_time || p.create_time;
     <div v-loading="loading" class="gh-tbody">
       <div
         v-for="p in filtered" :key="p.id" class="gh-row"
-        :class="{ sel: String(p.id) === String(selectedId) }"
         role="button" tabindex="0"
         @click="emit('select', p.id)" @keyup.enter="emit('select', p.id)"
       >
         <span class="c-name">
           <GhIcon :name="KIND_ICON[postKind(p)]" :size="16" class="gh-ficon" />
           <span class="gh-fname" :title="p.title">{{ p.title }}</span>
+          <!-- 项目制：有文件夹/仓库的帖子给个小标记，一眼知道点进去是目录树而不是一堆附件 -->
+          <span v-if="p.gitee_repo" class="gh-fbadge gt" :title="`含 Gitee 仓库：${p.gitee_repo}`">
+            <GhIcon name="repo" :size="12" /> {{ p.file_count || 0 }}
+          </span>
+          <span v-else-if="p.file_count" class="gh-fbadge" :title="`含项目文件夹：${p.file_count} 个文件`">
+            <GhIcon name="file-directory-fill" :size="12" /> {{ p.file_count }}
+          </span>
         </span>
         <span class="c-author" :title="p.nickname">{{ p.nickname }}</span>
         <span class="c-acts">
@@ -124,15 +129,18 @@ const stamp = (p) => p.update_time || p.create_time;
   &:last-of-type { border-bottom: 0; }
   &:hover { background: var(--surface-1); }
   &:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-  &.sel { background: var(--primary-tint); box-shadow: inset 3px 0 0 var(--primary); }
   .c-name { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); }
   .gh-ficon { color: var(--text-3); }
-  &.sel .gh-ficon { color: var(--primary); }
+  .gh-fbadge {
+    flex: none; display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10.5px; padding: 0 6px; border-radius: 999px;
+    color: var(--text-3); background: var(--surface-3); border: 1px solid var(--border);
+    &.gt { color: var(--primary); background: var(--primary-tint); border-color: var(--border-2); }
+  }
   .gh-fname {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     &:hover { color: var(--primary); text-decoration: underline; }
   }
-  &.sel .gh-fname { font-weight: 600; color: var(--primary); }
   .c-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .c-time { text-align: right; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
   .c-acts { display: flex; gap: 8px; align-items: center; }

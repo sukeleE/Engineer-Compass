@@ -27,6 +27,7 @@ import feishu from './routes/feishu.js';
 import expense from './routes/expense.js';
 import { hasSMTP } from './routes/mailer.js';
 import { accessLog } from './routes/middleware.js';
+import { sweepStaging } from './lib/shareFiles.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -65,13 +66,15 @@ app.use('/api/expense', expense);
 app.use(express.static('public'));
 
 // 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；vision=true 表示报销票据图片识别可用；
-// mail=true 表示邮箱登录发真邮件）
+// mail=true 表示邮箱登录发真邮件；gitee=true 表示配了 GITEE_ACCESS_TOKEN —— 只是配额更高，
+// 公开仓库不配也能拉，所以它是可选增强而非功能开关）
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true, name: 'Engineer-Compass API', time: new Date().toISOString(),
     ai: !!process.env.DEEPSEEK_API_KEY,
     vision: !!process.env.VISION_API_KEY,
     mail: hasSMTP(),
+    gitee: !!process.env.GITEE_ACCESS_TOKEN,
   });
 });
 
@@ -86,6 +89,12 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: err.message });
 });
+
+// 分享文件夹的暂存清理：用户传完文件夹又关掉弹窗，行/文件就永远绑不上帖（24h 宽限）
+try {
+  const n = sweepStaging();
+  if (n) console.log(`🧹 已清理 ${n} 个超期未发布的分享文件夹暂存文件`);
+} catch (e) { console.error('暂存清理失败（不影响启动）:', e.message); }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

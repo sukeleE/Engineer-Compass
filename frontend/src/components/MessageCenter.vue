@@ -40,7 +40,7 @@ async function goNotif(n) {
     refreshUnread();
   }
   emit('close'); // 跳转前关闭面板
-  router.push(`/share?post=${n.post.id}`);
+  router.push(`/share/${n.post.id}`);
 }
 
 // 私信跳转：跳到「我的」- 好友 tab，自动打开与对方的私聊弹窗

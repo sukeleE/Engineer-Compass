@@ -1,5 +1,6 @@
 // 消息中心冒烟测试：注册两人 → 发帖 → 赞/藏/评 → 通知分组/未读计数/标已读 → 私信未读 → 自己操作不通知 → 删帖级联清理
-const BASE = 'http://localhost:3000/api';
+import { DEFAULT_API } from './lib/probeDb.mjs';
+const BASE = process.env.PROBE_API || DEFAULT_API;
 const j = (r) => r.json();
 const api = async (path, opts = {}) => {
   const res = await fetch(BASE + path, {

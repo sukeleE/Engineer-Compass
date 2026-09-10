@@ -6,6 +6,7 @@ import { statfsSync, statSync } from 'node:fs';
 import db, { DB_PATH } from '../db/database.js';
 import { authRequired, adminRequired, logAudit } from './middleware.js';
 import { deleteResource } from './resource.js';
+import { purgePostFiles } from '../lib/shareFiles.js';
 
 const r = Router();
 r.use(authRequired);
@@ -165,6 +166,7 @@ r.delete('/posts/:id', (req, res) => {
   const id = Number(req.params.id);
   const p = db.prepare('SELECT id, title FROM share_post WHERE id = ?').get(id);
   if (!p) return res.status(404).json({ error: '帖子不存在' });
+  purgePostFiles(id); // 磁盘文件不随外键级联，必须先清盘再删帖
   db.prepare('DELETE FROM share_post WHERE id = ?').run(id);
   logAudit(req, 'post-delete', p.title, { post_id: id });
   res.json({ message: `帖子「${p.title}」已删除（评论/点赞/收藏/通知已级联清理）` });

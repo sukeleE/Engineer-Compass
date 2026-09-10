@@ -8,7 +8,9 @@
     "smoke:expense": "node scripts/smoke_expense.mjs",
     "probe:claimlost": "node scripts/probe_claimlost.mjs",
     "probe:vision": "node scripts/probe_vision.mjs",
-    "probe:share": "node scripts/probe_share.mjs"
+    "probe:share": "node scripts/probe_share.mjs",
+    "probe:share-folder": "node scripts/probe_share_folder.mjs",
+    "probe:share-gitee": "node scripts/probe_share_gitee.mjs"
   },
   "devDependencies": {
     "playwright": "1.63.0"

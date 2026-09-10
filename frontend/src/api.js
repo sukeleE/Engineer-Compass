@@ -164,6 +164,38 @@ export const api = {
   shareComment: (id, content) => req(`/share/posts/${id}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
   shareCommentDelete: (cid) => req(`/share/comments/${cid}`, { method: 'DELETE' }),
   shareTags: () => req('/share/tags'),
+  // 项目文件夹上传：一次 ≤10 个文件（由调用方分批）；paths 是与 files 等长的相对路径数组
+  // ⚠️ 同 resourceUpload：req() 的 opts spread 会覆盖 headers，必须显式带 token；不设 Content-Type 由浏览器补 boundary
+  shareUploads: (files, paths) => {
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f);
+    fd.append('paths', JSON.stringify(paths));
+    const token = localStorage.getItem('ec_token');
+    return req('/share/uploads', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
+  },
+  // 移除尚未绑帖的暂存文件（发帖弹窗里删掉刚传的文件）
+  shareFileDrop: (fid) => req(`/share/files/${fid}`, { method: 'DELETE' }),
+  // 文本预览（服务端 512KB 截断；渲染侧用 <pre>{{ text }}</pre>，插值天然转义，绝不用 v-html）
+  shareFileText: (fid) => req(`/share/files/${fid}/text`),
+  // 整包下载地址：浏览器直连（无需请求头），公开帖匿名可用
+  shareZipUrl: (id) => `${BASE}/share/posts/${id}/zip`,
+  // 文件字节流：<img>/<video>/下载都不能带请求头，这里主动取 blob 再由前端造 objectURL。
+  // **不走 ?token=** —— session token 进 URL 会被后端 access_log 原样记进 originalUrl（管理员可见）。
+  // dl=true 走 ?dl=1（下载）；raw=true 走 /raw（Gitee 条目——它的字节不在本站磁盘上，
+  // 要由后端去 gitee.com 代理回来；普通上传文件走前者）
+  shareFileBlob: async (fid, { dl = false, raw = false } = {}) => {
+    const token = localStorage.getItem('ec_token');
+    const url = raw ? `${BASE}/share/files/${fid}/raw` : `${BASE}/share/files/${fid}${dl ? '?dl=1' : ''}`;
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `读取失败（${res.status}）`);
+    }
+    return res.blob();
+  },
+  // Gitee：预览树（不落库，只用来在弹窗里现显示「已拉取 N 个文件」）与重新同步
+  shareGiteeTree: (repo, ref) => req('/share/gitee/tree', { method: 'POST', body: JSON.stringify({ repo, ref }) }),
+  shareGiteeSync: (id, repo, ref) => req(`/share/posts/${id}/gitee-sync`, { method: 'POST', body: JSON.stringify({ repo, ref }) }),
   // 好友与私聊
   friendList: () => req('/friends'),
   friendRequests: () => req('/friends/requests'),
