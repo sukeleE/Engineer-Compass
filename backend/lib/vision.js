@@ -3,7 +3,10 @@
 //   VISION_API_KEY：智谱开放平台 key（open.bigmodel.cn 申请，形如 id.secret）
 //   VISION_MODEL：默认 glm-4.6v-flash（新免费视觉模型，支持 base64/本地图，128K 上下文；
 //     老 glm-4v-flash 不支持 base64 只接受图片 URL —— 勿用）；VISION_BASE_URL 可换其它兼容网关
-// 职责只到「图片 → 结构化 JSON」：不落库、不写行 —— 识别结果由前端预填表单、人工确认后照常走行 CRUD；
+// 职责只到「图片/PDF → 结构化 JSON」：不落库、不写行 —— 识别结果由前端预填表单、人工确认后照常走行 CRUD；
+// PDF 的两条路（2026-09-10，见 pdfDoc.js）：文字层可用 → callVisionText 走文本模型（DeepSeek，快且不受视觉档限流）；
+//   扫描件/乱码 → 光栅化成图后仍走本文件的 callVision（GLM-4V）。两条路共用同一套 prompt / 解析 / 归一，
+//   仅 source 不同（'pdf-text' | 'pdf-image' | 'image'）
 // 看不清的字段宁可不填也不编造（模型输出按类别字段白名单归一后返回，拿不准一律空）
 // ⚠️ 响应解析：glm-4.6v-flash 是「思考型」模型 —— 答案在 choices[0].message.content、
 //   思考过程在 reasoning_content。必须经 extractModelText 取正文，切勿把整个响应体丢给 JSON 解析
@@ -45,7 +48,7 @@ function buildSystemPrompt(cat) {
   const fs = visionFieldList(cat);
   const spec = fs.length ? fs.map((f) => `"${f.key}"：${fieldSpec(f)}`).join('\n')
     : '（无可用字段 —— 返回空 fields 即可）';
-  return `你是报销票据 OCR 识别助手。识别用户上传的「${zh}」票据图片，只输出一个 json 对象，不要任何多余文字、不要 markdown 代码块。
+  return `你是报销票据 OCR 识别助手。识别用户提供的「${zh}」票据图片或票面文字，只输出一个 json 对象，不要任何多余文字、不要 markdown 代码块。
 本类别可输出的字段（键名必须与下列完全一致，多余键一律丢弃）：
 ${spec}
 规则：
@@ -144,8 +147,10 @@ function parseModelJson(raw) {
   } catch { return null; }
 }
 
-// 主入口：category（六类键）+ images=[{mime:'image/jpeg', b64:'…'}] → {fields:{中文键:值}, extra:[{k,v}], warnings:[]}
-export async function callVision(category, images, { timeoutMs = TIMEOUT_MS } = {}) {
+// 主入口（图片路径）：category（六类键）+ images=[{mime:'image/jpeg', b64:'…'}] → {fields, extra, warnings, source}
+//   source 用于标记识别来源（'image' | 'pdf-image'）—— 图片与「扫描件 PDF 转出的图」结果形状完全一样，
+//   不标来源就无法在测试里区分两条路，某条悄悄失效也测不出来
+export async function callVision(category, images, { timeoutMs = TIMEOUT_MS, source = 'image' } = {}) {
   const key = String(process.env.VISION_API_KEY || '').trim();
   if (!key) {
     throw new VisionError('未配置视觉识别服务（VISION_API_KEY）—— 图片识别暂不可用，可先手动填表',
@@ -196,16 +201,22 @@ export async function callVision(category, images, { timeoutMs = TIMEOUT_MS } = 
   const parsed = parseModelJson(got.text);
   if (!parsed) throw new VisionError('识别结果不是合法 JSON，请重试或换一张更清晰的图片', '模型偶发乱码：直接再点一次识别，或把票据拍正/光线充足');
 
-  // fields：只留本类别可自动回填键、值类型归一、空值丢弃
+  return { ...normalizeRecognition(category, parsed), warnings, source };
+}
+
+// 模型 JSON → 契约结果（图片路径与 PDF 文字路径共用，杜绝两套归一逻辑漂移）：
+//   fields：只留本类别可自动回填键（visionFieldList）、按 type 归一、空值丢弃
+//     —— 归属锚点（购买人）/备注/统一支付范围/是否日常家用 天然不在白名单里，永不会被识别结果改写
+//   extra：白名单键、trim ≤30、同键去重留首、限条数
+export function normalizeRecognition(category, parsed) {
   const fields = {};
   for (const f of visionFieldList(category)) {
-    const v = normByType(f, parsed.fields?.[f.key]);
+    const v = normByType(f, parsed?.fields?.[f.key]);
     if (v !== '' && v !== null && v !== undefined) fields[f.key] = v;
   }
-  // extra：白名单键、trim ≤30、同键去重留首、限条数
   const extra = [];
   const seen = new Set();
-  const rawExtra = Array.isArray(parsed.extra) ? parsed.extra : [];
+  const rawExtra = Array.isArray(parsed?.extra) ? parsed.extra : [];
   for (const x of rawExtra.slice(0, EXTRA_MAX * 3)) {
     const k = String(x?.k || '').trim();
     const v = String(x?.v || '').trim().replace(/\s+/g, ' ').slice(0, 30);
@@ -215,5 +226,36 @@ export async function callVision(category, images, { timeoutMs = TIMEOUT_MS } = 
     }
     if (extra.length >= EXTRA_MAX) break;
   }
-  return { fields, extra, warnings };
+  return { fields, extra };
+}
+
+// PDF 文字层路径（2026-09-10）：数字版电子发票自带文字层，提出来交文本模型（DeepSeek）即可 ——
+// 比走视觉模型更快、更省 token、更准，且不受免费视觉档限流影响（发票是最高频场景，不能挂在限流上）。
+// callModel 由路由注入（callDeepSeek 在 routes/ai.js，lib 不反向 import routes）：
+//   签名须同 callDeepSeek(messages, {json, timeoutMs})，返回模型正文（原始字符串，不要求已解析）
+export async function callVisionText(category, text, { callModel, timeoutMs = TIMEOUT_MS } = {}) {
+  const body = String(text || '').trim();
+  if (!body) throw new VisionError('未从该 PDF 中提取到票面文字');
+  if (typeof callModel !== 'function') throw new VisionError('文本识别通道未接入（服务端配置问题）',
+    '请联系负责人检查服务端识别配置');
+  const zh = catMeta(category)?.zh || '票据';
+  const msgs = [
+    { role: 'system', content: buildSystemPrompt(category) },
+    { role: 'user', content: `以下是从一张「${zh}」票据 PDF 中提取的票面文字，请按上述要求只输出 json：\n<<<票面文字\n${body}\n>>>` },
+  ];
+  let raw = '';
+  try {
+    // 显式传 timeoutMs：callDeepSeek 默认 0 = 不设超时，长驻服务里必须给上限
+    raw = String((await callModel(msgs, { json: true, timeoutMs })) || '');
+  } catch (e) {
+    const m = String(e?.message || e);
+    if (/未配置|API_KEY/.test(m)) {
+      throw new VisionError('PDF 文字识别暂不可用（服务端未配置文本模型）',
+        'PDF 文字层识别依赖 DEEPSEEK_API_KEY —— 可先手动填表，或改用截图识别');
+    }
+    throw new VisionError(`识别服务返回异常（${m.slice(0, 120)}）`, '稍后重试；连续失败可改用截图识别');
+  }
+  const parsed = parseModelJson(raw);
+  if (!parsed) throw new VisionError('识别结果不是合法 JSON，请重试', '模型偶发乱码：直接再点一次识别');
+  return { ...normalizeRecognition(category, parsed), warnings: [], source: 'pdf-text' };
 }

@@ -152,6 +152,8 @@ async function onVisionFile(e) {
     const res = await api.expenseVisionUpload(props.code, cat.value, img);
     const changed = mergeVision(res.fields || {});
     visExtra.value = res.extra || [];
+    // 识别过程提示（如「扫描件 PDF 已转图，本次仅识别前 N 页」）—— 服务端 warnings 此前从未展示，必须接上
+    for (const w of res.warnings || []) ElMessage.warning(w);
     if (changed.length) {
       await nextTick();
       ElMessage.warning(`识别预填了：${changed.join('、')} —— 请对照票据核对后保存`);
@@ -388,12 +390,13 @@ async function save() {
         </template>
       </p>
 
-      <!-- 传图识别预填（2026-09-10）：拍照识别当前类别票据 → 云端视觉回填表单字段（只读识别不落库，保存前人工核对）。
-           仅图片可识别（PDF 请截图/拍照转图）；出钱人/涵盖范围/购买人/备注 永不被自动改；看不清宁可不填 -->
+      <!-- 传图识别预填（2026-09-10）：拍照/传票据文件识别当前类别票据 → 回填表单字段（只读识别不落库，保存前人工核对）。
+           图片与 PDF 均可（PDF 有文字层走文本模型、扫描件自动转图，用户无需区分）；
+           出钱人/涵盖范围/购买人/备注 永不被自动改；看不清宁可不填 -->
       <div class="vis-row">
-        <el-button size="small" plain :loading="visBusy" :disabled="saving || visBusy" @click="pickVis">📷 传图识别预填</el-button>
-        <span class="dim">识别{{ meta?.zh || '票据' }}图片自动填本类别字段 —— 保存前请核对票面</span>
-        <input ref="visInput" v-show="false" type="file" accept="image/*" @change="onVisionFile" />
+        <el-button size="small" plain :loading="visBusy" :disabled="saving || visBusy" @click="pickVis">📷 传图/PDF 识别预填</el-button>
+        <span class="dim">识别{{ meta?.zh || '票据' }}图片或电子发票 PDF 自动填本类别字段 —— 保存前请核对票面</span>
+        <input ref="visInput" v-show="false" type="file" accept="image/*,.pdf" @change="onVisionFile" />
         <el-tag v-for="x in visExtra" :key="x.k" size="small" type="info" effect="plain"
                 :title="'票面参考信息（只读展示，不写入表单）'">{{ x.k }}：{{ x.v }}</el-tag>
       </div>

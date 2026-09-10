@@ -32,8 +32,12 @@ async function extractText(file) {
     }
     case '.pdf': {
       const parser = new PDFParse({ data: buf });
-      const res = await parser.getText();
-      return res.text;
+      try {
+        const res = await parser.getText();
+        return res.text;
+      } finally {
+        await parser.destroy().catch(() => {}); // 释放 pdfjs 文档对象（漏调按请求泄漏，同 pdfDoc.js）
+      }
     }
     case '.xls':
     case '.xlsx': {

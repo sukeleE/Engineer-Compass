@@ -46,6 +46,8 @@ const attListOf = (slot) => props.row.atts?.filter((a) => a.slot === slot) || []
 const rowMulti = props.row.team_id == null || scopeTxt !== '';
 const attUrl = (a) => api.expenseFileUrl(props.code, a.id);
 const isImg = (a) => (a.mime || '').startsWith('image/');
+// PDF 附件 2026-09-10 起同样可识别：mime 列历史数据可能为空 → 扩展名兜底，与服务端 recognizeKindOf 同口径
+const isPdf = (a) => (a.mime || '') === 'application/pdf' || /\.pdf$/i.test(String(a.orig_name || ''));
 
 function openAtt(a) {
   const url = attUrl(a);
@@ -107,6 +109,8 @@ async function recognize(a) {
   try {
     const res = await api.expenseVisionAtt(props.code, props.row.id, a.id);
     emit('edit-prefill', { row: props.row, fields: res.fields || {}, extra: res.extra || [] });
+    // 识别过程提示（如「扫描件 PDF 已转图」「模型思考超长已升配额重试」）—— 此前被丢弃，用户看不到
+    for (const w of res.warnings || []) ElMessage.warning(w);
     const n = Object.keys(res.fields || {}).length;
     ElMessage.success(n ? `已识别 ${n} 项 —— 在编辑弹窗中核对后保存` : '已识别（票面可确认项不多），可在编辑弹窗中手动补填');
   } catch (e) {
@@ -166,7 +170,7 @@ async function recognize(a) {
             </span>
             <span class="att-meta">{{ fmtBytes(a.size) }}</span>
             <a v-if="editable" class="att-x" title="下载" :href="api.expenseFileUrl(code, a.id, true)">⬇</a>
-            <a v-if="editable && isImg(a)" class="att-x vis-go" title="识别图片并预填编辑表单" @click.prevent="recognize(a)">{{ recogId === a.id ? '识别中…' : '🔍识别' }}</a>
+            <a v-if="editable && (isImg(a) || isPdf(a))" class="att-x vis-go" title="识别图片/PDF 并预填编辑表单" @click.prevent="recognize(a)">{{ recogId === a.id ? '识别中…' : '🔍识别' }}</a>
             <a v-if="editable" class="att-x" title="删除" @click.prevent="delAtt(a)">✕</a>
           </div>
           <!-- 再传入口（统一支付原件往往不止一张；槽位为空时即是上传入口） -->
@@ -185,7 +189,7 @@ async function recognize(a) {
             </span>
             <span class="att-meta">{{ fmtBytes(attOf(s.key).size) }}</span>
             <a v-if="editable" class="att-x" title="下载" :href="api.expenseFileUrl(code, attOf(s.key).id, true)">⬇</a>
-            <a v-if="editable && isImg(attOf(s.key))" class="att-x vis-go" title="识别图片并预填编辑表单" @click.prevent="recognize(attOf(s.key))">{{ recogId === attOf(s.key).id ? '识别中…' : '🔍识别' }}</a>
+            <a v-if="editable && (isImg(attOf(s.key)) || isPdf(attOf(s.key)))" class="att-x vis-go" title="识别图片/PDF 并预填编辑表单" @click.prevent="recognize(attOf(s.key))">{{ recogId === attOf(s.key).id ? '识别中…' : '🔍识别' }}</a>
             <a v-if="editable" class="att-x" title="删除" @click.prevent="delAtt(attOf(s.key))">✕</a>
           </div>
           <!-- 未上传 -->

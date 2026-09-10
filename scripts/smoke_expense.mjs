@@ -446,8 +446,11 @@ try {
   ok('匿名传图识别 403(先认领身份)', vr.status === 403 && String(vj.error).includes('认领'));
   vr = await visUp('票据.png', PNG_1x1, 'nope', M1); vj = await vr.json();
   ok('非法类别传图识别 400(费用类别不正确)', vr.status === 400 && vj.error === '费用类别不正确');
+  // PDF 支线（2026-09-10）：PNG 字节改名 .pdf 冒充 → 按 PDF 解析失败 → 400 可读文案（不是 500，离线确定）
   vr = await visUp('发票.pdf', PNG_1x1, 'train', M1); vj = await vr.json();
-  ok('.pdf 伪图片上传识别 400(提示转图)', vr.status === 400 && String(vj.error).includes('PDF 请截图'));
+  ok('PDF 假字节(PNG 改名)识别 400(PDF 无法解析+给 hint)', vr.status === 400 && String(vj.error).includes('PDF 无法解析') && String(vj.hint || '').length > 4);
+  vr = await visUp('票据.docx', PNG_1x1, 'train', M1); vj = await vr.json();
+  ok('.docx 上传识别 400(仅图片/PDF)', vr.status === 400 && String(vj.error).includes('仅支持图片'));
   if (visionOn) {
     vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
     // 上游限流(502)/网络波动时判「跳过」而非「失败」：免费档 glm-4.6v-flash 常 429，
@@ -464,7 +467,8 @@ try {
   got = await expect(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${Number(m2a.att.id)}/recognize`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
   ok('成员识别他人名下(赵大强)行附件 403(含 自己名下)', got.ok && String(got.data.error).includes('自己名下'));
   got = await expect(`/expense/o/${C}/row/${ridTrain}/file/${fidPdf2}/recognize`, 400, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
-  ok('成员识别自己行 PDF 附件 400(非图片)', got.ok && String(got.data.error).includes('不是图片'));
+  // 该附件是假字节 PDF（夹具 'PDF-X2-发票新版本\n'）→ 走 PDF 分支解析失败 → 400（离线确定，不触网不进模型）
+  ok('成员识别自己行「损坏 PDF」附件 400(PDF 无法解析，未 500)', got.ok && String(got.data.error).includes('PDF 无法解析'));
   if (visionOn) {
     // 真测：负责人给赵大强项目级行补传 1×1 空白 PNG → 识别 200 契约 → 删回（净零，不扰 §14 计数）
     // 不作内容断言：空白图本就无内容可识别（内容正确性见 probe_vision.mjs）

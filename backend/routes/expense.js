@@ -18,7 +18,9 @@ import {
 } from '../lib/expenseMeta.js';
 import { buildZip } from '../lib/zipStore.js';
 import { buildExpenseWorkbook } from '../lib/expenseExcel.js';
-import { callVision, VisionError } from '../lib/vision.js';
+import { callVision, callVisionText, VisionError } from '../lib/vision.js';
+import { pdfToRecognizeInput, PdfInputError } from '../lib/pdfDoc.js';
+import { callDeepSeek } from './ai.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const EXPENSE_ROOT = join(__dirname, '..', 'uploads', 'expense');
@@ -543,12 +545,21 @@ o.get('/:code/export/xlsx', (req, res) => {
   res.send(buf);
 });
 
-// ---- 票据图片视觉识别（2026-09-10，只读：识别→结构化 JSON，不落库不写行，不记审计）----
+// ---- 票据识别（2026-09-10，只读：识别→结构化 JSON，不落库不写行，不记审计）----
+// 输入两类：图片（jpg/png/webp/gif/bmp）与 PDF（电子发票的标准交付形式，2026-09-10 增）
 // 校验顺序约定（冒烟离线断言依赖）：404(码/行/附件) → 身份 gate 403 → 类别/格式 400 → 无 key/服务错误 502
 //   —— 先于 VISION_API_KEY 的 400/403 排最前，没配 key 也能离线全测
 const IMG_MIME = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', png: 'image/png',
   webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+};
+// 按文件名取识别输入类型：'image' | 'pdf' | ''（不支持）
+const recognizeKindOf = (name, mime = '') => {
+  const ext = extname(basename(String(name || ''))).slice(1).toLowerCase();
+  if ((mime || '').startsWith('image/') || IMG_MIME[ext]) return 'image';
+  // mime 列历史数据可能为空（schema 默认 ''）→ 以扩展名兜底判定 PDF
+  if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
+  return '';
 };
 // memoryStorage 峰值内存 = 并发数×单文件(≤25MB)，单人低并发可接受（注释留痕：如需收紧只改本实例 limits，不动全站语义）
 const visionMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE + 1 }, defParamCharset: 'utf8' });
@@ -561,6 +572,8 @@ function visionGate(ctx, p) {
 }
 function visionErr(err, req, res, next) {
   if (err instanceof VisionError) return res.status(502).json({ error: err.message, hint: err.hint });
+  // PDF 自身的问题（损坏/加密/取不到页）是「这份文件不能识别」，用户换一份即可 → 400，区别于 502 的服务端故障
+  if (err instanceof PdfInputError) return res.status(400).json({ error: err.message, hint: err.hint });
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '附件过大（单文件 ≤25MB）' });
     return res.status(400).json({ error: `上传失败：${err.message}` });
@@ -568,7 +581,19 @@ function visionErr(err, req, res, next) {
   next(err);
 }
 
-// A. 弹窗「传图识别预填」：multipart(file + category) → {fields, extra, warnings}，图片识别后前端回填表单待确认
+// PDF → 识别结果：先看文字层（数字版电子发票的常态 → 文本模型，快且不受免费视觉档限流影响），
+// 无可用文字层（扫描件/乱码）才光栅化成图走视觉模型。分派由 pdfDoc 的 textUsable 自动判定，用户无感。
+async function recognizePdf(category, buf) {
+  const input = await pdfToRecognizeInput(buf);
+  if (input.kind === 'text') return callVisionText(category, input.text, { callModel: callDeepSeek });
+  const out = await callVision(category, input.images, { source: 'pdf-image' });
+  const warnings = input.truncated
+    ? [`该 PDF 共 ${input.pageCount} 页，本次仅识别了前 ${input.images.length} 页`, ...out.warnings]
+    : out.warnings;
+  return { ...out, warnings };
+}
+
+// A. 弹窗「传图识别预填」：multipart(file + category) → {fields, extra, warnings, source}，图片/PDF 识别后前端回填表单待确认
 o.post('/:code/vision/upload', (req, res, next) => {
   const p = loadProject(req.params.code);
   if (!p) return res.status(404).json({ error: '邀请码不存在，请核对链接或联系负责人' });
@@ -580,15 +605,16 @@ o.post('/:code/vision/upload', (req, res, next) => {
     const p = loadProject(req.params.code);
     const category = String((req.body || {}).category || '');
     if (!CAT_KEYS.includes(category)) return res.status(400).json({ error: '费用类别不正确' });
-    if (!req.file) return res.status(400).json({ error: '未收到图片（multipart 字段名 file）' });
+    if (!req.file) return res.status(400).json({ error: '未收到文件（multipart 字段名 file）' });
+    const kind = recognizeKindOf(req.file.originalname);
+    if (!kind) return res.status(400).json({ error: '仅支持图片（jpg/png/webp/gif/bmp）或 PDF 识别' });
+    if (kind === 'pdf') return res.json(await recognizePdf(category, req.file.buffer));
     const mime = IMG_MIME[extname(basename(String(req.file.originalname || ''))).slice(1).toLowerCase()];
-    if (!mime) return res.status(400).json({ error: '仅支持图片识别（jpg/png/webp/gif/bmp）；PDF 请截图或拍照转成图片再识别' });
-    const out = await callVision(category, [{ mime, b64: req.file.buffer.toString('base64') }]);
-    res.json(out);
+    res.json(await callVision(category, [{ mime, b64: req.file.buffer.toString('base64') }]));
   })().catch(next);
 }, visionErr);
 
-// B. 行卡片已传图片附件「一键识别」：服务端读盘识别（不经前端回传文件）→ 前端打开编辑弹窗预填、人工确认后照常 PUT
+// B. 行卡片已传图片/PDF 附件「一键识别」：服务端读盘识别（不经前端回传文件）→ 前端打开编辑弹窗预填、人工确认后照常 PUT
 o.post('/:code/row/:rid/file/:fid/recognize', (req, res, next) => {
   (async () => {
     const got = loadRowForWrite(req, res); // 404 码/行（与上传/删附件同装配）
@@ -601,13 +627,16 @@ o.post('/:code/row/:rid/file/:fid/recognize', (req, res, next) => {
       ? db.prepare('SELECT * FROM expense_attach WHERE id = ? AND row_id = ? AND project_id = ?').get(fid, row.id, p.id)
       : null;
     if (!att) return res.status(404).json({ error: '附件不存在' });
-    if (!(att.mime || '').startsWith('image/')) {
-      return res.status(400).json({ error: '该附件不是图片（仅 jpg/png/webp/gif/bmp 可识别）；PDF 请截图/拍照转成图片再识别' });
-    }
+    const kind = recognizeKindOf(att.orig_name, att.mime);
+    if (!kind) return res.status(400).json({ error: '该附件既不是图片也不是 PDF（仅 jpg/png/webp/gif/bmp/PDF 可识别）' });
     const abs = join(dirs.slot(p.code, row.id, att.slot), att.store_name);
     if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失' });
-    const out = await callVision(row.category, [{ mime: att.mime, b64: readFileSync(abs).toString('base64') }]);
-    res.json(out);
+    const buf = readFileSync(abs);
+    if (kind === 'pdf') return res.json(await recognizePdf(row.category, buf));
+    const mime = (att.mime || '').startsWith('image/')
+      ? att.mime
+      : IMG_MIME[extname(String(att.orig_name || '')).slice(1).toLowerCase()];
+    res.json(await callVision(row.category, [{ mime, b64: buf.toString('base64') }]));
   })().catch(next);
 }, visionErr);
 
