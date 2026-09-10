@@ -30,6 +30,7 @@ function qs(params = {}) {
 }
 
 const AI_TIMEOUT = 90000; // AI 生成/提炼可能较慢
+const VISION_TIMEOUT = 120000; // 票据图片识别：视觉模型推理较慢（服务端请求余量 90s）
 
 // 报销整理请求头：登录态带 Authorization；已认领（传 code）追加 X-Claim-Token
 // ⚠️ claim token 只进请求头、绝不进 URL/query（后端 access_log 记录 originalUrl）
@@ -279,6 +280,16 @@ export const api = {
     return req(`/expense/o/${encodeURIComponent(code)}/row/${rid}/file?slot=${encodeURIComponent(slot)}`, { method: 'POST', body: fd, headers: expenseAuth(code) }, 300000);
   },
   expenseAttDelete: (code, rid, fid) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}/file/${fid}`, { method: 'DELETE', headers: expenseJsonHeaders(code) }),
+  // 票据图片识别（2026-09-10）：只读识别 → 结构化 JSON，前端回填表单待人工核对后照常保存（不落库）
+  // 弹窗「传图识别预填」= multipart(category+file)，FormData 不设 Content-Type（同附件注释）；认领头手动带
+  expenseVisionUpload: (code, category, file) => {
+    const fd = new FormData();
+    fd.append('category', category);
+    fd.append('file', file);
+    return req(`/expense/o/${encodeURIComponent(code)}/vision/upload`, { method: 'POST', body: fd, headers: expenseAuth(code) }, VISION_TIMEOUT);
+  },
+  // 行卡片图片附件「一键识别」：服务端按行原类别读盘识别（权限同改行 —— 成员仅自己名下）
+  expenseVisionAtt: (code, rid, fid) => req(`/expense/o/${encodeURIComponent(code)}/row/${rid}/file/${fid}/recognize`, { method: 'POST', headers: expenseJsonHeaders(code) }, VISION_TIMEOUT),
   // 下载/导出：GET 开放（code 即钥匙），返回裸 URL 供 <a href>/window.open 直连
   expenseFileUrl: (code, fid, dl = false) => `/api/expense/o/${encodeURIComponent(code)}/file/${fid}/download${dl ? '?dl=1' : ''}`,
   expenseZipUrl: (code, teamId) => `/api/expense/o/${encodeURIComponent(code)}/export/zip?team_id=${teamId}`,

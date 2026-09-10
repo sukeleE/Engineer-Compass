@@ -27,6 +27,8 @@ export const FIELDS = {
     { key: '到达时间', label: '到达日期', type: 'date' },
     { key: '出发地', label: '出发地', type: 'text' },
     { key: '到达地', label: '到达地', type: 'text' },
+    // 车次：票面号码；同车次聚合按 出发日期+车次+座位等级 分组（历史行无键显示为空/归「未填车次」）
+    { key: '车次', label: '车次', type: 'text', max: 20, placeholder: '如 G1234 / D123 / K123' },
     { key: '座位等级', label: '座位等级', type: 'text', placeholder: '如 二等座' },
     { key: '金额', label: '金额(元)', type: 'money' },
     { key: '备注', label: '备注', type: 'textarea' },

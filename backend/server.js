@@ -64,11 +64,13 @@ app.use('/api/expense', expense);
 // 飞书互传工作台页面（独立静态工具页，不参与业务）
 app.use(express.static('public'));
 
-// 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；mail=true 表示邮箱登录发真邮件）
+// 健康检查（部署后验证：ai=true 表示线上用户 AI 功能可用；vision=true 表示报销票据图片识别可用；
+// mail=true 表示邮箱登录发真邮件）
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true, name: 'Engineer-Compass API', time: new Date().toISOString(),
     ai: !!process.env.DEEPSEEK_API_KEY,
+    vision: !!process.env.VISION_API_KEY,
     mail: hasSMTP(),
   });
 });

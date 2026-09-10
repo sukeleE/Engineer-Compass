@@ -18,6 +18,7 @@ import {
 } from '../lib/expenseMeta.js';
 import { buildZip } from '../lib/zipStore.js';
 import { buildExpenseWorkbook } from '../lib/expenseExcel.js';
+import { callVision, VisionError } from '../lib/vision.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const EXPENSE_ROOT = join(__dirname, '..', 'uploads', 'expense');
@@ -541,6 +542,74 @@ o.get('/:code/export/xlsx', (req, res) => {
   res.set('Content-Disposition', `attachment; filename="download.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
 });
+
+// ---- 票据图片视觉识别（2026-09-10，只读：识别→结构化 JSON，不落库不写行，不记审计）----
+// 校验顺序约定（冒烟离线断言依赖）：404(码/行/附件) → 身份 gate 403 → 类别/格式 400 → 无 key/服务错误 502
+//   —— 先于 VISION_API_KEY 的 400/403 排最前，没配 key 也能离线全测
+const IMG_MIME = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', png: 'image/png',
+  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+};
+// memoryStorage 峰值内存 = 并发数×单文件(≤25MB)，单人低并发可接受（注释留痕：如需收紧只改本实例 limits，不动全站语义）
+const visionMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE + 1 }, defParamCharset: 'utf8' });
+// 与 rowWriteError 同口径的「无行」闸门：owner 放行 → guest 先认领 → closed 时 member 拦、owner 放（纠错通道）
+function visionGate(ctx, p) {
+  if (ctx.role === 'owner') return null;
+  if (ctx.role === 'guest') return { status: 403, error: '请先认领你的身份（打开链接后选自己姓名）' };
+  if (String(p.status) !== 'open') return { status: 403, error: '该项目已截止填报，如需修改请联系负责人' };
+  return null;
+}
+function visionErr(err, req, res, next) {
+  if (err instanceof VisionError) return res.status(502).json({ error: err.message, hint: err.hint });
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '附件过大（单文件 ≤25MB）' });
+    return res.status(400).json({ error: `上传失败：${err.message}` });
+  }
+  next(err);
+}
+
+// A. 弹窗「传图识别预填」：multipart(file + category) → {fields, extra, warnings}，图片识别后前端回填表单待确认
+o.post('/:code/vision/upload', (req, res, next) => {
+  const p = loadProject(req.params.code);
+  if (!p) return res.status(404).json({ error: '邀请码不存在，请核对链接或联系负责人' });
+  const err = visionGate(identity(req, p), p);
+  if (err) return res.status(err.status).json({ error: err.error });
+  next();
+}, visionMem.single('file'), (req, res, next) => {
+  (async () => {
+    const p = loadProject(req.params.code);
+    const category = String((req.body || {}).category || '');
+    if (!CAT_KEYS.includes(category)) return res.status(400).json({ error: '费用类别不正确' });
+    if (!req.file) return res.status(400).json({ error: '未收到图片（multipart 字段名 file）' });
+    const mime = IMG_MIME[extname(basename(String(req.file.originalname || ''))).slice(1).toLowerCase()];
+    if (!mime) return res.status(400).json({ error: '仅支持图片识别（jpg/png/webp/gif/bmp）；PDF 请截图或拍照转成图片再识别' });
+    const out = await callVision(category, [{ mime, b64: req.file.buffer.toString('base64') }]);
+    res.json(out);
+  })().catch(next);
+}, visionErr);
+
+// B. 行卡片已传图片附件「一键识别」：服务端读盘识别（不经前端回传文件）→ 前端打开编辑弹窗预填、人工确认后照常 PUT
+o.post('/:code/row/:rid/file/:fid/recognize', (req, res, next) => {
+  (async () => {
+    const got = loadRowForWrite(req, res); // 404 码/行（与上传/删附件同装配）
+    if (!got) return;
+    const { p, ctx, row } = got;
+    const err = rowWriteError(ctx, p, row); // 行归属口径与上传完全一致：member 仅自己名下；closed 成员拦、owner 放
+    if (err) return res.status(err.status).json({ error: err.error });
+    const fid = intParam(req.params.fid);
+    const att = fid
+      ? db.prepare('SELECT * FROM expense_attach WHERE id = ? AND row_id = ? AND project_id = ?').get(fid, row.id, p.id)
+      : null;
+    if (!att) return res.status(404).json({ error: '附件不存在' });
+    if (!(att.mime || '').startsWith('image/')) {
+      return res.status(400).json({ error: '该附件不是图片（仅 jpg/png/webp/gif/bmp 可识别）；PDF 请截图/拍照转成图片再识别' });
+    }
+    const abs = join(dirs.slot(p.code, row.id, att.slot), att.store_name);
+    if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失' });
+    const out = await callVision(row.category, [{ mime: att.mime, b64: readFileSync(abs).toString('base64') }]);
+    res.json(out);
+  })().catch(next);
+}, visionErr);
 
 r.use('/o', o);
 

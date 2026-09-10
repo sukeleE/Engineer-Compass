@@ -191,6 +191,29 @@ const teamAgg = (teamId) => {
   return m;
 };
 const rowsOf = (teamId, cat) => (pld.value?.rows || []).filter((x) => x.team_id === teamId && x.category === cat);
+// ---- 同车次车票聚合（纯前端展示，2026-09-09）：全项目 train 行按 出发日期(出发时间)+车次+座位等级 分组 ——
+//    跨队伍、含项目级行都算；车次为空 → 「未填车次」组恒沉底（历史行/漏填）；不进 Excel；金额口径=rowMoney（与 ②小计一致）——
+const trainGroups = computed(() => {
+  const gs = new Map();
+  for (const r of pld.value?.rows || []) {
+    if (r.category !== 'train') continue;
+    const d = r.data || {};
+    const date = String(d['出发时间'] || '').trim();
+    const train = String(d['车次'] || '').trim();
+    const seat = String(d['座位等级'] || '').trim();
+    const no = !train;
+    const k = no ? 'n' : `t|${date}|${train}|${seat}`;
+    let g = gs.get(k);
+    if (!g) { g = { k: no ? 'unfilled' : k, no, date, train, seat, n: 0, money: 0 }; gs.set(k, g); }
+    g.n += 1;
+    g.money += rowMoney('train', d);
+  }
+  const arr = [...gs.values()];
+  arr.sort((a, b) => (a.no !== b.no ? (a.no ? 1 : -1)
+    : a.date < b.date ? -1 : a.date > b.date ? 1
+      : a.train < b.train ? -1 : a.train > b.train ? 1 : 0));
+  return arr;
+});
 // ---- 全项目统一支付（项目级区块：team_id 空的行 —— 不属任何队伍：统一垫付 ＋ ⑥零散票据）----
 // 注意：头部统计条 catAgg/grandTotal 本就遍历全部行（含项目级），与 Excel 总计口径一致
 const projPayRows = computed(() => (pld.value?.rows || []).filter((r) => r.team_id == null));
@@ -229,16 +252,17 @@ const activeTeam = computed(() => (activeTab.value === PROJ_TAB ? null
   : (pld.value?.teams.find((t) => t.id === activeTab.value) || null)));
 
 // ---- 新增/编辑行 ----
-const dlg = ref({ open: false, mode: 'create', row: null, teamId: null, initialCat: '' });
+const dlg = ref({ open: false, mode: 'create', row: null, teamId: null, initialCat: '', prefill: null });
 function openCreate(teamId, catKey = '') {
-  dlg.value = { open: true, mode: 'create', row: null, teamId, initialCat: catKey };
+  dlg.value = { open: true, mode: 'create', row: null, teamId, initialCat: catKey, prefill: null };
 }
 // 全项目统一支付区块的新增入口：teamId=0 哨兵（弹窗内据此识别项目级模式）
 function openProjCreate(catKey = '') {
-  dlg.value = { open: true, mode: 'create', row: null, teamId: 0, initialCat: catKey };
+  dlg.value = { open: true, mode: 'create', row: null, teamId: 0, initialCat: catKey, prefill: null };
 }
-function openEdit(row) {
-  dlg.value = { open: true, mode: 'edit', row, teamId: row.team_id || 0, initialCat: row.category };
+// prefill：行卡片图片附件「🔍识别」后打开编辑弹窗，识别结果 {fields,extra} 在弹窗内预填（人工核对后保存）
+function openEdit(row, prefill = null) {
+  dlg.value = { open: true, mode: 'edit', row, teamId: row.team_id || 0, initialCat: row.category, prefill };
 }
 function onSaved(msg) {
   dlg.value.open = false;
@@ -539,6 +563,18 @@ onMounted(() => loadMine());
             </span>
             <span class="sum-chip total">总计 <b>{{ fmt(grandTotal) }}</b></span>
           </div>
+          <!-- 同车次车票聚合：按 出发日期+车次+座位等级 分组（跨队伍、含全项目区；纯页面参考，不进 Excel/附件包） -->
+          <div v-if="trainGroups.length" class="train-agg">
+            <span class="sub2">同车次车票：按 出发日期＋车次＋座位等级 聚合（{{ trainGroups.reduce((s, g) => s + g.n, 0) }} 张；点击行卡片可逐张核对）</span>
+            <div class="sum-bar" style="margin-top:4px">
+              <span v-for="g in trainGroups" :key="g.k" class="sum-chip" :class="{ 'tr-dim': g.no }"
+                    :title="g.no ? '这几张还没填车次（历史行或漏填）——点行卡片「✏ 编辑」补上车次后即自动归组' : `${g.n} 张（出发日期 · 车次 · 座位等级）`">
+                <template v-if="g.no">未填车次</template>
+                <template v-else>{{ g.date }} · {{ g.train }}<i v-if="g.seat"> · {{ g.seat }}</i></template>
+                <b>×{{ g.n }} 张 ¥{{ fmt(g.money) }}</b>
+              </span>
+            </div>
+          </div>
           <div class="head-ops">
             <el-button v-if="isOwner" size="small" type="primary" @click="addTeam">＋ 添加队伍</el-button>
             <el-button v-if="isOwner" size="small" type="primary" plain @click="copyInvite">📋 复制邀请链接</el-button>
@@ -624,7 +660,8 @@ onMounted(() => loadMine());
               <RowCard v-for="row in projRowsOf(c.key)" :key="row.id" :code="code" :row="row"
                        :editable="canEditProjRow(row)"
                        :locked-field="myRole === 'member' && canEditProjRow(row) && row.category === 'prop' ? '购买人' : ''"
-                       @edit="openEdit(row)" @changed="onRowChanged" />
+                       @edit="openEdit(row)" @changed="onRowChanged" @claim-lost="onClaimLost"
+                       @edit-prefill="(e) => openEdit(e.row, { fields: e.fields, extra: e.extra })" />
             </div>
           </template>
           <el-empty v-else description="还没有项目级记录" :image-size="60">
@@ -695,7 +732,8 @@ onMounted(() => loadMine());
             <div v-if="!rowsOf(activeTeam.id, c.key).length" class="cat-empty">暂无记录</div>
             <RowCard v-for="row in rowsOf(activeTeam.id, c.key)" :key="row.id" :code="code" :row="row" :editable="canEditRow(row)"
                      :locked-field="canEditMemberRow(row) && c.key === 'prop' ? '购买人' : ''"
-                     @edit="openEdit(row)" @changed="onRowChanged" />
+                     @edit="openEdit(row)" @changed="onRowChanged" @claim-lost="onClaimLost"
+                     @edit-prefill="(e) => openEdit(e.row, { fields: e.fields, extra: e.extra })" />
           </div>
         </section>
 
@@ -710,7 +748,7 @@ onMounted(() => loadMine());
 
         <!-- 录入/编辑弹窗 -->
         <RowFormDialog v-if="dlg.open" v-model="dlg.open" :mode="dlg.mode" :row="dlg.row" :team-id="dlg.teamId"
-                       :initial-cat="dlg.initialCat" :teams="pld.teams" :members="pld.members" :me="pld.me" :code="code"
+                       :initial-cat="dlg.initialCat" :prefill="dlg.prefill" :teams="pld.teams" :members="pld.members" :me="pld.me" :code="code"
                        @saved="onSaved" @claim-lost="onClaimLost" />
       </template>
     </div>
@@ -761,6 +799,8 @@ h3 { margin: 0; font-size: 16px; }
 .sum-chip i { font-style: normal; font-size: 11px; opacity: .7; }
 .sum-chip.total { background: var(--primary-tint); color: var(--primary-dark); }
 .sum-chip.total b { color: var(--primary); }
+.train-agg { margin-top: 8px; }
+.sum-chip.tr-dim { opacity: .72; border: 1px dashed var(--border); }
 .head-ops { display: flex; gap: 6px; flex-wrap: wrap; }
 .head-ops .el-button, .head-ops a { margin-left: 0; }
 

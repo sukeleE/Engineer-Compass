@@ -11,7 +11,9 @@ const props = defineProps({
   editable: Boolean,      // 可编辑/可删除/可上传（服务端权限已在父层判定）
   lockedField: String,    // 该字段冻结（prop 成员行的购买人）
 });
-const emit = defineEmits(['edit', 'changed']);
+// claim-lost：认领失效（token 被重置/他人换名占用）时上报父层清身份并刷新 —— 必须声明，
+//   否则生产构建下是静默 no-op：只弹错误 toast、身份条不清，之后每次写操作继续 403
+const emit = defineEmits(['edit', 'changed', 'edit-prefill', 'claim-lost']);
 
 const cat = props.row.category;
 const fields = FIELDS[cat];
@@ -97,6 +99,23 @@ async function delRow() {
     emit('changed');
   } catch (e) { ElMessage.error(e.message); }
 }
+// 图片附件「🔍识别」（2026-09-10）：服务端读盘识别 → 父层打开编辑弹窗预填，人工核对后保存 —— 只读不落库
+const recogId = ref('');
+async function recognize(a) {
+  if (!props.editable || recogId.value) return;
+  recogId.value = a.id;
+  try {
+    const res = await api.expenseVisionAtt(props.code, props.row.id, a.id);
+    emit('edit-prefill', { row: props.row, fields: res.fields || {}, extra: res.extra || [] });
+    const n = Object.keys(res.fields || {}).length;
+    ElMessage.success(n ? `已识别 ${n} 项 —— 在编辑弹窗中核对后保存` : '已识别（票面可确认项不多），可在编辑弹窗中手动补填');
+  } catch (e) {
+    ElMessage.error(e.message);
+    if (/认领|身份/.test(e.message)) emit('claim-lost');
+  } finally {
+    recogId.value = '';
+  }
+}
 </script>
 
 <template>
@@ -147,6 +166,7 @@ async function delRow() {
             </span>
             <span class="att-meta">{{ fmtBytes(a.size) }}</span>
             <a v-if="editable" class="att-x" title="下载" :href="api.expenseFileUrl(code, a.id, true)">⬇</a>
+            <a v-if="editable && isImg(a)" class="att-x vis-go" title="识别图片并预填编辑表单" @click.prevent="recognize(a)">{{ recogId === a.id ? '识别中…' : '🔍识别' }}</a>
             <a v-if="editable" class="att-x" title="删除" @click.prevent="delAtt(a)">✕</a>
           </div>
           <!-- 再传入口（统一支付原件往往不止一张；槽位为空时即是上传入口） -->
@@ -165,6 +185,7 @@ async function delRow() {
             </span>
             <span class="att-meta">{{ fmtBytes(attOf(s.key).size) }}</span>
             <a v-if="editable" class="att-x" title="下载" :href="api.expenseFileUrl(code, attOf(s.key).id, true)">⬇</a>
+            <a v-if="editable && isImg(attOf(s.key))" class="att-x vis-go" title="识别图片并预填编辑表单" @click.prevent="recognize(attOf(s.key))">{{ recogId === attOf(s.key).id ? '识别中…' : '🔍识别' }}</a>
             <a v-if="editable" class="att-x" title="删除" @click.prevent="delAtt(attOf(s.key))">✕</a>
           </div>
           <!-- 未上传 -->
@@ -206,6 +227,7 @@ async function delRow() {
 .att-name { cursor: pointer; color: var(--primary); text-decoration: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 .att-meta { color: var(--text-2); font-size: 11px; }
 .att-x { cursor: pointer; color: var(--text-2); font-size: 12px; text-decoration: none; }
+.vis-go { color: var(--primary); font-weight: 600; }
 .att-empty { border: 1px dashed #cbd5e1; color: var(--text-2); border-radius: 6px; padding: 2px 8px; font-size: 12px; }
 .att-empty i { font-style: normal; }
 .att-empty[data-ok] { cursor: default; }

@@ -5,7 +5,7 @@
 // owner：可挑选名单成员或"队伍"（公用耗材），全权代录/纠错
 // money→el-input-number(precision2) yn→三态 radio  textarea→textarea
 // 2026-09-03 下午：帮付三字段已全部删除（无 yn 联动字段）；prop「是否日常家用=是」仍有使用图软提示
-import { reactive, ref, computed, watch } from 'vue';
+import { reactive, ref, computed, watch, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js'; // 负责人本人显示名（全项目统一支付可填"负责人本人"）
@@ -15,6 +15,7 @@ const props = defineProps({
   modelValue: Boolean, mode: String, row: Object, teamId: Number, teams: Array,
   members: Array, code: String, me: Object, // {role, member}
   initialCat: String, // 新增时预选类别（类别块"＋添加"直达本类；编辑沿用 row.category）
+  prefill: Object, // 图片🔍识别后打开编辑：{fields,extra} 在 initForm 末尾合入当前渲染字段（人工核对后保存；只读识别不落库）
 });
 const emit = defineEmits(['update:modelValue', 'saved', 'claim-lost']);
 
@@ -86,11 +87,93 @@ const renderFields = computed(() =>
 const form = reactive({});
 const saving = ref(false);
 
+// ---- 票据图片识别（2026-09-10）：弹窗内「传图识别预填」+ 行卡片🔍识别带 prefill 进编辑 ——
+//   识别结果只合入「当前渲染的表单字段」（renderFields 白名单）：
+//   统一支付/项目级态只渲染 金额/yn/备注（misc+票据名称）—— 其余键本态保存时本就会被服务端丢弃，填了也白填
+const visBusy = ref(false);
+const visInput = ref(null);
+const visExtra = ref([]); // 票面参考信息（乘车人/发票号码等）：只读 chip，绝不写入表单
+const mergeVision = (fields) => {
+  const changed = [];
+  for (const f of renderFields.value) {
+    const v = fields?.[f.key];
+    if (v === '' || v === undefined || v === null) continue;
+    const nv = f.type === 'money' ? Number(v) : String(v);
+    if (String(form[f.key] ?? '') !== String(nv)) {
+      form[f.key] = nv;
+      changed.push(f.label);
+    }
+  }
+  return changed;
+};
+function pickVis() { if (!visBusy.value && !saving.value) visInput.value?.click(); }
+// 客户端压缩：超 1600px 或 >4MB 的图压到 jpeg(0.85) 再传（视觉走 base64，控制体积；白底垫底防透明 png 变黑）
+const visMax = 1600;
+function compressImg(file) {
+  return new Promise((resolve) => {
+    if (!(file.type || '').startsWith('image/')) return resolve(file); // 非图片由后端 400 兜底
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        if (img.naturalWidth <= visMax && img.naturalHeight <= visMax && file.size <= 4 * 1024 * 1024) {
+          URL.revokeObjectURL(url);
+          return resolve(file); // 已合规：原图直传保真
+        }
+        const sc = Math.min(1, visMax / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round((img.naturalWidth || 1) * sc));
+        c.height = Math.max(1, Math.round((img.naturalHeight || 1) * sc));
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          resolve(blob && blob.size
+            ? new File([blob], `${(file.name || '票据').replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg' })
+            : file);
+        }, 'image/jpeg', 0.85);
+      } catch { URL.revokeObjectURL(url); resolve(file); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+async function onVisionFile(e) {
+  const file = e.target.files?.[0];
+  if (e.target) e.target.value = '';
+  if (!file) return;
+  if (file.size > 25 * 1024 * 1024) return ElMessage.error('附件过大（单文件 ≤25MB）');
+  if (visBusy.value) return;
+  visBusy.value = true;
+  try {
+    const img = await compressImg(file);
+    const res = await api.expenseVisionUpload(props.code, cat.value, img);
+    const changed = mergeVision(res.fields || {});
+    visExtra.value = res.extra || [];
+    if (changed.length) {
+      await nextTick();
+      ElMessage.warning(`识别预填了：${changed.join('、')} —— 请对照票据核对后保存`);
+    } else if (Object.keys(res.fields || {}).length) {
+      ElMessage.info('识别结果与已填内容一致，可直接核对保存');
+    } else {
+      ElMessage.info('未识别到可回填的字段（票据不完整/图片模糊？）—— 可先手动填写');
+    }
+  } catch (err) {
+    if (/认领|身份/.test(err.message)) { api.expenseClearClaim(props.code); emit('claim-lost'); }
+    ElMessage.error(err.message);
+  } finally {
+    visBusy.value = false;
+  }
+}
+
 // date 键只接受 YYYY-MM-DD（日历控件值），存量自由文本/脏值规整为空（null 表示未选）
 const normDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
 
 // 初始化表单（新增=全空；编辑=回填 row.data）
 function initForm() {
+  visExtra.value = []; // 识别参考 chips 随表单重建清空
   for (const k of Object.keys(form)) delete form[k];
   if (!cat.value) return;
   for (const f of FIELDS[cat.value]) {
@@ -118,6 +201,12 @@ function initForm() {
   else ownerSel.value = roster.value[0]?.name || '';
   // prop 成员行「购买人」冻结且须=出钱人（成员出钱人恒=自己）→ 默认同步
   if (props.mode === 'create' && cat.value === 'prop' && isMember()) form['购买人'] = ownerSel.value;
+  // 识别预填合入（prefill 仅行卡片🔍识别打开编辑时传）：只写当前渲染字段并 toast 列明改动的键，人工核对后保存
+  if (props.prefill?.fields) {
+    const changed = mergeVision(props.prefill.fields);
+    visExtra.value = props.prefill.extra || [];
+    if (changed.length) nextTick(() => ElMessage.warning(`识别预填了：${changed.join('、')} —— 请对照票据核对后保存`));
+  }
 }
 watch(cat, initForm, { immediate: true });
 watch(() => props.teamId, (t) => { if (props.mode === 'create' && t) teamSel.value = t; });
@@ -299,6 +388,16 @@ async function save() {
         </template>
       </p>
 
+      <!-- 传图识别预填（2026-09-10）：拍照识别当前类别票据 → 云端视觉回填表单字段（只读识别不落库，保存前人工核对）。
+           仅图片可识别（PDF 请截图/拍照转图）；出钱人/涵盖范围/购买人/备注 永不被自动改；看不清宁可不填 -->
+      <div class="vis-row">
+        <el-button size="small" plain :loading="visBusy" :disabled="saving || visBusy" @click="pickVis">📷 传图识别预填</el-button>
+        <span class="dim">识别{{ meta?.zh || '票据' }}图片自动填本类别字段 —— 保存前请核对票面</span>
+        <input ref="visInput" v-show="false" type="file" accept="image/*" @change="onVisionFile" />
+        <el-tag v-for="x in visExtra" :key="x.k" size="small" type="info" effect="plain"
+                :title="'票面参考信息（只读展示，不写入表单）'">{{ x.k }}：{{ x.v }}</el-tag>
+      </div>
+
       <el-form label-width="110px" label-position="left" size="default" @submit.prevent>
         <el-form-item v-for="f in renderFields" :key="f.key" :label="f.label">
           <el-input-number v-if="f.type === 'money'" v-model="form[f.key]" :precision="2" :min="0" :controls="false"
@@ -419,4 +518,5 @@ async function save() {
 .pay-names .el-checkbox { margin-right: 0; height: 26px; }
 .pay-uncl { font-style: normal; color: var(--text-2); font-size: 12px; }
 .pay-hint { color: var(--text-2); font-size: 12px; margin: 6px 0 0; }
+.vis-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 10px; }
 </style>

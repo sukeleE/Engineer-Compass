@@ -1,0 +1,14 @@
+{
+  "name": "engineer-compass",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "仓库级测试工具链：scripts/ 下的 API 冒烟 + Playwright 浏览器探针。与 backend/、frontend/ 的依赖互不影响，deploy.sh 不涉及本目录（不会污染线上）。",
+  "scripts": {
+    "smoke:expense": "node scripts/smoke_expense.mjs",
+    "probe:claimlost": "node scripts/probe_claimlost.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

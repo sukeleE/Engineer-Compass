@@ -4,6 +4,8 @@
 // 改名同步 owner_name+prop购买人 → 重置认领旧token失效 → 统一支付(范围三态/项目级范围放开子集留空)
 // 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400、成员可自建自己名下) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
 // 单一身份(12.7)：一账户一项目一名 —— 带 token 再认领=原子换名(switchedFrom) / release 放弃 / 无 token 400 / 失效 404 →
+// 票据图片识别(11.9)：/vision/upload 与行附件 recognize 两入口只读不落库 —— 404→gate 403→类别/格式 400→未配键 502(指向 VISION_API_KEY)，
+//   400/403/404 全离线可测；配键另跑真测(200 形状，限流/网络波动 502 属预期)；§13 截止后成员传图识别 403 →
 // zip(含 team_id=0 全项目/06零散票据)/xlsx(=SUM 六列/注入转义/全项目统一支付独立 sheet) → 四级删除级联清盘
 // → 清理测试用户（DatabaseSync + fs.rmSync 自清理，process.exit(fail?1:0)）
 import { DatabaseSync } from 'node:sqlite';
@@ -408,6 +410,54 @@ try {
   ok('同槽剩余那份仍可下载', gM2b.status === 200);
   ok('删除后槽位目录剩 1 份', readdirSync(`${UP}\\${C}\\${Number(misc1.row.id)}\\ticket`).length === 1);
 
+  // ---------- 11.9 票据图片识别（视觉，2026-09-10）：只读不落库不写行；404→403→400 全离线，无键 502 指向配置，配键加跑真测 ----------
+  // A=/vision/upload(multipart category+file)；B=/row/:rid/file/:fid/recognize(服务端读盘) —— 复用夹具：ridTrain=M1(王小明)自己 PDF 附件 fidPdf2、
+  // misc1=赵大强项目级⑥零散票据行、m2a 为其槽内现存图片附件（另一端点的 403/400 不触网、无键也确定）
+  const visionOn = (await (await rawReq('/health')).json()).vision === true;
+  const PNG_1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const visUp = async (name, buf, cat, token) => {
+    const fd = new FormData();
+    fd.append('category', cat);
+    fd.append('file', new Blob([buf]), name);
+    return rawReq(`/expense/o/${C}/vision/upload`, { method: 'POST', headers: token ? { 'X-Claim-Token': token } : {}, body: fd });
+  };
+  let vr, vj;
+  vr = await visUp('票据.png', PNG_1x1, 'train'); vj = await vr.json();
+  ok('匿名传图识别 403(先认领身份)', vr.status === 403 && String(vj.error).includes('认领'));
+  vr = await visUp('票据.png', PNG_1x1, 'nope', M1); vj = await vr.json();
+  ok('非法类别传图识别 400(费用类别不正确)', vr.status === 400 && vj.error === '费用类别不正确');
+  vr = await visUp('发票.pdf', PNG_1x1, 'train', M1); vj = await vr.json();
+  ok('.pdf 伪图片上传识别 400(提示转图)', vr.status === 400 && String(vj.error).includes('PDF 请截图'));
+  if (visionOn) {
+    vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
+    ok('配键：成员传图识别 200 形状 fields+extra+warnings(真测)', vr.status === 200 && vj && typeof vj.fields === 'object' && Array.isArray(vj.extra) && Array.isArray(vj.warnings));
+    if (vr.status !== 200) console.log(`      ↳ 真测返回 ${vr.status}: ${String(vj.error || '').slice(0, 120)}（限流/图片过小属预期，可重跑）`);
+  } else {
+    vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
+    ok('未配键：上传识别 502 指向配置(error 含 VISION_API_KEY/hint 含 VISION)', vr.status === 502 && String(vj.error).includes('VISION_API_KEY') && String(vj.hint || '').includes('VISION'));
+  }
+  got = await expect(`/expense/o/${C}/row/${ridTrain}/file/99999999/recognize`, 404, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('假附件 id 识别 404(附件不存在)', got.ok && got.data.error === '附件不存在');
+  got = await expect(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${Number(m2a.att.id)}/recognize`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('成员识别他人名下(赵大强)行附件 403(含 自己名下)', got.ok && String(got.data.error).includes('自己名下'));
+  got = await expect(`/expense/o/${C}/row/${ridTrain}/file/${fidPdf2}/recognize`, 400, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
+  ok('成员识别自己行 PDF 附件 400(非图片)', got.ok && String(got.data.error).includes('不是图片'));
+  if (visionOn) {
+    // 真测：负责人给赵大强项目级行补传真实 1×1 PNG → 识别 200 形状 → 删回（净零，不扰 §14 计数）
+    const fdV = new FormData();
+    fdV.append('file', new Blob([PNG_1x1]), '识别真测.png');
+    const upVR = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file?slot=ticket`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` }, body: fdV });
+    const fidV = Number((await upVR.json()).att.id);
+    vr = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${fidV}/recognize`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` } });
+    vj = await vr.json();
+    ok('配键：负责人识别图片附件 200(真测)', vr.status === 200 && typeof vj.fields === 'object' && Array.isArray(vj.extra));
+    if (vr.status !== 200) console.log(`      ↳ 真测返回 ${vr.status}: ${String(vj.error || '').slice(0, 120)}（限流/图片过小属预期，可重跑）`);
+    const delV = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${fidV}`, { method: 'DELETE', headers: { Authorization: `Bearer ${ta}` } });
+    ok('识别用临时附件已删回(净零)', delV.status === 200);
+  } else {
+    console.log('⏭️ 配键真测：负责人识别图片附件 200（服务端未配 VISION_API_KEY，跳过）');
+  }
+
   // ---------- 12.6 负责人同时是队员（is_owner 条目）：登录占用、他人不可认领、防伪冒 ----------
   // owner A 昵称='报销负责人'：自加名单同名 → 自动标 is_owner（项目内互斥）
   const mSelf = await api(`/expense/${P}/team/${t1}/member`, { method: 'POST', token: ta, body: { name: '报销负责人' } });
@@ -497,6 +547,8 @@ try {
   await api(`/expense/${P}`, { method: 'PATCH', token: ta, body: { status: 'closed' } });
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { team_id: t1, category: 'reg', data: { 金额: 5 } } });
   ok('截止后成员建行 403', got.ok);
+  vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
+  ok('截止后成员传图识别 403(含 截止)', vr.status === 403 && String(vj.error).includes('截止'));
   got = await expect(`/expense/o/${C}/row/${ridTrain}`, 403, { method: 'PUT', headers: { 'X-Claim-Token': M1 }, body: { data: { ...dTrain } } });
   ok('截止后成员改行 403', got.ok);
   got = await expect(`/expense/o/${C}/row`, 403, { method: 'POST', headers: { 'X-Claim-Token': M1 }, body: { project_pay: true, category: 'reg', owner_name: '王小明', data: { 金额: 5, 统一支付范围: '全体成员' } } });
