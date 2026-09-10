@@ -5,12 +5,17 @@
 // 帮付三字段已删(旧键被白名单丢弃) + ⑥零散票据仅项目级区(队行400、成员可自建自己名下) → 统一支付行附件每槽可多份(单人行仍替换) → 截止 403 →
 // 单一身份(12.7)：一账户一项目一名 —— 带 token 再认领=原子换名(switchedFrom) / release 放弃 / 无 token 400 / 失效 404 →
 // 票据图片识别(11.9)：/vision/upload 与行附件 recognize 两入口只读不落库 —— 404→gate 403→类别/格式 400→未配键 502(指向 VISION_API_KEY)，
-//   400/403/404 全离线可测；配键另跑真测(200 形状，限流/网络波动 502 属预期)；§13 截止后成员传图识别 403 →
+//   400/403/404 全离线可测；配键另跑真测(限流/网络波动 502 属预期) —— ⚠️ 真测只断言「契约」(键⊆本类别白名单、
+//   禁写键不出现、extra 白名单去重)，**不断言识别内容**：夹具是 1×1 空白 PNG，本就无内容可识别。2026-09-10 教训：
+//   此处曾只判 "fields 是对象"，响应解析整段失效恒返回 {} 时照样全绿（假阳性，功能坏了半个月没人发现）——
+//   内容正确性由 scripts/probe_vision.mjs 负责：渲染真实票据图，断言 车次/金额/日期/出发到达 必须对得上；§13 截止后成员传图识别 403 →
 // zip(含 team_id=0 全项目/06零散票据)/xlsx(=SUM 六列/注入转义/全项目统一支付独立 sheet) → 四级删除级联清盘
 // → 清理测试用户（DatabaseSync + fs.rmSync 自清理，process.exit(fail?1:0)）
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
+// 视觉白名单真相源：直接引服务端同一模块（不抄一份，避免与其漂移）；只读常量，不触网不读 .env
+import { visionFieldList, VISION_EXTRA_KEYS } from '../backend/lib/vision.js';
 
 const BASE = 'http://localhost:3000/api';
 const UP = 'D:\\desktop\\竞赛指导\\backend\\uploads\\expense';
@@ -43,9 +48,24 @@ const expect = async (path, status, opts = {}) => {
   return { ok: res.status === status, got: res.status, data };
 };
 
+// 识别响应的「契约」校验（不作内容断言 —— 夹具是空白图，内容正确性见 probe_vision.mjs）：
+//   ① fields 是普通对象且键 ⊆ 本类别可回填白名单（类别白名单外的键必须被服务端过滤掉）
+//   ② 禁写锚点键永不出现（购买人/备注/统一支付范围/是否日常家用 —— 识别只预填表单，不得自填归属）
+//   ③ extra 每项键在白名单内、值非空、同键去重、条数 ≤6
+const VISION_FORBID_KEYS = ['购买人', '备注', '统一支付范围', '是否日常家用'];
+const visionContractOk = (vj, cat) => {
+  if (!vj || typeof vj.fields !== 'object' || vj.fields === null || Array.isArray(vj.fields)) return false;
+  const allow = new Set(visionFieldList(cat).map((f) => f.key));
+  if (!Object.keys(vj.fields).every((k) => allow.has(k))) return false;
+  if (VISION_FORBID_KEYS.some((k) => k in vj.fields)) return false;
+  if (!Array.isArray(vj.extra) || !Array.isArray(vj.warnings)) return false;
+  if (!vj.extra.every((x) => VISION_EXTRA_KEYS.includes(x?.k) && String(x?.v ?? '').trim() !== '')) return false;
+  return new Set(vj.extra.map((x) => x.k)).size === vj.extra.length && vj.extra.length <= 6;
+};
+
 const stamp = Date.now().toString().slice(-8);
 const EA = `exp_a_${stamp}@test.dev`, EB = `exp_b_${stamp}@test.dev`;
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0; // skip：仅上游限流/不可用导致的真测跳过（非代码缺陷，不计失败也不计通过）
 const ok = (name, cond) => { cond ? (pass++, console.log(`✅ ${name}`)) : (fail++, console.log(`❌ ${name}`)); };
 
 // ===== 实体 id 变量（跨阶段引用） =====
@@ -430,8 +450,11 @@ try {
   ok('.pdf 伪图片上传识别 400(提示转图)', vr.status === 400 && String(vj.error).includes('PDF 请截图'));
   if (visionOn) {
     vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
-    ok('配键：成员传图识别 200 形状 fields+extra+warnings(真测)', vr.status === 200 && vj && typeof vj.fields === 'object' && Array.isArray(vj.extra) && Array.isArray(vj.warnings));
-    if (vr.status !== 200) console.log(`      ↳ 真测返回 ${vr.status}: ${String(vj.error || '').slice(0, 120)}（限流/图片过小属预期，可重跑）`);
+    // 上游限流(502)/网络波动时判「跳过」而非「失败」：免费档 glm-4.6v-flash 常 429，
+    //   记成红会让绿/红随上游容量抖动、久了没人信这个红 —— 离线契约由 visionContractOk 处处可查，
+    //   内容正确性另由 probe_vision.mjs（带退避重试 + 同样跳过策略）负责
+    if (vr.status === 200) ok('配键：成员传图识别 200 契约(键⊆本类别白名单/禁写键不出现/extra 白名单去重)', visionContractOk(vj, 'train'));
+    else { skip++; console.log(`⏭️ 配键：成员传图识别契约（上游不可用 ${vr.status}: ${String(vj.error || '').slice(0, 90)}）—— 跳过，非代码缺陷`); }
   } else {
     vr = await visUp('票据.png', PNG_1x1, 'train', M1); vj = await vr.json();
     ok('未配键：上传识别 502 指向配置(error 含 VISION_API_KEY/hint 含 VISION)', vr.status === 502 && String(vj.error).includes('VISION_API_KEY') && String(vj.hint || '').includes('VISION'));
@@ -443,15 +466,16 @@ try {
   got = await expect(`/expense/o/${C}/row/${ridTrain}/file/${fidPdf2}/recognize`, 400, { method: 'POST', headers: { 'X-Claim-Token': M1 } });
   ok('成员识别自己行 PDF 附件 400(非图片)', got.ok && String(got.data.error).includes('不是图片'));
   if (visionOn) {
-    // 真测：负责人给赵大强项目级行补传真实 1×1 PNG → 识别 200 形状 → 删回（净零，不扰 §14 计数）
+    // 真测：负责人给赵大强项目级行补传 1×1 空白 PNG → 识别 200 契约 → 删回（净零，不扰 §14 计数）
+    // 不作内容断言：空白图本就无内容可识别（内容正确性见 probe_vision.mjs）
     const fdV = new FormData();
     fdV.append('file', new Blob([PNG_1x1]), '识别真测.png');
     const upVR = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file?slot=ticket`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` }, body: fdV });
     const fidV = Number((await upVR.json()).att.id);
     vr = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${fidV}/recognize`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` } });
     vj = await vr.json();
-    ok('配键：负责人识别图片附件 200(真测)', vr.status === 200 && typeof vj.fields === 'object' && Array.isArray(vj.extra));
-    if (vr.status !== 200) console.log(`      ↳ 真测返回 ${vr.status}: ${String(vj.error || '').slice(0, 120)}（限流/图片过小属预期，可重跑）`);
+    if (vr.status === 200) ok('配键：负责人识别图片附件 200 契约(键⊆本类别白名单/禁写键不出现)', visionContractOk(vj, 'train'));
+    else { skip++; console.log(`⏭️ 配键：负责人识别图片附件契约（上游不可用 ${vr.status}: ${String(vj.error || '').slice(0, 90)}）—— 跳过，非代码缺陷`); }
     const delV = await rawReq(`/expense/o/${C}/row/${Number(misc1.row.id)}/file/${fidV}`, { method: 'DELETE', headers: { Authorization: `Bearer ${ta}` } });
     ok('识别用临时附件已删回(净零)', delV.status === 200);
   } else {
@@ -604,5 +628,5 @@ try {
   console.log(`❌ 异常中断: ${e.message}`);
 }
 
-console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
+console.log(`\n结果: ${pass} 通过 / ${fail} 失败${skip ? ` / ${skip} 跳过（上游限流，非代码缺陷）` : ''}`);
 process.exit(fail ? 1 : 0);

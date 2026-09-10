@@ -5,6 +5,9 @@
 //     老 glm-4v-flash 不支持 base64 只接受图片 URL —— 勿用）；VISION_BASE_URL 可换其它兼容网关
 // 职责只到「图片 → 结构化 JSON」：不落库、不写行 —— 识别结果由前端预填表单、人工确认后照常走行 CRUD；
 // 看不清的字段宁可不填也不编造（模型输出按类别字段白名单归一后返回，拿不准一律空）
+// ⚠️ 响应解析：glm-4.6v-flash 是「思考型」模型 —— 答案在 choices[0].message.content、
+//   思考过程在 reasoning_content。必须经 extractModelText 取正文，切勿把整个响应体丢给 JSON 解析
+//   （曾因此让识别功能整段静默失效：信封对象解析成功但 fields 恒空，见 extractModelText 注释）
 // 错误契约：key 未配置/限流/超时等统一抛 VisionError(message, hint)，路由层转 502 {error, hint}
 import { FIELDS, catMeta } from './expenseMeta.js';
 
@@ -108,6 +111,28 @@ async function postOnce(body, timeoutMs) {
   return { status: resp.status, text };
 }
 
+// 取模型正文（2026-09-10 修，此前的实现让整个识别功能静默失效）：
+//   glm-4.6v-flash 是「思考型」模型 —— 最终答案在 choices[0].message.content，
+//   思考过程在同级 reasoning_content。早前版本把「整个 HTTP 响应体」交给 parseModelJson 做贪心
+//   /\{[\s\S]*\}/ 匹配：匹配到的是最外层信封对象且 JSON.parse 成功 → parsed.fields 恒为 undefined
+//   → 恒返回空 fields，前端提示「未识别到可回填的字段（图片模糊？）」—— 模型其实答得完全正确。
+// 返回 {text, finish, reasoningLen}：text=正文；finish=finish_reason；
+//   reasoningLen>0 且 text 空 = 思考烧光 max_tokens 被截断（finish=length），需上层给明确文案而非静默空
+export function extractModelText(bodyText) {
+  let env = null;
+  try { env = JSON.parse(String(bodyText || '')); } catch { /* 非标准信封：回落原文 */ }
+  const ch = env?.choices?.[0];
+  if (!ch?.message) return { text: String(bodyText || ''), finish: '', reasoningLen: 0 };
+  const msg = ch.message;
+  let c = msg.content;
+  if (Array.isArray(c)) c = c.map((x) => (typeof x === 'string' ? x : x?.text || '')).join(''); // 兼容多模态数组
+  return {
+    text: typeof c === 'string' ? c : '',
+    finish: String(ch.finish_reason || ''),
+    reasoningLen: String(msg.reasoning_content || '').length,
+  };
+}
+
 function parseModelJson(raw) {
   let s = String(raw || '').trim();
   s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -153,7 +178,22 @@ export async function callVision(category, images, { timeoutMs = TIMEOUT_MS } = 
     }
     throw new VisionError(`识别服务返回异常（${out.status}），请稍后重试`, '可检查 VISION_BASE_URL/VISION_MODEL 配置');
   }
-  const parsed = parseModelJson(out.text);
+  // 正文只取 choices[0].message.content（见 extractModelText 注释：此处曾整段静默失效）
+  let got = extractModelText(out.text);
+  if (!got.text.trim() && (got.finish === 'length' || got.reasoningLen > 0)) {
+    // 思考型模型把 max_tokens 烧在 reasoning 上 → content 空。升配额重试一次
+    // （老 glm-4v-flash 上限 1024，升配额会 400 —— 那就保持空，由下方给出明确文案）
+    const out2 = await postOnce({ ...bodyBase, max_tokens: Math.max(MAX_TOKENS * 4, 4096) }, timeoutMs);
+    if (out2.status === 200) {
+      const got2 = extractModelText(out2.text);
+      if (got2.text.trim()) { got = got2; warnings.push('模型思考较长，已自动提高输出配额重试成功'); }
+    }
+  }
+  if (!got.text.trim()) {
+    throw new VisionError('识别失败：模型这次没给出结果（思考超长被截断）—— 请重试一次',
+      '思考型视觉模型先"想"再答，偶尔想太久没能输出。直接再点一次通常即可；连续失败可换更清晰或裁剪后的票据图');
+  }
+  const parsed = parseModelJson(got.text);
   if (!parsed) throw new VisionError('识别结果不是合法 JSON，请重试或换一张更清晰的图片', '模型偶发乱码：直接再点一次识别，或把票据拍正/光线充足');
 
   // fields：只留本类别可自动回填键、值类型归一、空值丢弃
