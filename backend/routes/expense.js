@@ -19,7 +19,8 @@ import {
 import { buildZip } from '../lib/zipStore.js';
 import { buildExpenseWorkbook } from '../lib/expenseExcel.js';
 import { callVision, callVisionText, VisionError } from '../lib/vision.js';
-import { pdfToRecognizeInput, PdfInputError } from '../lib/pdfDoc.js';
+import { pdfToRecognizeInput, PdfInputError, textUsable } from '../lib/pdfDoc.js';
+import { callGlmOcr, OcrError } from '../lib/ocr.js';
 import { callDeepSeek } from './ai.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -581,16 +582,47 @@ function visionErr(err, req, res, next) {
   next(err);
 }
 
-// PDF → 识别结果：先看文字层（数字版电子发票的常态 → 文本模型，快且不受免费视觉档限流影响），
-// 无可用文字层（扫描件/乱码）才光栅化成图走视觉模型。分派由 pdfDoc 的 textUsable 自动判定，用户无感。
+// PDF → 识别结果，三级递进（2026-09-14 加 OCR 级）：
+//   ① PDF 自带可用文字层（数字版电子发票常态）→ DeepSeek 文本抽取，最快最省
+//   ② 无文字层/字体未嵌入 → GLM-OCR 服务端渲染取全文（Foxit 残票/扫描件都能读，~2s 厘元级）→ DeepSeek 抽取
+//   ③ OCR 未配置/限流/读不出 → pdf.js 本地光栅化 → 对话式视觉模型（最终兜底）
+// 字体未嵌入时 pdfToRecognizeInput 抛 PDF_FONT_MISSING：先试 OCR，OCR 也读不出才把 400 指引交给用户
 async function recognizePdf(category, buf) {
-  const input = await pdfToRecognizeInput(buf);
+  let input;
+  try {
+    input = await pdfToRecognizeInput(buf);
+  } catch (e) {
+    if (e instanceof PdfInputError && e.code === 'PDF_FONT_MISSING') {
+      const viaOcr = await recognizeViaOcr(category, buf);
+      if (viaOcr) return viaOcr; // OCR 救回（GLM-OCR 服务端有完整字体环境）
+    }
+    throw e;
+  }
   if (input.kind === 'text') return callVisionText(category, input.text, { callModel: callDeepSeek });
+
+  const viaOcr = await recognizeViaOcr(category, buf);
+  if (viaOcr) return viaOcr; // OCR 默认读全部页，不存在本地光栅化的「仅前 N 页」截断
+
   const out = await callVision(category, input.images, { source: 'pdf-image' });
   const warnings = input.truncated
     ? [`该 PDF 共 ${input.pageCount} 页，本次仅识别了前 ${input.images.length} 页`, ...out.warnings]
     : out.warnings;
   return { ...out, warnings };
+}
+
+// ②级：GLM-OCR 取全文 → DeepSeek 抽字段。OCR 未配置/限流/文本不可用一律返回 null 交调用方回落
+//   （OCR 是优选通道不是唯一通道，它的故障不该直接变成用户错误）
+async function recognizeViaOcr(category, buf) {
+  let ocr;
+  try {
+    ocr = await callGlmOcr(buf);
+  } catch (e) {
+    if (e instanceof OcrError) return null;
+    throw e;
+  }
+  if (!textUsable(ocr.text)) return null;
+  const out = await callVisionText(category, ocr.text, { callModel: callDeepSeek });
+  return { ...out, source: 'pdf-ocr' }; // 覆盖 callVisionText 的 'pdf-text' 标记，便于测试区分通道
 }
 
 // A. 弹窗「传图识别预填」：multipart(file + category) → {fields, extra, warnings, source}，图片/PDF 识别后前端回填表单待确认

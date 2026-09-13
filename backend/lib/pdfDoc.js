@@ -17,11 +17,13 @@ const MIN_TEXT_CHARS = 40;    // 文字层可用阈值：真实发票去空白�
 const MAX_TEXT = 6000;        // 喂给文本模型的字符上限（票据文本很短，防超大 PDF 撑爆 token）
 
 // 解析失败（损坏/加密/非 PDF 字节）统一抛本错误，路由层转 400（区别于 502 的上游服务错误）
+// code：PDF_FONT_MISSING=字体未嵌入残缺（路由可先走 OCR 兜底，OCR 也读不出才把错误交给用户）
 export class PdfInputError extends Error {
-  constructor(message, hint = '') {
+  constructor(message, hint = '', code = '') {
     super(message);
     this.name = 'PdfInputError';
     this.hint = hint;
+    this.code = code;
   }
 }
 
@@ -118,7 +120,8 @@ export async function pdfToRecognizeInput(buf, { maxPages = MAX_PAGES, desiredWi
       const missing = await detectUnembeddedText(parser.doc, maxPages);
       if (missing) {
         throw new PdfInputError('这份 PDF 的文字字体未嵌入，服务器无法渲染票面文字（制票/抢票软件导出的票据常见此问题）',
-          '在电脑或手机上打开这份 PDF 后截图，直接用截图识别；或用「打印 → 另存为 PDF」重新导出一份再上传');
+          '在电脑或手机上打开这份 PDF 后截图，直接用截图识别；或用「打印 → 另存为 PDF」重新导出一份再上传',
+          'PDF_FONT_MISSING');
       }
     }
 

@@ -239,10 +239,12 @@ try {
     if (r2.warnings?.length) console.log(`   ℹ️ warnings: ${JSON.stringify(r2.warnings)}`);
   } else console.log('⏭️  ②数字版PDF：跳过内容断言');
 
-  // ③ 扫描件 PDF（无文字层）→ 自动转图 → GLM-4V
+  // ③ 扫描件 PDF（无文字层）→ GLM-OCR 优先（2026-09-14 起），OCR 不可用才自动转图走视觉模型
   const r3 = await upload(scannedPdf, '探针火车票扫描件.pdf', '扫描件PDF');
   if (r3) {
-    ok('③扫描件PDF source=pdf-image（无文字层已自动转图）', r3.source === 'pdf-image');
+    ok(`③扫描件PDF 走 OCR/视觉兜底通道之一（实际 source=${r3.source}）`,
+      r3.source === 'pdf-ocr' || r3.source === 'pdf-image');
+    if (r3.source === 'pdf-ocr') console.log('   ℹ️ 本次走 GLM-OCR 两跳通道（OCR 不可用时自动回落 pdf-image）');
     assertTicket('③扫描件PDF ', r3);
     if (r3.warnings?.length) console.log(`   ℹ️ warnings: ${JSON.stringify(r3.warnings)}`);
   } else console.log('⏭️  ③扫描件PDF：跳过内容断言');
@@ -257,8 +259,9 @@ try {
     rb.status === 400 && String(jb.error || '').includes('PDF 无法解析'));
 
   // ⑤ 字体未嵌入的残缺 PDF（合成 Type0/CID：裸名 SimSun、无 FontFile、无 ToUnicode）
-  //    必须在光栅化/视觉调用**之前**拦下并给可操作指引 —— 真实事故见 §0.3 注释。
-  //    纯本地判定、不触网不耗模型配额，故不走 upload() 的限流重试
+  //    生产链路会先试 GLM-OCR 兜底；本夹具 CID 全是假值（页面实为空白），OCR 也读不到字
+  //    → 最终回落 400 指引。真实 Foxit 残票 OCR 可救回（正路径由③扫描件 pdf-ocr 覆盖）。
+  //    不走 upload() 的限流重试：400 是确定性本地判定，与上游容量无关
   const unembeddedPdf = buildUnembeddedCidPdf();
   const fd5 = new FormData();
   fd5.append('category', CATEGORY);

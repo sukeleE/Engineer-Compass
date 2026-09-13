@@ -14,6 +14,7 @@ try { process.loadEnvFile(resolve(here, '../backend/.env')); } catch { /* 服务
 const { PDFParse } = await import(new URL('../backend/node_modules/pdf-parse/dist/pdf-parse/esm/index.js', import.meta.url));
 const { pdfToRecognizeInput, textUsable } = await import('../backend/lib/pdfDoc.js');
 const { callVision, callVisionText, visionFieldList } = await import('../backend/lib/vision.js');
+const { callGlmOcr } = await import('../backend/lib/ocr.js');
 
 const file = process.argv[2];
 const cat = process.argv[3] || 'misc';
@@ -54,27 +55,56 @@ console.log('textUsable 判定:', textUsable(rawText) ? '✅ 可用 → 走 Deep
 console.log('前 600 字符（JSON 转义，乱码/控制符会显形）:');
 console.log(JSON.stringify(rawText.slice(0, 600)));
 
-// ---- 第 2 层：按生产代码同口径分派 ----
-const input = await pdfToRecognizeInput(buf).catch((e) => ({ __error: e }));
-await parser.destroy().catch(() => {});
-if (input.__error) {
-  console.log('\n❌ pdfToRecognizeInput 抛错（路由会把它返成 400）:', input.__error.message);
-  console.log('hint:', input.__error.hint || '');
-  process.exit(0);
+// ---- 第 2 层：本地分派（与生产 recognizePdf 同口径：文字层 → OCR → 光栅化兜底）----
+let input = null;
+let fontMissing = null;
+try {
+  input = await pdfToRecognizeInput(buf);
+} catch (e) {
+  if (e.code === 'PDF_FONT_MISSING') fontMissing = e;
+  else {
+    console.log('\n❌ pdfToRecognizeInput 抛错（路由会把它返成 400）:', e.message);
+    if (e.hint) console.log('hint:', e.hint);
+    await parser.destroy().catch(() => {});
+    process.exit(0);
+  }
 }
-console.log(`\n── ② 分派结果: kind=${input.kind}` + (input.kind === 'images' ? `，光栅化 ${input.images.length} 页，每页约 ${(input.images[0]?.b64.length * 3 / 4 / 1024 || 0).toFixed(0)} KB` : ''));
+await parser.destroy().catch(() => {});
+if (fontMissing) console.log('\n── ② 本地判定：字体未嵌入残缺（PDF_FONT_MISSING）→ 先试 GLM-OCR，读不出才回落 400 指引');
+else console.log(`\n── ② 本地分派: kind=${input.kind}` + (input.kind === 'images' ? `，光栅化 ${input.images.length} 页，每页约 ${(input.images[0]?.b64.length * 3 / 4 / 1024 || 0).toFixed(0)} KB` : ''));
 
-// ---- 第 3 层：完整模型链路 ----
+// OCR 一跳（lib/ocr.js：GLM-OCR layout_parsing → 清洗后的全文）
+async function viaOcr() {
+  try {
+    const ocr = await callGlmOcr(buf);
+    console.log(`   OCR：${ocr.pages} 页 / ${ocr.tokens} token / 清洗后 ${ocr.text.length} 字 / textUsable=${textUsable(ocr.text)}`);
+    if (!textUsable(ocr.text)) { console.log('   OCR 文本不足，回落下一通道'); return null; }
+    const out = await callVisionText(cat, ocr.text, { callModel: callDeepSeek });
+    return { ...out, source: 'pdf-ocr' };
+  } catch (e) {
+    console.log('   OCR 通道不可用（回落）:', e.message);
+    return null;
+  }
+}
+
+// ---- 第 3 层：完整模型链路（三级递进）----
 const t0 = Date.now();
 try {
-  const result = input.kind === 'text'
-    ? await callVisionText(cat, input.text, { callModel: callDeepSeek })
-    : await callVision(cat, input.images, { source: 'pdf-image' });
+  let result;
+  if (input?.kind === 'text') {
+    result = await callVisionText(cat, input.text, { callModel: callDeepSeek });
+  } else {
+    result = await viaOcr();
+    if (!result) {
+      if (fontMissing) throw fontMissing; // OCR 也读不出 → 400「截图识别/打印另存」指引
+      result = await callVision(cat, input.images, { source: 'pdf-image' });
+    }
+  }
   console.log(`\n── ③ 模型链路（${Date.now() - t0}ms）source=${result.source}`);
   console.log('fields:', JSON.stringify(result.fields));
   console.log('extra:', JSON.stringify(result.extra));
   console.log('warnings:', JSON.stringify(result.warnings));
-  console.log(Object.keys(result.fields).length ? '✅ 识别到字段' : '⚠️  fields 为空 —— 这就是线上症状，看①的文字层是否乱码、字段白名单是否匹配');
+  console.log(Object.keys(result.fields).length ? '✅ 识别到字段' : '⚠️  fields 为空 —— 看①的文字层/OCR 文本与字段白名单是否匹配');
 } catch (e) {
   console.log(`\n❌ 模型链路失败（${Date.now() - t0}ms）:`, e.message);
   if (e.hint) console.log('hint:', e.hint);
