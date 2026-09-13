@@ -92,7 +92,7 @@ async function load(c, { soft = false } = {}) {
 // ?code=xxx 直达（后退/切项目时跟随路由变化）
 watch(() => route.query.code, (c) => {
   code.value = String(c || '');
-  if (code.value) { activeTab.value = PROJ_TAB; load(code.value); } // 切项目标签复位到第一个（全项目统一支付）
+  if (code.value) { activeTab.value = PROJ_TAB; trainOpenG.value = new Set(); trainOpenS.value = new Set(); load(code.value); } // 切项目：标签/车次下钻都复位
   else errMsg.value = ''; // 离开项目回落地页时清掉上一次的报错
 });
 onMounted(() => {
@@ -191,9 +191,12 @@ const teamAgg = (teamId) => {
   return m;
 };
 const rowsOf = (teamId, cat) => (pld.value?.rows || []).filter((x) => x.team_id === teamId && x.category === cat);
-// ---- 同车次车票聚合（纯前端展示，2026-09-09）：全项目 train 行按 出发日期(出发时间)+车次+座位等级 分组 ——
-//    跨队伍、含项目级行都算；车次为空 → 「未填车次」组恒沉底（历史行/漏填）；不进 Excel；金额口径=rowMoney（与 ②小计一致）——
-const trainGroups = computed(() => {
+// ---- 同车次车票三级聚合（2026-09-14 改为可下钻；纯前端，跨队伍、含项目级行）----
+// 大类 = 出发日期(出发时间)+车次（不再含座位等级）→ 座位等级小类 → 一张张乘客票（叶子）。
+// 与后端 expenseExcel.js 的 trainStatArrays 是**镜像实现**：哨兵（车次空='unfilled' 单一沉底组、
+//   座位空='__none__' 小类沉底）与排序口径改动必须两处同步；金额口径=rowMoney（与 ②小计 / Excel 同源）。
+// 车次为空的历史行/漏填行归唯一一个「未填车次」大类沉底（不按日期拆），叶子自带各自日期。
+const trainTree = computed(() => {
   const gs = new Map();
   for (const r of pld.value?.rows || []) {
     if (r.category !== 'train') continue;
@@ -202,18 +205,49 @@ const trainGroups = computed(() => {
     const train = String(d['车次'] || '').trim();
     const seat = String(d['座位等级'] || '').trim();
     const no = !train;
-    const k = no ? 'n' : `t|${date}|${train}|${seat}`;
-    let g = gs.get(k);
-    if (!g) { g = { k: no ? 'unfilled' : k, no, date, train, seat, n: 0, money: 0 }; gs.set(k, g); }
-    g.n += 1;
-    g.money += rowMoney('train', d);
+    const gk = no ? 'unfilled' : `g|${date}|${train}`;
+    let g = gs.get(gk);
+    if (!g) { g = { k: gk, no, date, train, n: 0, money: 0, seats: new Map() }; gs.set(gk, g); }
+    const sk = `${gk}|s|${seat || '__none__'}`;
+    let s = g.seats.get(sk);
+    if (!s) { s = { k: sk, seat, noSeat: !seat, n: 0, money: 0, rows: [] }; g.seats.set(sk, s); }
+    const money = rowMoney('train', d);
+    g.n += 1; s.n += 1; g.money += money; s.money += money;
+    s.rows.push({
+      id: r.id, row: r,
+      name: String(r.owner_name || ''),
+      teamName: r.team_id == null ? '全项目统一支付' : teamNameOf(r.team_id),
+      date,
+      from: String(d['出发地'] || '').trim(),
+      to: String(d['到达地'] || '').trim(),
+      money,
+    });
   }
   const arr = [...gs.values()];
   arr.sort((a, b) => (a.no !== b.no ? (a.no ? 1 : -1)
     : a.date < b.date ? -1 : a.date > b.date ? 1
       : a.train < b.train ? -1 : a.train > b.train ? 1 : 0));
+  for (const g of arr) {
+    g.seatArr = [...g.seats.values()];
+    g.seatArr.sort((a, b) => (a.noSeat !== b.noSeat ? (a.noSeat ? 1 : -1)
+      : a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0));
+    for (const s of g.seatArr) s.rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id));
+  }
   return arr;
 });
+const trainTotalN = computed(() => trainTree.value.reduce((s, g) => s + g.n, 0));
+// 展开态：大类 / 小类各一个 Set（仿 ShareFileTree；复制新 Set 才触发响应式）。切项目清空，soft 刷新保留
+const trainOpenG = ref(new Set());
+const trainOpenS = ref(new Set());
+// 注意：模板里 ref 自动解包，不能把 ref 本身当参数传进来（拿到的是 Set，赋 .value 不触发更新）——用 'G'/'S' 标识在函数内取 ref
+function toggleTrain(which, k) {
+  const refSet = which === 'S' ? trainOpenS : trainOpenG;
+  const n = new Set(refSet.value);
+  if (n.has(k)) n.delete(k); else n.add(k);
+  refSet.value = n;
+}
+// 名单里的票点开编辑：弹窗按 code+row.id 保存，跨队/项目级行无需切换主体 tab
+const canEditTrainLeaf = (row) => (row.team_id == null ? canEditProjRow(row) : canEditRow(row));
 // ---- 全项目统一支付（项目级区块：team_id 空的行 —— 不属任何队伍：统一垫付 ＋ ⑥零散票据）----
 // 注意：头部统计条 catAgg/grandTotal 本就遍历全部行（含项目级），与 Excel 总计口径一致
 const projPayRows = computed(() => (pld.value?.rows || []).filter((r) => r.team_id == null));
@@ -563,16 +597,52 @@ onMounted(() => loadMine());
             </span>
             <span class="sum-chip total">总计 <b>{{ fmt(grandTotal) }}</b></span>
           </div>
-          <!-- 同车次车票聚合：按 出发日期+车次+座位等级 分组（跨队伍、含全项目区；纯页面参考，不进 Excel/附件包） -->
-          <div v-if="trainGroups.length" class="train-agg">
-            <span class="sub2">同车次车票：按 出发日期＋车次＋座位等级 聚合（{{ trainGroups.reduce((s, g) => s + g.n, 0) }} 张；点击行卡片可逐张核对）</span>
+          <!-- 同车次车票三级聚合：大类(出发日期+车次) → 座位等级小类 → 乘客名单（跨队伍、含全项目区） -->
+          <div v-if="trainTree.length" class="train-agg">
+            <span class="sub2">同车次车票（{{ trainTotalN }} 张，¥{{ fmt(trainTree.reduce((s, g) => s + g.money, 0)) }}）：点车次展开座位等级，再点座位看乘客名单</span>
             <div class="sum-bar" style="margin-top:4px">
-              <span v-for="g in trainGroups" :key="g.k" class="sum-chip" :class="{ 'tr-dim': g.no }"
-                    :title="g.no ? '这几张还没填车次（历史行或漏填）——点行卡片「✏ 编辑」补上车次后即自动归组' : `${g.n} 张（出发日期 · 车次 · 座位等级）`">
+              <button v-for="g in trainTree" :key="g.k" type="button"
+                      class="sum-chip tr-chip" :class="{ 'tr-dim': g.no, on: trainOpenG.has(g.k) }"
+                      :title="g.no ? '这几张还没填车次（历史行或漏填）——名单里点自己的票「✏」补上车次后即自动归组' : `${g.n} 张，点击展开座位等级`"
+                      @click="toggleTrain('G', g.k)">
+                <span class="tr-caret" :class="{ open: trainOpenG.has(g.k) }">▸</span>
                 <template v-if="g.no">未填车次</template>
-                <template v-else>{{ g.date }} · {{ g.train }}<i v-if="g.seat"> · {{ g.seat }}</i></template>
+                <template v-else>{{ g.date }} · {{ g.train }}</template>
                 <b>×{{ g.n }} 张 ¥{{ fmt(g.money) }}</b>
-              </span>
+              </button>
+            </div>
+            <div class="tr-panels">
+              <div v-for="g in trainTree" v-show="trainOpenG.has(g.k)" :key="g.k" class="tr-panel" :class="{ 'tr-dim': g.no }">
+                <div class="tr-ghead">
+                  <span class="tr-caret open">▸</span>
+                  <b>{{ g.no ? '未填车次' : `${g.date} · ${g.train}` }}</b>
+                  <i>×{{ g.n }} 张 ¥{{ fmt(g.money) }}</i>
+                </div>
+                <div class="tr-seatbar">
+                  <button v-for="s in g.seatArr" :key="s.k" type="button"
+                          class="tr-seat" :class="{ dim: s.noSeat, on: trainOpenS.has(s.k) }"
+                          :title="`${s.n} 位同学，点击查看名单`"
+                          @click="toggleTrain('S', s.k)">
+                    <span class="tr-caret sm" :class="{ open: trainOpenS.has(s.k) }">▸</span>
+                    {{ s.noSeat ? '未填座位' : s.seat }}
+                    <b>×{{ s.n }} ¥{{ fmt(s.money) }}</b>
+                  </button>
+                </div>
+                <div v-for="s in g.seatArr" v-show="trainOpenS.has(s.k)" :key="s.k" class="tr-leaves">
+                  <div v-for="r in s.rows" :key="r.id" class="tr-leaf"
+                       :class="{ editable: canEditTrainLeaf(r.row) }"
+                       :title="canEditTrainLeaf(r.row) ? '点击编辑这张票' : '只读（代录/纠错请找项目负责人）'"
+                       @click="canEditTrainLeaf(r.row) && openEdit(r.row)">
+                    <b class="tl-name">🧑 {{ r.name }}</b>
+                    <span class="tl-team">{{ r.teamName }}</span>
+                    <span class="tl-route">
+                      <template v-if="g.no">{{ r.date || '未填日期' }} · </template>{{ r.from || '?' }}→{{ r.to || '?' }}
+                    </span>
+                    <span class="tl-money">¥{{ fmt(r.money) }}</span>
+                    <span v-if="canEditTrainLeaf(r.row)" class="tl-edit">✏</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="head-ops">
@@ -801,6 +871,40 @@ h3 { margin: 0; font-size: 16px; }
 .sum-chip.total b { color: var(--primary); }
 .train-agg { margin-top: 8px; }
 .sum-chip.tr-dim { opacity: .72; border: 1px dashed var(--border); }
+/* 大类 chip 改按钮：reset 回 span 外观 */
+.tr-chip { font: inherit; line-height: inherit; border: 1px solid transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; }
+.tr-chip:hover { border-color: var(--primary); }
+.tr-chip.on { background: var(--primary-tint); border-color: var(--primary); }
+.tr-chip.on b { color: var(--primary); }
+.tr-caret { display: inline-block; transition: transform .15s ease; font-size: 10px; opacity: .6; }
+.tr-caret.open { transform: rotate(90deg); opacity: 1; }
+.tr-caret.sm { font-size: 9px; }
+/* 展开面板：限高内部滚动，避免展开多个大车次把头卡撑得过长 */
+.tr-panels { max-height: min(38vh, 320px); overflow-y: auto; margin-top: 6px;
+  display: flex; flex-direction: column; gap: 4px; }
+.tr-panel { border-top: 1px dashed var(--border); padding: 6px 2px 2px; }
+.tr-ghead { display: flex; align-items: baseline; gap: 6px; font-size: 13px; margin-bottom: 2px; }
+.tr-ghead i { font-style: normal; font-size: 12px; color: var(--text-2); }
+.tr-seatbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px 14px; }
+.tr-seat { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-2); border-radius: 12px; padding: 2px 10px;
+  display: inline-flex; align-items: center; gap: 4px; }
+.tr-seat b { color: var(--text); font-weight: 600; }
+.tr-seat:hover { border-color: var(--primary); }
+.tr-seat.on { background: var(--primary-tint); border-color: var(--primary); color: var(--primary-dark); }
+.tr-seat.on b { color: var(--primary); }
+.tr-seat.dim { opacity: .72; border-style: dashed; }
+.tr-leaves { padding-left: 28px; display: flex; flex-direction: column; }
+.tr-leaf { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 3px 8px; border-radius: 6px; font-size: 13px; }
+.tr-leaf.editable { cursor: pointer; }
+.tr-leaf.editable:hover { background: var(--surface-2); }
+.tl-team { color: var(--text-2); font-size: 11px; background: var(--surface-3);
+  border: 1px solid var(--border); padding: 0 8px; border-radius: 10px; }
+.tl-route { color: var(--text-2); font-size: 12px; }
+.tl-money { margin-left: auto; font-weight: 600; }
+.tl-edit { color: var(--primary); font-size: 12px; }
 .head-ops { display: flex; gap: 6px; flex-wrap: wrap; }
 .head-ops .el-button, .head-ops a { margin-left: 0; }
 

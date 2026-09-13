@@ -344,8 +344,18 @@ try {
   const pZip2b = Buffer.from(await pZip2.arrayBuffer());
   ok('全项目 ZIP 含 06零散票据 目录与票据文件', pZip2b.includes(Buffer.from('06零散票据')) && pZip2b.includes(Buffer.from('打车票据截图.png')));
 
-  // ---------- 12. XLSX：sheet 名 / =SUM 公式 / 注入转义 ----------
+  // ---------- 12. XLSX：sheet 名 / =SUM 公式 / 注入转义 / 同车次统计 sheet ----------
   await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body: { team_id: t2, category: 'reg', owner_name: '赵大强', data: { 金额: 10, 是否帮付: '否', 帮付人: '', 备注: '' } } });
+  // 同车次统计夹具（断言后立即 DELETE 净零，否则扰 §14 级联硬计数）：
+  //   G1234/07-15 一等座×1(李小华2) + 二等座×3(王小明先锋队、王小明项目级同名第二票、赵大强凌云队)
+  //   D321/07-16 未填座位×1(李小华2)；另有 ridTrain 无车次=「未填车次」块（座位二等座，到达地已在 §7 改为杭州）
+  const trainFix = [];
+  const mkTrain = async (body) => { const r = await api(`/expense/o/${C}/row`, { method: 'POST', token: ta, body }); trainFix.push(Number(r.row.id)); };
+  await mkTrain({ team_id: t1, category: 'train', owner_name: '王小明', data: { 出发时间: '2026-07-15', 出发地: '北京', 到达地: '上海', 车次: 'G1234', 座位等级: '二等座', 金额: 553.5 } });
+  await mkTrain({ team_id: t2, category: 'train', owner_name: '赵大强', data: { 出发时间: '2026-07-15', 出发地: '北京', 到达地: '上海', 车次: 'G1234', 座位等级: '二等座', 金额: 553.5 } });
+  await mkTrain({ team_id: t1, category: 'train', owner_name: '李小华2', data: { 出发时间: '2026-07-15', 出发地: '北京', 到达地: '上海', 车次: 'G1234', 座位等级: '一等座', 金额: 933 } });
+  await mkTrain({ project_pay: true, category: 'train', owner_name: '王小明', data: { 出发时间: '2026-07-15', 出发地: '北京', 到达地: '上海', 车次: 'G1234', 座位等级: '二等座', 金额: 553.5 } });
+  await mkTrain({ team_id: t1, category: 'train', owner_name: '李小华2', data: { 出发时间: '2026-07-16', 出发地: '北京', 到达地: '天津', 车次: 'D321', 座位等级: '', 金额: 300 } });
   const xRes = await rawReq(`/expense/o/${C}/export/xlsx`);
   const xbuf = Buffer.from(await xRes.arrayBuffer());
   ok('XLSX 下载 200 且为 zip 容器', xRes.status === 200 && xbuf.slice(0, 2).toString('latin1') === 'PK');
@@ -377,7 +387,11 @@ try {
   };
   const parts = unzipAll(xbuf);
   const wbXml = parts['xl/workbook.xml']?.toString('utf8') || '';
-  ok('sheet 名含 汇总/队伍/全项目统一支付/附件清单', ['汇总', '先锋队', '凌云队', '全项目统一支付', '附件清单'].every((n) => wbXml.includes(`name="${n}"`)));
+  ok('sheet 名含 汇总/同车次统计/队伍/全项目统一支付/附件清单', ['汇总', '同车次统计', '先锋队', '凌云队', '全项目统一支付', '附件清单'].every((n) => wbXml.includes(`name="${n}"`)));
+  // sheet 顺序：同车次统计必须紧跟汇总、在首个队伍 sheet 之前
+  const sheetNames = [...wbXml.matchAll(/<sheet[^>]*\sname="([^"]+)"/g)].map((m) => m[1]);
+  ok('同车次统计位置=汇总之后、队伍明细之前', sheetNames.indexOf('同车次统计') > sheetNames.indexOf('汇总')
+    && sheetNames.indexOf('同车次统计') < sheetNames.indexOf('先锋队'));
   const allXml = Object.entries(parts).filter(([n]) => n.startsWith('xl/worksheets/')).map(([, v]) => v.toString('utf8')).join('\n');
   ok('工作表含 =SUM 公式', allXml.includes('<f>=SUM('));
   ok('注入值转义为 &apos;=1+1', allXml.includes("&apos;=1+1"));
@@ -397,6 +411,37 @@ try {
   ok('全项目统一支付 sheet：范围子集原样/⑥零散票据明细/总计公式', !!projXml && projXml.includes('<v>统一支付范围</v>') && projXml.includes('<v>赵大强、王小明</v>') && projXml.includes('<v>票据名称</v>') && projXml.includes('<v>7-20 打车发票×3</v>') && projXml.includes('<f>=SUM('));
   const attSheetXml = Object.entries(parts).filter(([n]) => n.startsWith('xl/worksheets/')).map(([, v]) => v.toString('utf8')).find((s) => s.includes('附件槽位')) || '';
   ok('附件清单标全项目统一支付行(含原件名/⑥目录类)', attSheetXml.includes('全项目统一支付') && attSheetXml.includes('全员报名费发票.pdf') && attSheetXml.includes('⑥零散票据'));
+
+  // ---- 同车次统计 sheet（三级：日期+车次 大类 → 座位小类 → 乘客票；与前端 trainTree 同口径）----
+  const trXml = Object.entries(parts).filter(([n]) => n.startsWith('xl/worksheets/')).map(([, v]) => v.toString('utf8')).find((s) => s.includes('同车次车票统计')) || '';
+  ok('同车次统计表头 8 列(出发日期/车次/座位等级/成员姓名/队伍/出发地/到达地/金额)',
+    ['出发日期', '车次', '座位等级', '成员姓名', '队伍', '出发地', '到达地', '金额'].every((h) => trXml.includes(`<v>${h}</v>`)));
+  ok('同车次统计：小类/大类/总计层级标签', ['小计（一等座）', '小计（二等座）', '小计（未填座位）',
+    '合计（2026-07-15 · G1234 · 4 张）', '合计（2026-07-16 · D321 · 1 张）', '合计（未填车次 · 1 张）',
+    '车票总计（同车次统计 · 6 张）'].every((t) => trXml.includes(t)));
+  ok('同车次统计：跨队/项目级同名两票靠队名列区分', trXml.includes('<v>全项目统一支付</v>') && trXml.includes('<v>凌云队</v>') && trXml.includes('<v>天津</v>'));
+  // 行号口径见 trainStatArrays：标题+表头 2 行，G1234 一等座 1 票→H4 小计；二等座 H5:H7→H8 小计；H9 大类合计
+  ok('同车次统计：座位小计区间公式(4 条)', [`<f>=SUM(H3:H3)</f>`, `<f>=SUM(H5:H7)</f>`, `<f>=SUM(H10:H10)</f>`, `<f>=SUM(H13:H13)</f>`]
+    .every((f) => trXml.includes(f)) && (trXml.match(/<f>=SUM\(H\d+:H\d+\)<\/f>/g) || []).length === 4);
+  ok('同车次统计：大类合计/总计逗号枚举(无双算)', trXml.includes('<f>=SUM(H4,H8)</f>') && trXml.includes('<f>=SUM(H11)</f>')
+    && trXml.includes('<f>=SUM(H14)</f>') && trXml.includes('<f>=SUM(H9,H12,H15)</f>'));
+  // SheetJS 会把公式里的单引号 XML 转义成 &apos;
+  ok('同车次统计：对账公式跨表引用汇总②车票列(D)且差额应为 0', /<f>=ROUND\(H16-(?:&apos;|')汇总(?:&apos;|')!D\d+,2\)<\/f>/.test(trXml) && trXml.includes('差额应为 0'));
+  // 净零：删除 5 张同车次夹具行（不扰 §11.8 附件 / §13 截止 / §14 级联硬计数）
+  for (const rid of trainFix) {
+    const dr = await rawReq(`/expense/o/${C}/row/${rid}`, { method: 'DELETE', headers: { Authorization: `Bearer ${ta}` } });
+    if (dr.status !== 200) throw new Error(`同车次夹具清理失败 rid=${rid} status=${dr.status}`);
+  }
+  ok('同车次夹具 5 行已净零删除', trainFix.length === 5);
+
+  // 空项目（无任何车票）导出：不出「同车次统计」sheet，其余 sheet 照常
+  const emptyProj = await api('/expense', { method: 'POST', token: ta, body: { name: '空项目同车次' } });
+  const eRes = await rawReq(`/expense/o/${emptyProj.code}/export/xlsx`);
+  const eParts = unzipAll(Buffer.from(await eRes.arrayBuffer()));
+  const eWb = eParts['xl/workbook.xml']?.toString('utf8') || '';
+  ok('无车票项目：不出同车次统计 sheet 且汇总/附件清单照常', eRes.status === 200 && !eWb.includes('同车次统计')
+    && eWb.includes('name="汇总"') && eWb.includes('name="附件清单"'));
+  await api(`/expense/${emptyProj.id}`, { method: 'DELETE', token: ta });
 
   // ---------- 11.8 统一支付行附件：每槽可多份（追加不替换；单人常规记录仍每槽一份=替换，见 §8） ----------
   // ⑥零散票据行（项目级）同槽加传第二份

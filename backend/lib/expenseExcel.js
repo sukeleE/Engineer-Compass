@@ -1,6 +1,8 @@
 // 报销整理·xlsx 导出（SheetJS CE 已在依赖中，importPlan.js 同款用法）
 // 布局：Sheet1 汇总 = 队伍→成员 两级展开（成员行×各类金额 + 个人合计，队小计/总计 =SUM 页内公式）
 //       全项目统一支付块（team_id 为空的项目级行）在各队伍块之后、总计行之前，同样进 blocks → 计入全部总计
+//       Sheet2 同车次统计（2026-09-14，有 train 行才出）：大类 出发日期+车次 → 座位等级小类 → 乘客票，
+//         小类/大类/总计 =SUM 公式 + 与汇总表②车票列的跨表对账格（差额应为 0）
 //       每队伍一个 sheet + 「全项目统一支付」sheet（各类块纵向堆叠全字段，金额 number，块小计/页底总计 =SUM）
 // 行序：队伍内按名单顺序（同人按录入先后），公用"队伍"行置末；项目级 sheet 按录入先后
 //       末 Sheet 附件清单（负责人逐槽核对是否交齐）
@@ -95,6 +97,97 @@ function detailArrays(sortedRows, attsByRow) {
     subs.push({ col: moneyCol, first: firstD, subR });
   }
   return { aoaT, merges, subs, maxCols };
+}
+
+// 同车次三级统计 sheet 数据（2026-09-14）：大类=出发日期+车次 → 座位等级小类 → 乘客票（叶子）
+// 与前端 ExpenseView.vue 的 trainTree 是**镜像实现**（前后端不共享模块）——
+// 归桶哨兵（车次空='unfilled' 单一沉底组、座位空='__none__' 小类沉底）/排序口径改动必须两处同步。
+// 8 列：出发日期|车次|座位等级|成员姓名|队伍|出发地|到达地|金额（H 列）；叶子行 A/B/C 重复填值不合并，便于 Excel 筛选排序
+// 返回公式行号：seatSubs 座位小计（区间 SUM）、groupTotals 大类合计（逗号枚举各小类小计格，避免跨区间双算）、
+//   grandR 车票总计、checkR 与「汇总」②车票列的对账行
+function trainStatArrays(trainRows, teamNameById, { sumSheetName, sumGrandR }) {
+  const MONEY_COL = 7; // H
+  const groups = new Map();
+  for (const x of trainRows) {
+    const d = safeParseData(x.data);
+    const date = String(d['出发时间'] || '').trim();
+    const train = String(d['车次'] || '').trim();
+    const seat = String(d['座位等级'] || '').trim();
+    const no = !train;
+    const gk = no ? 'unfilled' : `g|${date}|${train}`;
+    let g = groups.get(gk);
+    if (!g) { g = { k: gk, no, date, train, n: 0, money: 0, seats: new Map() }; groups.set(gk, g); }
+    const sk = `${gk}|s|${seat || '__none__'}`;
+    let s = g.seats.get(sk);
+    if (!s) { s = { k: sk, seat, noSeat: !seat, n: 0, money: 0, rows: [] }; g.seats.set(sk, s); }
+    const money = sumMoney('train', d);
+    g.n += 1; s.n += 1; g.money += money; s.money += money;
+    s.rows.push({
+      id: x.id,
+      name: x.owner_name,
+      teamName: x.team_id == null ? '全项目统一支付' : (teamNameById.get(x.team_id) || ''),
+      date,
+      from: String(d['出发地'] || '').trim(),
+      to: String(d['到达地'] || '').trim(),
+      money,
+    });
+  }
+  const gArr = [...groups.values()];
+  gArr.sort((a, b) => (a.no !== b.no ? (a.no ? 1 : -1)
+    : a.date < b.date ? -1 : a.date > b.date ? 1
+      : a.train < b.train ? -1 : a.train > b.train ? 1 : 0));
+  for (const g of gArr) {
+    g.seatArr = [...g.seats.values()];
+    g.seatArr.sort((a, b) => (a.noSeat !== b.noSeat ? (a.noSeat ? 1 : -1)
+      : a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0));
+    for (const s of g.seatArr) s.rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id));
+  }
+
+  const aoaT = [
+    ['同车次车票统计：出发日期＋车次 为大类，座位等级为小类（金额单位：元；空白车次/座位为历史行漏填）'],
+    ['出发日期', '车次', '座位等级', '成员姓名', '队伍', '出发地', '到达地', '金额'],
+  ];
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }];
+  const seatSubs = [];
+  const groupTotals = [];
+  let totalN = 0;
+  for (const g of gArr) {
+    totalN += g.n;
+    const subCells = [];
+    for (const s of g.seatArr) {
+      const first = aoaT.length;
+      for (const r of s.rows) {
+        aoaT.push([
+          g.no ? cellSafe(r.date) : cellSafe(g.date),
+          g.no ? '' : cellSafe(g.train),
+          cellSafe(s.seat), cellSafe(r.name), cellSafe(r.teamName),
+          cellSafe(r.from), cellSafe(r.to), cellNum(r.money),
+        ]);
+      }
+      const subR = aoaT.length;
+      aoaT.push([null, null, null, `小计（${s.noSeat ? '未填座位' : s.seat}）`]);
+      merges.push({ s: { r: subR, c: 3 }, e: { r: subR, c: 6 } });
+      seatSubs.push({ r: subR, first });
+      subCells.push(subR);
+    }
+    const gR = aoaT.length;
+    aoaT.push([`合计（${g.no ? '未填车次' : `${g.date} · ${g.train}`} · ${g.n} 张）`]);
+    merges.push({ s: { r: gR, c: 0 }, e: { r: gR, c: 6 } });
+    groupTotals.push({ r: gR, cells: subCells });
+  }
+  const grandR = aoaT.length;
+  aoaT.push([`车票总计（同车次统计 · ${totalN} 张）`]);
+  merges.push({ s: { r: grandR, c: 0 }, e: { r: grandR, c: 6 } });
+  let checkR = -1;
+  if (sumGrandR >= 0) {
+    checkR = aoaT.length;
+    aoaT.push(['对账（本总计 －「汇总」表②车票总额，差额应为 0）']);
+    merges.push({ s: { r: checkR, c: 0 }, e: { r: checkR, c: 6 } });
+  }
+  const noteR = aoaT.length;
+  aoaT.push(['注：大类按出发日期＋车次聚合，展开座位等级后逐张列出乘客票；队名「全项目统一支付」=项目级行（不属任何队伍）；金额口径与「汇总」表②车票完全一致。生成时间见各队伍明细表。']);
+  merges.push({ s: { r: noteR, c: 0 }, e: { r: noteR, c: 7 } });
+  return { aoaT, merges, seatSubs, groupTotals, grandR, checkR, totalN, moneyCol: MONEY_COL, sumSheetName };
 }
 
 /**
@@ -192,7 +285,37 @@ export function buildExpenseWorkbook({ project, teams, members, rows, atts }) {
   }
   wsSum['!merges'] = mSum;
   wsSum['!cols'] = [{ wch: 16 }, { wch: 20 }, ...Array(N).fill({ wch: 10 }), { wch: 11 }];
-  XLSX.utils.book_append_sheet(wb, wsSum, sheetName('汇总', usedSheets));
+  // 提变量：同车次统计 sheet 的对账公式要跨表引用本名（sheetName 可能去重，不能硬编码「汇总」）
+  const sumSheetName = sheetName('汇总', usedSheets);
+  XLSX.utils.book_append_sheet(wb, wsSum, sumSheetName);
+
+  // ---------- Sheet2 同车次统计（大类 日期+车次 → 座位等级 → 乘客票；无 train 行则整表跳过）----------
+  const trainRowsAll = rows.filter((x) => x.category === 'train');
+  if (trainRowsAll.length) {
+    const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
+    const st = trainStatArrays(trainRowsAll, teamNameById, { sumSheetName, sumGrandR: grandR });
+    const wsTr = XLSX.utils.aoa_to_sheet(st.aoaT);
+    const HC = L(st.moneyCol);
+    for (const s of st.seatSubs) { // 座位小类小计 =SUM(本小类叶子区间)
+      wsTr[XLSX.utils.encode_cell({ r: s.r, c: st.moneyCol })] =
+        { t: 'n', f: `=SUM(${HC}${s.first + 1}:${HC}${s.r})` };
+    }
+    for (const g of st.groupTotals) { // 大类合计=枚举各小类小计格（不用跨小计区间，防双算）
+      wsTr[XLSX.utils.encode_cell({ r: g.r, c: st.moneyCol })] =
+        { t: 'n', f: `=SUM(${g.cells.map((r) => `${HC}${r + 1}`).join(',')})` };
+    }
+    wsTr[XLSX.utils.encode_cell({ r: st.grandR, c: st.moneyCol })] =
+      { t: 'n', f: `=SUM(${st.groupTotals.map((g) => `${HC}${g.r + 1}`).join(',')})` };
+    if (st.checkR >= 0 && grandR >= 0) {
+      // 汇总表②车票列字母 = moneyLo + catIdx('train')（reg 是第 0 类，train=1 → D）
+      const trainColL = L(moneyLo + catIdx('train'));
+      wsTr[XLSX.utils.encode_cell({ r: st.checkR, c: st.moneyCol })] =
+        { t: 'n', f: `=ROUND(${HC}${st.grandR + 1}-'${sumSheetName}'!${trainColL}${grandR + 1},2)` };
+    }
+    wsTr['!merges'] = st.merges;
+    wsTr['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsTr, sheetName('同车次统计', usedSheets));
+  }
 
   // ---------- 每队伍一 sheet（原有布局不变）----------
   for (const t of teams) {
