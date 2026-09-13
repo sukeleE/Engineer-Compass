@@ -114,8 +114,10 @@ async function recognize(a) {
     const n = Object.keys(res.fields || {}).length;
     ElMessage.success(n ? `已识别 ${n} 项 —— 在编辑弹窗中核对后保存` : '已识别（票面可确认项不多），可在编辑弹窗中手动补填');
   } catch (e) {
-    ElMessage.error(e.message);
     if (/认领|身份/.test(e.message)) emit('claim-lost');
+    // 带可操作指引的错误（如 PDF 字体未嵌入：截图识别/打印另存）用弹窗，长文案不自动消失
+    if (e.hint) ElMessageBox.alert(e.hint, e.message, { type: 'error', confirmButtonText: '我知道了' });
+    else ElMessage.error(e.message);
   } finally {
     recogId.value = '';
   }

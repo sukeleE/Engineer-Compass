@@ -6,7 +6,7 @@
 // money→el-input-number(precision2) yn→三态 radio  textarea→textarea
 // 2026-09-03 下午：帮付三字段已全部删除（无 yn 联动字段）；prop「是否日常家用=是」仍有使用图软提示
 import { reactive, ref, computed, watch, nextTick } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js'; // 负责人本人显示名（全项目统一支付可填"负责人本人"）
 import { FIELDS, SLOTS, CATEGORIES } from '../../utils/expenseMeta.js';
@@ -164,7 +164,9 @@ async function onVisionFile(e) {
     }
   } catch (err) {
     if (/认领|身份/.test(err.message)) { api.expenseClearClaim(props.code); emit('claim-lost'); }
-    ElMessage.error(err.message);
+    // 带可操作指引的错误（如 PDF 字体未嵌入：截图识别/打印另存）用弹窗，长文案不自动消失
+    if (err.hint) ElMessageBox.alert(err.hint, err.message, { type: 'error', confirmButtonText: '我知道了' });
+    else ElMessage.error(err.message);
   } finally {
     visBusy.value = false;
   }

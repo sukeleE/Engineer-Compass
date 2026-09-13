@@ -15,7 +15,8 @@
 import { chromium } from 'playwright';
 import { DEFAULT_API, openProbeDb } from './lib/probeDb.mjs';
 import { extractModelText } from '../backend/lib/vision.js';
-import { textUsable } from '../backend/lib/pdfDoc.js';
+import { textUsable, pageLacksEmbeddedFonts, fontNameUsable } from '../backend/lib/pdfDoc.js';
+import * as pdfjs from '../backend/node_modules/pdfjs-dist/legacy/build/pdf.mjs';
 
 const API = process.env.PROBE_API || DEFAULT_API;
 const CATEGORY = 'train';
@@ -57,6 +58,35 @@ const TICKET_HTML = `<!doctype html><meta charset="utf-8">
 </div></body>`;
 
 const EXTRA_WHITE = ['乘车人', '座位号', '发票号码', '发票代码', '开票日期', '销售方名称', '购方名称', '证件号'];
+
+// 合成「中文字体未嵌入」残缺 PDF（复刻 Foxit KP Creator 电子客票结构）：
+//   Type0/CIDFontType2 引用裸名 SimSun、无 FontFile 程序、无 ToUnicode、20 段 Identity-H 文本。
+// 与真实残票同构（已用真实文件对照：文字层 0 项、翻译失败字体 name=null、showText 20+）。
+function buildUnembeddedCidPdf() {
+  const parts = [];
+  for (let i = 0; i < 20; i++) parts.push(`BT /F1 16 Tf 72 ${780 - i * 24} Td <${i.toString(16).padStart(4, '0')}> Tj ET`);
+  const content = parts.join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>',
+    '<< /Type /Font /Subtype /Type0 /BaseFont /SimSun /Encoding /Identity-H /DescendantFonts [5 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /SimSun /DW 1000 /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 6 0 R >>',
+    '<< /Type /FontDescriptor /FontName /SimSun /Flags 4 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ];
+  const chunks = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
+  const offsets = [];
+  objs.forEach((body, i) => {
+    offsets.push(Buffer.concat(chunks).length);
+    chunks.push(Buffer.from(`${i + 1} 0 obj\n`, 'latin1'), Buffer.from(body, 'latin1'), Buffer.from('\nendobj\n', 'latin1'));
+  });
+  const head = Buffer.concat(chunks);
+  let xref = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) xref += `${String(off).padStart(10, '0')} 00000 n \n`;
+  xref += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${head.length}\n%%EOF\n`;
+  return Buffer.concat([head, Buffer.from(xref, 'latin1')]);
+}
 // 票面内容断言（三路输入共用）：任一路径的解析/归一/提示词坏掉，这里都会红
 function assertTicket(label, data) {
   const f = data.fields || {}, ex = data.extra || [];
@@ -109,6 +139,34 @@ ok('§0.2 离线：真实票面文字判为可用（字符数够且含数字）'
   textUsable('中国铁路电子客票 G1234 北京南站 上海虹桥站 二等座 553.50 2026-07-15') === true);
 ok('§0.2 离线：无数字的纯文字判为不可用（发票必有金额/号码，无数字说明没提到正文）',
   textUsable('中国铁路电子客票 乘车人 王小明 出发站 到达站 座位等级 二等座') === false);
+
+// §0.3 字体未嵌入检测（2026-09-14，真实事故：Foxit KP Creator 电子客票中文字体只写名不嵌入，
+//   服务端光栅化画不出字 → 视觉模型对无字图返回空 fields，用户只看到含糊的「未识别到字段」）
+ok('§0.3 离线：字体名可用性 —— 子集嵌入/标准14可用；裸名/空名（翻译失败）不可用',
+  fontNameUsable('AAAAAA+MicrosoftYaHei') === true
+  && fontNameUsable('Helvetica') === true
+  && fontNameUsable('ZapfDingbats') === true
+  && fontNameUsable('SimSun') === false
+  && fontNameUsable('') === false);
+// 构造假算子列表：n 个 showText（CID hex 串参数为 Uint8Array，与真实 pdfjs 输出同形）
+const { setFont, showText, paintImage } = pdfjs.OPS;
+function fakeOps(n, key) {
+  const fnArray = n === null ? [paintImage, paintImage] : [setFont, ...Array(n).fill(showText)];
+  const argsArray = n === null ? [[], []] : [[key], ...Array(n).fill(0).map(() => [new Uint8Array([0, 0x42])])];
+  return { fnArray, argsArray };
+}
+ok('§0.3 离线：20 段文本 + 字体名全缺（CID 翻译失败）→ 判字体未嵌入',
+  pageLacksEmbeddedFonts(fakeOps(20, 'g_d0_f1'), ['']) === true);
+ok('§0.3 离线：20 段文本 + SimSun 裸名 → 判未嵌入',
+  pageLacksEmbeddedFonts(fakeOps(20, 'g_d0_f1'), ['SimSun']) === true);
+ok('§0.3 离线：同样算子但字体子集嵌入 → 放行（正常数字版/打印 PDF）',
+  pageLacksEmbeddedFonts(fakeOps(20, 'g_d1_f1'), ['AAAAAA+MicrosoftYaHei']) === false);
+ok('§0.3 离线：只用标准 Helvetica（即使未嵌入也靠阅读器内置渲染）→ 放行',
+  pageLacksEmbeddedFonts(fakeOps(20, 'g_d0_f1'), ['Helvetica']) === false);
+ok('§0.3 离线：文本算子太少（仅 2 段）→ 放行（防纯符号页误报）',
+  pageLacksEmbeddedFonts(fakeOps(2, 'g_d0_f1'), ['']) === false);
+ok('§0.3 离线：整页位图无 setFont（扫描件）→ 放行',
+  pageLacksEmbeddedFonts(fakeOps(null), []) === false);
 
 const stamp = Date.now().toString().slice(-8);
 const EMAIL = `probe_vision_${stamp}@test.dev`;
@@ -197,6 +255,20 @@ try {
   const jb = await rb.json().catch(() => ({}));
   ok(`④损坏 PDF 400 且错误可读（实际 ${rb.status}：${String(jb.error || '').slice(0, 60)}）`,
     rb.status === 400 && String(jb.error || '').includes('PDF 无法解析'));
+
+  // ⑤ 字体未嵌入的残缺 PDF（合成 Type0/CID：裸名 SimSun、无 FontFile、无 ToUnicode）
+  //    必须在光栅化/视觉调用**之前**拦下并给可操作指引 —— 真实事故见 §0.3 注释。
+  //    纯本地判定、不触网不耗模型配额，故不走 upload() 的限流重试
+  const unembeddedPdf = buildUnembeddedCidPdf();
+  const fd5 = new FormData();
+  fd5.append('category', CATEGORY);
+  fd5.append('file', new Blob([unembeddedPdf]), '电子客票.pdf');
+  const r5 = await fetch(`${API}/expense/o/${C}/vision/upload`, { method: 'POST', headers: { Authorization: `Bearer ${ta}` }, body: fd5 });
+  const j5 = await r5.json().catch(() => ({}));
+  ok(`⑤字体未嵌入 PDF → 400 且明确指出原因（实际 ${r5.status}：${String(j5.error || '').slice(0, 50)}）`,
+    r5.status === 400 && /字体未嵌入/.test(String(j5.error || '')));
+  ok('⑤错误 hint 给出可操作出路（截图识别 / 打印另存）',
+    /截图|另存/.test(String(j5.hint || '')));
 
   // ---- 清理 ----
   await api(`/expense/${P}`, { method: 'DELETE', token: ta });

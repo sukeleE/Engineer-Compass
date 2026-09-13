@@ -8,6 +8,8 @@
 //   后者内部用其依赖 @napi-rs/canvas + pdfjs-dist 渲染，故本功能零新增依赖。
 // ⚠️ destroy() 必须在 finally 调用：它释放 pdfjs 文档对象，长驻服务里漏调会按请求泄漏。
 import { PDFParse } from 'pdf-parse';
+// 与 pdf-parse 内部同一条 pdfjs 路径（legacy build：Node 无 DOMMatrix 等浏览器 API）
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const MAX_PAGES = 3;          // 光栅化页数上限：发票以单页为主，多页行程单取前 3 页足够
 const DESIRED_WIDTH = 1600;   // 渲染宽度：够清晰且 PNG 体积可控（实测 ~90KB/页）
@@ -31,6 +33,71 @@ export function textUsable(text) {
   return compact.length >= MIN_TEXT_CHARS && /\d/.test(compact);
 }
 
+// ---- 字体未嵌入检测（2026-09-14）----
+// 真实事故：Foxit KP Creator（铁路制票/第三方抢票工具）导出的电子客票 PDF，中文字体
+//   （SimSun/SimHei/KaiTi/DengXian）只写名字不嵌入字体程序、且无 ToUnicode ——
+//   手机/电脑上靠系统字体顶替看着完好，服务端光栅化却画不出任何文字（背景/红章/二维码正常），
+//   视觉模型对着无字图只能返回空 fields，用户只得到含糊的「未识别到字段」。
+// 判据来自 pdf.js 字体对象的**命名**（hasData/missingFile 实测都不可靠：子集嵌入字体 hasData 也为 false）：
+//   ① 子集嵌入字体按 PDF 规范必带 6 大写字母前缀（AAAAAA+MicrosoftYaHei）→ 可用
+//   ② 标准 14 字体（Helvetica/Times/Courier/Symbol/ZapfDingbats）由阅读器内置 → 可用
+//   ③ name 为空（cid 字体翻译失败时对象无名）或其他裸名（SimSun…）→ 不可用
+// 「页面有大量文本绘制算子、却零个可用字体」即判残缺；扫描件整页位图无 setFont 算子，天然不命中。
+const EMBEDDED_SUBSET_RE = /^[A-Z]{6}\+/;
+const STANDARD14_RE = /^(Helvetica|Times(?:-Roman|-Bold|-Italic|-BoldItalic)?|Courier(?:-Bold|-Oblique|-BoldOblique)?|Symbol|ZapfDingbats)$/i;
+const MIN_TEXT_OPS = 10;     // showText/showSpaced 算子数下限（真实残票 47，合成夹具 20；防纯符号页误报）
+const MIN_TEXT_UNITS = 40;   // 或参数字符量下限（Kerning 文本可能只有 1 个 TJ 却含整段文字）
+
+export function fontNameUsable(name) {
+  const n = String(name || '');
+  return EMBEDDED_SUBSET_RE.test(n) || STANDARD14_RE.test(n);
+}
+
+// 纯函数（离线可测）：一页的算子列表 + 该页实际使用字体的名字数组 → 是否「有文字但字体全缺」
+export function pageLacksEmbeddedFonts(operatorList, fontNames = []) {
+  const fn = operatorList?.fnArray || [];
+  const args = operatorList?.argsArray || [];
+  const fontKeys = new Set();
+  let textOps = 0;
+  let textUnits = 0;
+  const argLen = (x) => (typeof x === 'string' ? x.length
+    : ArrayBuffer.isView(x) ? x.length
+      : Array.isArray(x) ? x.reduce((n, y) => n + (typeof y === 'string' ? y.length : ArrayBuffer.isView(y) ? y.length : 0), 0)
+        : 0);
+  fn.forEach((op, i) => {
+    if (op === pdfjs.OPS.setFont) fontKeys.add(args[i]?.[0]);
+    else if (op === pdfjs.OPS.showText || op === pdfjs.OPS.showSpaced) {
+      textOps++;
+      textUnits += argLen(args[i]?.[0]);
+    }
+  });
+  if (!fontKeys.size) return false; // 整页位图（扫描件）——交给视觉模型正常识别
+  if (textOps < MIN_TEXT_OPS && textUnits < MIN_TEXT_UNITS) return false;
+  return fontNames.length > 0 && fontNames.every((n) => !fontNameUsable(n));
+}
+
+// 集成层：检查前 N 页（与光栅化页范围一致），任一页命中即返回 {page}，否则 null
+async function detectUnembeddedText(doc, maxPages) {
+  const total = Math.min(Number(doc?.numPages) || maxPages, maxPages);
+  for (let no = 1; no <= total; no++) {
+    let page;
+    try { page = await doc.getPage(no); } catch { break; }
+    let ops;
+    try { ops = await page.getOperatorList(); } catch { continue; }
+    const keys = new Set();
+    ops.fnArray.forEach((op, i) => { if (op === pdfjs.OPS.setFont) keys.add(ops.argsArray[i]?.[0]); });
+    const names = [];
+    for (const k of keys) {
+      try {
+        const f = page.commonObjs.has(k) ? await page.commonObjs.get(k) : null;
+        names.push(f?.name || '');
+      } catch { names.push(''); }
+    }
+    if (pageLacksEmbeddedFonts(ops, names)) return { page: no, fonts: names };
+  }
+  return null;
+}
+
 // PDF buffer → {kind:'text', text} 或 {kind:'images', images:[{mime,b64}], pageCount, truncated}
 export async function pdfToRecognizeInput(buf, { maxPages = MAX_PAGES, desiredWidth = DESIRED_WIDTH } = {}) {
   if (!buf || !buf.length) throw new PdfInputError('PDF 内容为空');
@@ -44,6 +111,16 @@ export async function pdfToRecognizeInput(buf, { maxPages = MAX_PAGES, desiredWi
         '文件可能下载不完整或后缀名与实际格式不符 —— 重新下载/导出一次，或改用截图识别');
     }
     if (textUsable(text)) return { kind: 'text', text: text.slice(0, MAX_TEXT) };
+
+    // 无文字层先排查「字体未嵌入」残缺 PDF（必须在光栅化之前 —— 渲染出的无字图会白白烧掉一次视觉调用，
+    //   且模型只能回空字段）。parser.doc 在 getText 后已就绪（PDFParse 公共字段）
+    if (parser.doc) {
+      const missing = await detectUnembeddedText(parser.doc, maxPages);
+      if (missing) {
+        throw new PdfInputError('这份 PDF 的文字字体未嵌入，服务器无法渲染票面文字（制票/抢票软件导出的票据常见此问题）',
+          '在电脑或手机上打开这份 PDF 后截图，直接用截图识别；或用「打印 → 另存为 PDF」重新导出一份再上传');
+      }
+    }
 
     // 无可用文字层 → 光栅化（扫描件/拍照转的 PDF）
     let pages = [];

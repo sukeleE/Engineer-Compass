@@ -12,7 +12,12 @@ async function req(path, opts = {}, timeoutMs = 30000) {
       ...opts,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `请求失败（${res.status}）`);
+    if (!res.ok) {
+      // hint 一并带出（如 PDF 字体未嵌入时的可操作指引），需要处读 err.hint 弹窗展示
+      const err = new Error(data.error || `请求失败（${res.status}）`);
+      err.hint = data.hint || '';
+      throw err;
+    }
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(`请求超时（${timeoutMs / 1000}s），请重试`);
