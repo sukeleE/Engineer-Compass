@@ -173,8 +173,8 @@ function lab(full, short) { return isNarrow.value ? short : full; }
               </el-descriptions-item>
               <el-descriptions-item label="难度">
                 <span style="color:#f59e0b">{{ '★'.repeat(comp.difficulty || 0) }}</span>
-                <span style="color:#e2e8f0">{{ '☆'.repeat(5 - (comp.difficulty || 0)) }}</span>
-                <span v-if="comp.difficulty" style="margin-left:6px;color:#94a3b8">（{{ comp.difficulty }}/5）</span>
+                <span style="color:var(--border)">{{ '☆'.repeat(5 - (comp.difficulty || 0)) }}</span>
+                <span v-if="comp.difficulty" style="margin-left:6px;color:var(--text-3)">（{{ comp.difficulty }}/5）</span>
               </el-descriptions-item>
               <el-descriptions-item label="举办周期">{{ comp.cycle || '—' }}</el-descriptions-item>
               <el-descriptions-item label="组队">{{ comp.team || '—' }}</el-descriptions-item>

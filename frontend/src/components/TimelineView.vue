@@ -404,7 +404,7 @@ onMounted(load);
     font-size: 10px; color: var(--badge-fg); background: var(--badge-tint); border-radius: 4px; padding: 1px 5px;
     &.ai { color: var(--ai-fg); background: var(--ai-tint); }
   }
-  .t-stars { color: #f59e0b; font-size: 11px; i { color: #e2e8f0; font-style: normal; } }
+  .t-stars { color: #f59e0b; font-size: 11px; i { color: var(--border); font-style: normal; } }
 }
 
 // ===== 移动端月份视图（默认隐藏，≤768px 显示并隐藏桌面网格）=====

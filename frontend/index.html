@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>工科竞赛导航 Engineer-Compass</title>
+    <script>
+      // 深色模式防白闪：在应用挂载前按已存偏好/系统偏好挂上 html.dark-mode（与 src/theme.js 同口径）
+      try {
+        var t = localStorage.getItem('ec_theme');
+        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark-mode');
+        }
+      } catch (e) { /* localStorage 不可用（隐私模式等）→ 默认浅色 */ }
+    </script>
   </head>
   <body>
     <div id="app"></div>

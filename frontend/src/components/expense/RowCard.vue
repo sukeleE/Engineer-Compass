@@ -221,11 +221,11 @@ async function recognize(a) {
 .rc-cell.locked { opacity: .75; }
 .rc-label { font-size: 11px; color: var(--text-2); }
 .rc-val { word-break: break-all; font-size: 13px; }
-.empty { color: #cbd5e1; }
+.empty { color: var(--border-2); }
 .rc-cell.money b { font-size: 14px; color: var(--primary-dark); }
 .yn { font-size: 12px; padding: 0 6px; border-radius: 8px; align-self: flex-start; }
-.yn.ok { background: #dcfce7; color: #15803d; }
-.yn.no { background: #fee2e2; color: #b91c1c; }
+.yn.ok { background: var(--ok-tint); color: var(--ok-fg); }
+.yn.no { background: var(--danger-tint); color: var(--danger-fg); }
 .yn.off { background: var(--surface-2); color: var(--text-2); }
 .att-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .att-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 2px 8px; font-size: 12px; }

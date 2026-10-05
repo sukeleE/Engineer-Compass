@@ -417,3 +417,15 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **★ dock 只在有数据时渲染**（在 `v-else` 的 `<template>` 内），空态/加载/出错时不出现；滚动提示 `.e-cue` 因与 dock 相挤从 `bottom:18` 上移到 `bottom:84`（在 dock 上方）
 - **探针同步（`probe_honor.mjs`，81→84）**：主页面先断言 3 条精选口径（②⓪ `.ecard` 数=nPub / ②⓪② 图解码 / ②⓪③ dock 默认高亮「精选」），再 **click「流动」waitFor .marquee visible** 才跑原来整套跑马灯断言；窄屏(②㉒前)、降级(②㉕前)两处同样先切 flow。新增3条+原81=**84/84**；判别力靠那3条守着「默认是 editorial」
 - **验证**：`probe_honor` **84/84**；`vite build` 通过；9 条金/银/铜真实感数据对 桌面浅色/暗色/375px 截图人工过目（大留白居中、软阴影相框、近黑暗色红按钮、375px dock 不溢出）；临时脚本/截图/端口3106·5198/临时库均已清理
+
+## 2026-09-28 全站深色模式（顶栏 🌙/☀️ 切换，跟随系统 + 手动偏好）
+
+- **需求**：用户「添加深色模式」。完全复用幽灵模式的换肤范式（组件色早已全部变量化，覆盖变量即整套换肤），**不改任何后端/数据模型**
+- **四件套**：
+  - `src/theme.js`（新）：`html.dark-mode` 驱动；**未手动选择时跟随系统** `prefers-color-scheme`，点过切换后以 `localStorage(ec_theme)` 为准（'light'|'dark'|null）；系统亮暗变化只在 null 时跟随；导出响应式 `theme`（`.dark`）+ `toggleTheme()`
+  - `index.html` 头部内联脚本：应用挂载前按同口径挂类，**防白闪**（module 脚本在 DOM 解析后才跑，深色用户会先闪一屏浅底）
+  - `main.scss` 新增 `html.dark-mode` 块：slate 蓝黑调（保持品牌蓝 primary，明度梯度同幽灵：bg < surface-3 < card < surface-1 < surface-2）+ 全套 `--el-*` 覆盖（结构完全镜像 ghost 块）+ `color-scheme: dark`（原生控件/滚动条）+ 暗色滚动条
+  - `App.vue` 顶栏 `.header-user` 内、nav-me 左侧加圆形 🌙/☀️ 图标按钮
+- **★ 块序即优先级**：`html.dark-mode` 块**必须排在 `html.ghost-mode` 之前** —— 两者选择器同特异性，源序后者胜 → 彩蛋主题（红黑）激活时压过常规深色。HonorView 末尾非 scoped 块同理：dark 行在前、ghost 行在后（金银铜等级色覆盖）
+- **顺手补的变量化**（浅色下取值=原硬编码，零变化）：`--ok-fg/--ok-tint/--ok-border`、`--danger-fg/--danger-border` 三主题全覆盖（`:root`/dark/ghost 各定义一次）。替换点：RowCard `.yn.ok/.yn.no/.empty`、ExpenseGuide `.callout.warn/.tip`、RowFormDialog `.tip-warn/.pay-tip`（→ badge/ok/danger 系）、CompDialog 难度空星 `#e2e8f0→var(--border)` 与 `(n/5)→var(--text-3)`、TimelineView `.t-stars i` 同款空星。这些是暗底下会刺眼的「亮底色块/亮灰字」
+- **验证**：`vite build` 通过；浅色模式全站逐页与改动前一致（变量默认值未动）

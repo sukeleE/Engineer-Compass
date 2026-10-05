@@ -506,12 +506,12 @@ async function save() {
 .cp { cursor: pointer; font-size: 15px; padding: 8px 14px; }
 .dim { color: var(--text-2); font-size: 12px; margin: 2px 0; }
 .line { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
-.tip-warn { color: #b45309; background: #fef3c7; border-radius: 6px; padding: 4px 10px; font-size: 12px; margin: 4px 0; }
+.tip-warn { color: var(--badge-fg); background: var(--badge-tint); border-radius: 6px; padding: 4px 10px; font-size: 12px; margin: 4px 0; }
 .slot-tips { display: flex; flex-wrap: wrap; gap: 6px; }
 .st { border: 1px dashed var(--border); border-radius: 6px; padding: 2px 8px; font-size: 12px; color: var(--text-2); }
 .mode-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .mode-locked { font-size: 13px; color: var(--text); }
-.pay-tip { color: #b45309; background: #fef9ec; border: 1px dashed #fcd34d; border-radius: 6px; padding: 5px 10px; font-size: 12px; margin: 0 0 8px; }
+.pay-tip { color: var(--badge-fg); background: var(--badge-tint); border: 1px dashed var(--badge-border); border-radius: 6px; padding: 5px 10px; font-size: 12px; margin: 0 0 8px; }
 .pay-zone { border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 2px; }
 .pay-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pay-lb { font-size: 12px; color: var(--text-2); }

@@ -210,7 +210,7 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
           <header class="e-hero">
             <p class="e-eyebrow">HALL&nbsp;&nbsp;OF&nbsp;&nbsp;HONOR</p>
             <h1 class="e-title">荣誉墙</h1>
-            <p class="e-sub">每一块奖牌背后，都是一整个赛季的加班</p>
+            <p class="e-sub">荣耀源于每一次全力以赴</p>
             <p class="e-statline">
               {{ stat.n }} 项荣誉<i>·</i>国家级 / 国际级 {{ stat.top }} 项
               <template v-if="stat.years"><i>·</i>跨越 {{ stat.years }} 个获奖年份</template>
@@ -677,10 +677,14 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
 }
 </style>
 
-<!-- 非 scoped：幽灵模式下的等级配色覆盖。
-     不能在 scoped 块里用 :global(html.ghost-mode) 嵌套 —— Sass 会把后代选择器吞掉（2026-09-26 教训）。
-     全部用 .honor-page 前缀收窄，不外泄到别的页面。 -->
+<!-- 非 scoped：暗色主题（深色/幽灵模式）下的等级配色覆盖。
+     不能在 scoped 块里用 :global(html.xxx) 嵌套 —— Sass 会把后代选择器吞掉（2026-09-26 教训）。
+     全部用 .honor-page 前缀收窄，不外泄到别的页面。
+     深色块在前、幽灵块在后：两者同时激活时幽灵（彩蛋）优先。 -->
 <style lang="scss">
+html.dark-mode .honor-page .t-gold   { --t: #e6b93e; --t2: #f7dd8a; }
+html.dark-mode .honor-page .t-silver { --t: #9aa7b8; --t2: #c3ccda; }
+html.dark-mode .honor-page .t-bronze { --t: #d99a66; --t2: #efbd8f; }
 html.ghost-mode .honor-page .t-gold   { --t: #e6b93e; --t2: #f7dd8a; }
 html.ghost-mode .honor-page .t-silver { --t: #9aa7b8; --t2: #c3ccda; }
 html.ghost-mode .honor-page .t-bronze { --t: #d99a66; --t2: #efbd8f; }

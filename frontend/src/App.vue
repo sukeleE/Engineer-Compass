@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue';
 import ToolDock from './components/ToolDock.vue';
 import ImageViewer from './components/ImageViewer.vue';
 import auth from './auth.js';
+import theme, { toggleTheme } from './theme.js';
 import { api } from './api.js';
 
 // 全局公告横幅：最新置顶公告（公开接口，无需登录；关闭仅本次会话记忆）
@@ -43,8 +44,14 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
         <router-link to="/honor"><span class="ic">🏅</span><span class="txt">荣誉墙</span></router-link>
         <router-link v-if="auth.user?.is_ghost" to="/ghost-share"><span class="ic">👻</span><span class="txt">秘密分享</span></router-link>
       </nav>
-      <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页） -->
+      <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页；🌙/☀️=深色模式切换） -->
       <div class="header-user">
+        <button
+          class="theme-toggle" type="button"
+          :title="theme.dark ? '切换到浅色模式' : '切换到深色模式'"
+          :aria-label="theme.dark ? '切换到浅色模式' : '切换到深色模式'"
+          @click="toggleTheme"
+        >{{ theme.dark ? '☀️' : '🌙' }}</button>
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
           <span class="me-avatar">
             <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
@@ -83,6 +90,17 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
     font-size: 14px; padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
     &:hover { background: var(--card-bg)22; color: #fff; }
   }
+}
+
+/* 深色模式切换：与 nav-me 同高的圆形图标按钮 */
+.theme-toggle {
+  width: 32px; height: 32px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+  background: var(--card-bg); color: var(--text-2); font-size: 15px; line-height: 1;
+  padding: 0;
+  transition: all .2s;
+  &:hover { color: var(--text); background: var(--surface-2); }
 }
 
 .nav-me {

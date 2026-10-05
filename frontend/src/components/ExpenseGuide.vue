@@ -286,9 +286,9 @@ h3 { font-size: 15px; margin: 0 0 8px; }
 
 /* callout */
 .callout { border-radius: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.8; margin: 8px 0; }
-.callout.warn { color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; }
+.callout.warn { color: var(--badge-fg); background: var(--badge-tint); border: 1px solid var(--badge-border); }
 .callout.info { color: var(--primary-dark); background: var(--primary-tint); border: 1px solid var(--border); }
-.callout.tip { color: #15803d; background: #dcfce7; border: 1px solid #86efac; }
+.callout.tip { color: var(--ok-fg); background: var(--ok-tint); border: 1px solid var(--ok-border); }
 .tips-grid { display: grid; gap: 6px; }
 
 /* 步骤/列表/表格 */

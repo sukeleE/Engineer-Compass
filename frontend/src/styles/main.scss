@@ -1,5 +1,6 @@
 // 全局样式：赛道主题色 + 基础排版
 :root {
+  color-scheme: light; // 深色模式在 html.dark-mode 下覆盖为 dark（原生控件/滚动条跟随）
   --c-电子机器人: #3b82f6;
   --c-机械: #f59e0b;
   --c-综合: #10b981;
@@ -36,6 +37,13 @@
   --success-tint: #f0fdf4;       // 成功提示浅绿底
   --success-border: #bbf7d0;     // 成功提示浅绿边
   --danger-tint: #fee2e2;        // 危险 hover 浅红底
+  // 语义芯片组（成功/危险小色块，如报销是/否章、提示 callout）——默认值=原硬编码色 → 普通模式零变化，
+  // 深色/幽灵模式覆盖即整体适配
+  --ok-fg: #15803d;
+  --ok-tint: #dcfce7;
+  --ok-border: #86efac;
+  --danger-fg: #b91c1c;
+  --danger-border: #fecaca;
 }
 
 * { box-sizing: border-box; }
@@ -177,6 +185,106 @@ td, th {
   /* 窄屏隐藏 emoji 的规则在 App.vue scoped（.nav a .ic/.nav-admin .ic），此处不写避免特异性混淆 */
 }
 
+// ============ 深色模式（用户可切换）：slate 蓝黑主题 ============
+// 顶栏 🌙/☀️ 切换（src/theme.js），未手动选择时跟随系统；偏好存 localStorage(ec_theme)。
+// 与幽灵模式同一换肤范式：覆盖 CSS 变量 + Element Plus --el-* 系列变量。
+// 本块必须排在 html.ghost-mode 之前 —— 两者同时激活时彩蛋主题（红黑）优先压过常规深色。
+html.dark-mode {
+  color-scheme: dark; // 原生控件（输入框/滚动条/checkbox）跟随暗色
+  // —— 页面骨架（slate 蓝黑调，明度梯度同幽灵模式：bg < surface-3 < card < surface-1 < surface-2）——
+  --bg: #0e1117;          // 页面底
+  --card-bg: #181e2a;     // 卡片
+  --surface-3: #131824;   // 面板内底
+  --surface-2: #232c3d;   // 气泡/hover 底
+  --surface-1: #1f2838;   // 表头底 / 表格行 hover
+  --border: #2b3546;      // 边框
+  --border-2: #3d4a5f;    // 文件框/表格外框（比 --border 亮一档）
+  --text: #e6eaf2;        // 主文字
+  --text-2: #9aa5b6;      // 次文字
+  --text-3: #6c7789;      // 三级文字
+  // —— 主强调色（保持品牌蓝，仅微调亮度适配暗底）——
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+  --primary-tint: #17233a; // 深蓝底（浅色模式的淡蓝底在暗色下的对应物）
+  // 徽章/AI 标签/成功/危险芯片暗色适配（亮字 + 暗底，与幽灵模式同法）
+  --badge-fg: #fbbf24;
+  --badge-tint: #342a12;
+  --badge-border: #4a3d1c;
+  --ai-fg: #a78bfa;
+  --ai-tint: #231d3a;
+  --success-fg: #4ade80;
+  --success-tint: #11291b;
+  --success-border: #1e4230;
+  --danger-fg: #f87171;
+  --danger-tint: #341a1c;
+  --danger-border: #55282c;
+  --ok-fg: #4ade80;
+  --ok-tint: #11291b;
+  --ok-border: #1e4230;
+  // EP warning 色 → 亮金（同幽灵模式：el-tag type="warning" 等在暗底上需要亮色）
+  --el-color-warning: #f0b90b;
+  --el-color-warning-light-3: #f3c63c;
+  --el-color-warning-light-5: #f6d468;
+  --el-color-warning-light-7: #f9e294;
+  --el-color-warning-light-8: #fbe9ab;
+  --el-color-warning-light-9: #342a12;
+  --el-color-warning-dark-2: #c9970a;
+  // EP success/danger/info 标签暗色底
+  --el-color-success-light-8: #1e4230;
+  --el-color-success-light-9: #11291b;
+  --el-color-danger-light-8: #4a2426;
+  --el-color-danger-light-9: #341a1c;
+  --el-color-info-light-8: #2b3546;
+  --el-color-info-light-9: #232b3b;
+
+  // —— Element Plus 暗色底/字 ——
+  --el-bg-color: #181e2a;
+  --el-bg-color-overlay: #1e2534;
+  --el-fill-color-blank: #181e2a;
+  --el-fill-color: #232c3d;
+  --el-fill-color-light: #263041;
+  --el-fill-color-lighter: #293346;
+  --el-fill-color-dark: #1f2735;
+  --el-fill-color-darker: #1c2330;
+  --el-border-color: #2b3546;
+  --el-border-color-light: #262f40;
+  --el-border-color-lighter: #232b3b;
+  --el-border-color-extra-light: #1f2838;
+  --el-border-color-dark: #334054;
+  --el-border-color-darker: #3d4a5f;
+  --el-text-color-primary: #e6eaf2;
+  --el-text-color-regular: #c8cfda;
+  --el-text-color-secondary: #9aa5b6;
+  --el-text-color-placeholder: #6c7789;
+  --el-text-color-disabled: #4c5566;
+  // v-loading 白雾遮罩 → 暗色遮罩
+  --el-mask-color: rgba(0, 0, 0, .75);
+  --el-mask-color-extra-light: rgba(0, 0, 0, .3);
+
+  // —— EP 主色（品牌蓝；light-9 = 深蓝底、light-3..8 = 暗底上的提亮梯度）——
+  --el-color-primary: #3b82f6;
+  --el-color-primary-light-3: #5e98f8;
+  --el-color-primary-light-5: #87b1fa;
+  --el-color-primary-light-7: #aec9fc;
+  --el-color-primary-light-8: #c3d8fd;
+  --el-color-primary-light-9: #17233a;
+  --el-color-primary-dark-2: #2f6fe0;
+
+  // —— 卡片 / 表格 ——
+  --el-card-bg-color: #181e2a;
+  --el-card-border-color: #2b3546;
+  --el-table-bg-color: #181e2a;
+  --el-table-tr-bg-color: #181e2a;
+  --el-table-header-bg-color: #1f2838;
+  --el-table-border-color: #2b3546;
+  --el-table-row-hover-bg-color: #232c3d;
+
+  // 滚动条暗色
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #334054; border-radius: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
 // ============ 幽灵模式（秘密通道「水手冰淇淋」）：红黑暗色主题 ============
 // 组件浅色/主蓝字面量已全部变量化（var(--card-bg)/--surface-*/--primary 系列，默认值=原色，
 // 普通模式零变化）。幽灵模式下只需覆盖 CSS 变量即整套换肤；Element Plus 组件（卡片/弹窗/
@@ -208,6 +316,12 @@ html.ghost-mode {
   --success-tint: #12231a;
   --success-border: #1e3a2a;
   --danger-tint: #301010;
+  // 语义芯片组（同深色模式：亮字 + 暗底）
+  --ok-fg: #4ade80;
+  --ok-tint: #12231a;
+  --ok-border: #1e3a2a;
+  --danger-fg: #f87171;
+  --danger-border: #4a2020;
   // EP warning 色 → 亮金（el-tag type="warning"：组长/👑 角色标签、金边提示）
   --el-color-warning: #f0b90b;
   --el-color-warning-light-3: #f3c63c;
