@@ -305,6 +305,8 @@ export const api = {
   adminResourceDelete: (id) => req(`/admin/resources/${id}`, { method: 'DELETE' }),
   // 荣誉墙（前台公开只读：**不带 token**，出图走浏览器缓存；服务端已把 image_url 拼好并带 ?v= 缓存键）
   honorList: () => req('/honor'),
+  // 班级字典 [{name,count}]（按上架荣誉数降序；级别/奖等是固定枚举，见 utils/honorMeta.js）
+  honorTags: () => req('/honor/tags?kind=class'),
   // 后台：荣誉墙管理。元数据走 JSON、图片走独立的 multipart 端点 —— 不混在一个请求里（见后端 routes/honor.js 注释）
   adminHonors: () => req('/admin/honors'),
   adminHonorCreate: (b) => req('/admin/honors', { method: 'POST', body: JSON.stringify(b) }),

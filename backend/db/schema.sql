@@ -571,7 +571,10 @@ CREATE TABLE IF NOT EXISTS honor (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   title       TEXT NOT NULL,              -- 奖项名称（必填）
   winner      TEXT DEFAULT '',            -- 获奖者/团队
-  award_level TEXT DEFAULT '',            -- 级别：国家级/省级/校级…（自由文本，前台据此着色）
+  award_level TEXT DEFAULT '',            -- 授予级别：国际级/国家级/省级/市级/校级（受控选项+允许自建，前台据此着色）
+  prize_rank  TEXT DEFAULT '',            -- 奖等：特等奖/一等奖/二等奖/三等奖/优胜奖（受控选项+允许自建）
+  comp_id     INTEGER,                    -- 赛项→competition.id；裸列**故意不加外键**（import 会重建 competition 表，同 team_plan.comp_id）
+  event_name  TEXT DEFAULT '',            -- 赛项名快照：comp_id 命中由服务端回填 short_name/name；手填时 comp_id=NULL
   award_date  TEXT DEFAULT '',            -- 获奖年月 'YYYY-MM'（纯文本，不做时区换算）
   description TEXT DEFAULT '',            -- 一句话说明
   image_name  TEXT,                       -- 原始文件名（下载/alt 用）
@@ -586,6 +589,21 @@ CREATE TABLE IF NOT EXISTS honor (
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_honor_show ON honor(is_active, sort_order, id);
+
+-- 荣誉墙标签字典 + 关联桥表（2026-10-21，目前 kind 只有 'class' 班级；输入即沉淀，仿 share_tag）
+-- 授予级别/奖等是单列单选直接存 honor 行；赛项存 comp_id+event_name 快照 —— 只有班级是多值走此表
+CREATE TABLE IF NOT EXISTS honor_tag (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind  TEXT NOT NULL DEFAULT 'class',    -- 标签维度：目前仅 'class'
+  name  TEXT NOT NULL,                    -- 班级名（≤20 字）
+  UNIQUE(kind, name)
+);
+CREATE TABLE IF NOT EXISTS honor_tag_link (
+  honor_id INTEGER NOT NULL REFERENCES honor(id) ON DELETE CASCADE,
+  tag_id   INTEGER NOT NULL REFERENCES honor_tag(id) ON DELETE CASCADE,
+  PRIMARY KEY (honor_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_honor_tag_link_t ON honor_tag_link(tag_id);
 
 -- ========== 物料采购申请模块（2026-10-14，/purchase） ==========
 

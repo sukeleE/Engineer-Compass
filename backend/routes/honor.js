@@ -47,12 +47,19 @@ function uploadErr(err, _req, res, next) {
 
 // 唯一的出参口：**绝不包含 store_name / image_name**（磁盘文件名不外泄）。
 // image_url 里的 ?v= 是缓存键（image_ver）—— 换图后 URL 变，浏览器才会去取新图。
+// 四类标签：award_level=授予级别、prize_rank=奖等（单选，直接存行）；
+//   event_name=赛项名快照（comp_id 命中竞赛库时服务端回填，手填时 comp_id 为 NULL）；
+//   class_tags=班级（多值，走 honor_tag/honor_tag_link 字典表，由 decorateList 批量挂上）。
 function publicHonor(h) {
   return {
     id: h.id,
     title: h.title,
     winner: h.winner || '',
     award_level: h.award_level || '',
+    prize_rank: h.prize_rank || '',
+    comp_id: h.comp_id ?? null,
+    event_name: h.event_name || '',
+    class_tags: [],
     award_date: h.award_date || '',
     description: h.description || '',
     sort_order: h.sort_order || 0,
@@ -62,9 +69,71 @@ function publicHonor(h) {
   };
 }
 
-const LIMITS = { winner: 40, award_level: 20, award_date: 20, description: 200 };
+// 列表统一出参：一次性把整批荣誉的班级标签取全再分组（不做 N+1）
+function decorateList(rows) {
+  const tagMap = new Map(rows.map((h) => [h.id, []]));
+  if (rows.length) {
+    const links = db.prepare(
+      `SELECT l.honor_id, t.name FROM honor_tag_link l
+       JOIN honor_tag t ON t.id = l.tag_id AND t.kind = 'class'
+       WHERE l.honor_id IN (${rows.map(() => '?').join(',')})
+       ORDER BY l.tag_id`
+    ).all(...rows.map((h) => h.id));
+    for (const row of links) tagMap.get(row.honor_id)?.push(row.name);
+  }
+  return rows.map((h) => ({ ...publicHonor(h), class_tags: tagMap.get(h.id) || [] }));
+}
+
+const LIMITS = {
+  winner: 40, award_level: 20, prize_rank: 20, award_date: 20,
+  description: 200, event_name: 60, class_name: 20,
+};
+const MAX_CLASS_TAGS = 6; // 一条荣誉最多挂 6 个班级（团队奖跨班兜底，再多就是录错了）
+const TAG_KINDS = new Set(['class']);
 const strField = (v, max) => String(v ?? '').trim().slice(0, max);
 const maxSort = () => db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM honor').get().m;
+
+// 班级标签规范化（同 share.js normTags 口径）：去空/去重/截断；超限返回 null 让调用方报 400
+function normClassTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const t of raw) {
+    const name = strField(t, LIMITS.class_name);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out.length > MAX_CLASS_TAGS ? null : out;
+}
+
+// 整组替换一条荣誉的班级标签（写法同 share.js: INSERT OR IGNORE 字典 + 重绑桥表），
+// 顺手清掉零引用标签 —— 打错的班级不该在字典里常驻
+function replaceClassTags(id, names) {
+  db.prepare('DELETE FROM honor_tag_link WHERE honor_id = ?').run(id);
+  const insTag = db.prepare("INSERT OR IGNORE INTO honor_tag (kind, name) VALUES ('class', ?)");
+  const tagId = db.prepare("SELECT id FROM honor_tag WHERE kind = 'class' AND name = ?");
+  const insLink = db.prepare('INSERT OR IGNORE INTO honor_tag_link (honor_id, tag_id) VALUES (?, ?)');
+  for (const name of names) {
+    insTag.run(name);
+    insLink.run(id, tagId.get(name).id);
+  }
+  db.prepare(
+    `DELETE FROM honor_tag WHERE kind = 'class'
+     AND id NOT IN (SELECT DISTINCT tag_id FROM honor_tag_link)`
+  ).run();
+}
+
+// 赛项解析：comp_id 命中竞赛库就**由服务端**回填名称快照（客户端传的名不可信）；
+// 没选库中竞赛（null/非法/对不上）则退化成手填 event_name、comp_id 置 NULL
+function resolveEvent(b) {
+  const cid = Number(b?.comp_id);
+  if (Number.isInteger(cid) && cid > 0) {
+    const c = db.prepare('SELECT id, name, short_name FROM competition WHERE id = ?').get(cid);
+    if (c) return { comp_id: c.id, event_name: strField(c.short_name || c.name, LIMITS.event_name) };
+  }
+  return { comp_id: null, event_name: strField(b?.event_name, LIMITS.event_name) };
+}
 
 // ============ 前台只读（/api/honor） ============
 const r = Router();
@@ -72,10 +141,25 @@ r.use(optionalAuth);
 
 // GET /api/honor —— 上架列表（sort_order 大的在前，同值按 id 新的在前）
 r.get('/', (_req, res) => {
-  const list = db.prepare(
+  const rows = db.prepare(
     'SELECT * FROM honor WHERE is_active = 1 ORDER BY sort_order DESC, id DESC'
-  ).all().map(publicHonor);
-  res.json({ list });
+  ).all();
+  res.json({ list: decorateList(rows) });
+});
+
+// GET /api/honor/tags?kind=class —— 班级字典（按上架荣誉数降序，只统计 is_active=1 的公开口径）。
+// 放在 /:id/image 前面仅为可读性；段数不同，Express 不会误匹配。
+r.get('/tags', (req, res) => {
+  const kind = String(req.query.kind || 'class');
+  if (!TAG_KINDS.has(kind)) return res.status(400).json({ error: '不支持的标签维度' });
+  const tags = db.prepare(
+    `SELECT t.name AS name, COUNT(l.honor_id) AS count
+     FROM honor_tag t
+     JOIN honor_tag_link l ON l.tag_id = t.id
+     JOIN honor h ON h.id = l.honor_id AND h.is_active = 1
+     WHERE t.kind = ? GROUP BY t.id ORDER BY count DESC, t.id`
+  ).all(kind);
+  res.json(tags);
 });
 
 // GET /api/honor/:id/image —— 公开出图
@@ -100,15 +184,17 @@ adminR.use(adminRequired);
 
 // GET /api/admin/honors —— 全量（含下架）
 adminR.get('/', (_req, res) => {
-  const list = db.prepare(
+  const rows = db.prepare(
     `SELECT h.*, u.username AS admin_name FROM honor h
      LEFT JOIN user u ON u.id = h.admin_id ORDER BY h.sort_order DESC, h.id DESC`
-  ).all().map((h) => ({
-    ...publicHonor(h),
-    is_active: !!h.is_active,
-    image_name: h.image_name || '', // 原始文件名，只给后台看（不是磁盘名）
-    admin_name: h.admin_name || '',
-    create_time: h.create_time,
+  ).all();
+  // decorateList 保序且等长，后台私有字段按同下标从原行补回
+  const list = decorateList(rows).map((p, i) => ({
+    ...p,
+    is_active: !!rows[i].is_active,
+    image_name: rows[i].image_name || '', // 原始文件名，只给后台看（不是磁盘名）
+    admin_name: rows[i].admin_name || '',
+    create_time: rows[i].create_time,
   }));
   res.json({ list });
 });
@@ -126,14 +212,22 @@ adminR.post('/', (req, res) => {
     if (!Number.isInteger(sort_order)) return res.status(400).json({ error: '排序值必须是整数' });
   }
   const is_active = b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1;
+  const classes = normClassTags(b.class_tags);
+  if (classes === null) {
+    return res.status(400).json({ error: `班级最多 ${MAX_CLASS_TAGS} 个，每个 ≤${LIMITS.class_name} 字` });
+  }
+  const ev = resolveEvent(b);
   const info = db.prepare(
-    `INSERT INTO honor (title, winner, award_level, award_date, description, sort_order, is_active, admin_id)
-     VALUES (?,?,?,?,?,?,?,?)`
+    `INSERT INTO honor (title, winner, award_level, prize_rank, comp_id, event_name,
+       award_date, description, sort_order, is_active, admin_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
   ).run(title, strField(b.winner, LIMITS.winner), strField(b.award_level, LIMITS.award_level),
+    strField(b.prize_rank, LIMITS.prize_rank), ev.comp_id, ev.event_name,
     strField(b.award_date, LIMITS.award_date), strField(b.description, LIMITS.description),
     sort_order, is_active, req.user.id);
   const id = Number(info.lastInsertRowid);
-  logAudit(req, 'honor-create', title, { id, sort_order, is_active });
+  replaceClassTags(id, classes);
+  logAudit(req, 'honor-create', title, { id, sort_order, is_active, comp_id: ev.comp_id, classes });
   res.status(201).json({ id, message: '荣誉已添加' });
 });
 
@@ -154,11 +248,28 @@ adminR.put('/:id', (req, res) => {
     sort_order = Number(b.sort_order);
     if (!Number.isInteger(sort_order)) return res.status(400).json({ error: '排序值必须是整数' });
   }
+  // 赛项沿用部分更新口径：这一键里两个字段都没传就不动；传了任一就整体 resolve（清空=显式 null）
+  let { comp_id, event_name } = h;
+  comp_id = comp_id ?? null;
+  event_name = event_name || '';
+  if (b.comp_id !== undefined || b.event_name !== undefined) {
+    ({ comp_id, event_name } = resolveEvent(b));
+  }
+  // 班级：传了 class_tags 才整组替换；不传不动（与图片字段缺省=不动同口径）
+  let classes = null;
+  if (b.class_tags !== undefined) {
+    classes = normClassTags(b.class_tags);
+    if (classes === null) {
+      return res.status(400).json({ error: `班级最多 ${MAX_CLASS_TAGS} 个，每个 ≤${LIMITS.class_name} 字` });
+    }
+  }
   db.prepare(
-    `UPDATE honor SET title = ?, winner = ?, award_level = ?, award_date = ?, description = ?,
-       sort_order = ?, is_active = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(title, pick('winner'), pick('award_level'), pick('award_date'), pick('description'), sort_order, is_active, id);
-  logAudit(req, 'honor-update', title, { id, is_active, sort_order });
+    `UPDATE honor SET title = ?, winner = ?, award_level = ?, prize_rank = ?, comp_id = ?, event_name = ?,
+       award_date = ?, description = ?, sort_order = ?, is_active = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(title, pick('winner'), pick('award_level'), pick('prize_rank'), comp_id, event_name,
+    pick('award_date'), pick('description'), sort_order, is_active, id);
+  if (classes) replaceClassTags(id, classes);
+  logAudit(req, 'honor-update', title, { id, is_active, sort_order, comp_id, classes });
   res.json({ message: '荣誉已更新' });
 });
 
@@ -232,7 +343,11 @@ adminR.delete('/:id', (req, res) => {
   const h = db.prepare('SELECT * FROM honor WHERE id = ?').get(id);
   if (!h) return res.status(404).json({ error: '荣誉不存在' });
   purgeHonor(h);
-  db.prepare('DELETE FROM honor WHERE id = ?').run(id);
+  db.prepare('DELETE FROM honor WHERE id = ?').run(id); // 桥表靠 ON DELETE CASCADE 自清
+  db.prepare(
+    `DELETE FROM honor_tag WHERE kind = 'class'
+     AND id NOT IN (SELECT DISTINCT tag_id FROM honor_tag_link)`
+  ).run(); // 顺手清掉失去引用的班级字典
   logAudit(req, 'honor-delete', h.title, { id });
   res.json({ message: '荣誉已删除' });
 });

@@ -8,6 +8,7 @@ import { fmtDateTime, fmtDateTimeS } from '../utils/time.js';
 import { displayName } from '../utils/displayName.js';
 import { compressImage, shrinkHint } from '../utils/imageCompress.js';
 import { openImage } from '../utils/imageViewer.js';
+import { LEVEL_OPTS, RANK_OPTS } from '../utils/honorMeta.js';
 
 const tab = ref('users');
 
@@ -320,9 +321,23 @@ async function delResource(row) {
 
 // ==================== Tab7 荣誉墙（奖状图 + 奖项信息） ====================
 const honors = reactive({ loading: false, list: [] });
+// 赛项下拉：竞赛库全量 active（仿 TeamView 建组选竞赛，非远程一次拉全）；
+// 班级选项：已有班级字典 ∪ 列表里出现过的值（含下架条目上的）
+const honorComps = ref([]);
+const honorClassOpts = ref([]);
 async function loadHonors() {
   honors.loading = true;
-  try { honors.list = (await api.adminHonors()).list || []; }
+  try {
+    const [listRes, compRes, tagRes] = await Promise.all([
+      api.adminHonors(),
+      api.competitions({ status: 'active' }).catch(() => ({ list: [] })),
+      api.honorTags().catch(() => []),
+    ]);
+    honors.list = listRes.list || [];
+    honorComps.value = Array.isArray(compRes) ? compRes : [];
+    const fromRows = honors.list.flatMap((h) => h.class_tags || []);
+    honorClassOpts.value = [...new Set([...(tagRes || []).map((t) => t.name), ...fromRows])];
+  }
   catch (e) { ElMessage.error(e.message); } finally { honors.loading = false; }
 }
 
@@ -330,25 +345,35 @@ async function loadHonors() {
 // 三者对应三个不同的接口动作，互斥由 handleHonorPick / toggleHonorRemove 保证。
 const honorDlg = ref(false);
 const honorForm = reactive({
-  id: null, title: '', winner: '', award_level: '', award_date: '', description: '',
+  id: null, title: '', winner: '', award_level: '', prize_rank: '', award_date: '', description: '',
+  class_tags: [], eventVal: null, // eventVal：竞赛 id(number)=库选 / 字符串=手填赛项名 / null=未选
   sort_order: '', is_active: true,
   file: null, preview: '', hint: '', removeImg: false, keepUrl: '', imageName: '',
 });
 function honorReset() {
   if (honorForm.preview) URL.revokeObjectURL(honorForm.preview);
-  Object.assign(honorForm, { file: null, preview: '', hint: '', removeImg: false });
+  Object.assign(honorForm, {
+    file: null, preview: '', hint: '', removeImg: false,
+    class_tags: [], eventVal: null,
+  });
 }
 function openHonorDlg(h) {
   honorReset();
   Object.assign(honorForm, {
     id: h?.id ?? null,
     title: h?.title || '', winner: h?.winner || '', award_level: h?.award_level || '',
+    prize_rank: h?.prize_rank || '',
     award_date: h?.award_date || '', description: h?.description || '',
+    class_tags: Array.isArray(h?.class_tags) ? [...h.class_tags] : [],
+    // 有 comp_id 直接选中库内竞赛；comp_id 对不上（竞赛被删/下架）时退回显示手填名
+    eventVal: h?.comp_id && honorComps.value.some((c) => c.id === h.comp_id) ? h.comp_id : (h?.event_name || null),
     sort_order: h?.sort_order ?? '', is_active: h ? !!h.is_active : true,
     keepUrl: h?.image_url || '', imageName: h?.image_name || '',
   });
   honorDlg.value = true;
 }
+// 赛项下拉显示名：有简称用简称（电赛），否则全称
+const compLabel = (c) => (c.short_name ? `${c.short_name}（${c.name}）` : c.name);
 
 // 选图 → 立刻压缩（3–8MB 的手机照压到 ~300KB，后端没有图像库，这里是唯一一道）
 async function handleHonorPick(e) {
@@ -370,8 +395,15 @@ function toggleHonorRemove() {
 
 async function saveHonor() {
   if (!honorForm.title.trim()) return ElMessage.warning('奖项名称不能为空');
+  if (honorForm.class_tags.length > 6) return ElMessage.warning('班级最多挂 6 个');
+  // eventVal：number=库选（event_name 交给服务端回填），string=手填名（comp_id 置 null）
+  const ev = honorForm.eventVal;
   const meta = {
     title: honorForm.title.trim(), winner: honorForm.winner, award_level: honorForm.award_level,
+    prize_rank: honorForm.prize_rank,
+    comp_id: typeof ev === 'number' ? ev : null,
+    event_name: typeof ev === 'string' ? ev : '',
+    class_tags: honorForm.class_tags,
     award_date: honorForm.award_date, description: honorForm.description,
     is_active: honorForm.is_active ? 1 : 0,
   };
@@ -808,6 +840,19 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <el-table-column prop="award_level" label="级别" width="90">
             <template #default="{ row }">{{ row.award_level || '—' }}</template>
           </el-table-column>
+          <el-table-column prop="prize_rank" label="奖等" width="80">
+            <template #default="{ row }">{{ row.prize_rank || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="班级" min-width="150">
+            <template #default="{ row }">
+              <el-tag v-for="c in (row.class_tags || [])" :key="c" size="small" class="hon-clstag"
+                disable-transitions>{{ c }}</el-tag>
+              <span v-if="!(row.class_tags || []).length" class="cell-sub">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="event_name" label="赛项" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.event_name || '—' }}</template>
+          </el-table-column>
           <el-table-column prop="winner" label="获奖者" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.winner || '—' }}</template>
           </el-table-column>
@@ -960,7 +1005,30 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <el-input v-model="honorForm.title" maxlength="60" show-word-limit placeholder="如：全国大学生电子设计竞赛 一等奖（≤60 字）" />
         </el-form-item>
         <el-form-item label="级别">
-          <el-input v-model="honorForm.award_level" maxlength="20" placeholder="如：国家级 / 省级 / 校级（≤20 字）" />
+          <el-select v-model="honorForm.award_level" filterable allow-create clearable
+            class="hon-tagsel" placeholder="授予级别：国家级 / 省级 / 校级…（可选，可手填）">
+            <el-option v-for="v in LEVEL_OPTS" :key="v" :label="v" :value="v" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="奖等">
+          <el-select v-model="honorForm.prize_rank" filterable allow-create clearable
+            class="hon-tagsel" placeholder="获奖等次：一等奖 / 二等奖…（可选，可手填）">
+            <el-option v-for="v in RANK_OPTS" :key="v" :label="v" :value="v" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="赛项">
+          <el-select v-model="honorForm.eventVal" filterable allow-create clearable
+            class="hon-tagsel" default-first-option
+            placeholder="从竞赛库选赛项，或直接输入库中没有的赛项名（单选）">
+            <el-option v-for="c in honorComps" :key="c.id" :label="compLabel(c)" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="班级">
+          <el-select v-model="honorForm.class_tags" multiple filterable allow-create
+            class="hon-tagsel" :reserve-keyword="false" :multiple-limit="6"
+            placeholder="如：电子2301 班（可多选，输入即沉淀，最多 6 个）">
+            <el-option v-for="v in honorClassOpts" :key="v" :label="v" :value="v" />
+          </el-select>
         </el-form-item>
         <el-form-item label="获奖者">
           <el-input v-model="honorForm.winner" maxlength="40" placeholder="如：张三、李四（≤40 字）" />
@@ -1084,4 +1152,6 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
   font-size: 12px; color: var(--text-2, #94a3b8); text-align: center; padding: 4px;
 }
 .hon-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.hon-tagsel { width: 100%; }
+.hon-clstag { margin: 2px 4px 2px 0; }
 </style>

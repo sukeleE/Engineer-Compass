@@ -45,6 +45,9 @@ migCol('user', 'phone_verified', 'ALTER TABLE user ADD COLUMN phone_verified INT
 migCol('share_post', 'slug', "ALTER TABLE share_post ADD COLUMN slug TEXT DEFAULT ''");                // GitHub 风路径名
 migCol('share_post', 'is_public', 'ALTER TABLE share_post ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1'); // 1=开源
 migCol('user', 'real_name', "ALTER TABLE user ADD COLUMN real_name TEXT NOT NULL DEFAULT ''");         // 真实姓名（三模块实名门禁）
+migCol('honor', 'prize_rank', "ALTER TABLE honor ADD COLUMN prize_rank TEXT DEFAULT ''");              // 荣誉墙：奖等（特等/一/二/三等奖…）
+migCol('honor', 'comp_id', 'ALTER TABLE honor ADD COLUMN comp_id INTEGER');                            // 荣誉墙：赛项→competition.id（无外键，同 team_plan）
+migCol('honor', 'event_name', "ALTER TABLE honor ADD COLUMN event_name TEXT DEFAULT ''");              // 荣誉墙：赛项名快照（库选/手填统一展示）
 
 // ---- user_version 闸门：只对「升级前的老库」执行一次的存量数据回填 ----
 // 新库（schema 直接建成新结构、零行）同样过一遍但 0 行受影响，随即落版本号。

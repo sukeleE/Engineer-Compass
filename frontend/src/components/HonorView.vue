@@ -16,11 +16,12 @@
 //
 // 装饰元素（顶边色条 .haccent / 奖牌点）一律 position:absolute，不进 flex 流、不改变卡片外宽。
 // 切换视图靠 v-if，各视图用独立类名（.editorial/.ecard、.marquee/.hcard、.hall-grid/.gcard）。
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api.js';
 import auth from '../auth.js';
 import { openImage } from '../utils/imageViewer.js';
+import { LEVEL_OPTS, RANK_OPTS } from '../utils/honorMeta.js';
 
 const router = useRouter();
 
@@ -49,8 +50,53 @@ const reduced = ref(false);
 let mq = null;
 const onMq = (e) => { reduced.value = e.matches; };
 
+// —— 四维筛选：级别 / 奖等 / 班级 / 赛项。每维单选、维间交集；状态本地留存不进 URL（同 TimelineView 口径）——
+const fv = reactive({ level: '', rank: '', cls: '', event: '' });
+// 从全量 list 聚合计数（chips 始终展示全集分布，不只展示当前筛选结果）
+function tally(getter) {
+  const m = new Map();
+  for (const h of list.value) {
+    for (const v of getter(h) || []) {
+      const k = String(v || '').trim();
+      if (k) m.set(k, (m.get(k) || 0) + 1);
+    }
+  }
+  return m;
+}
+// 级别/奖等按固定枚举顺序排（库里出现才显示），枚举外的自建值按计数补在后面；班级/赛项纯按计数
+function canonOpts(map, canon) {
+  return [
+    ...canon.filter((v) => map.has(v)).map((v) => ({ v, n: map.get(v) })),
+    ...[...map.entries()].filter(([v]) => !canon.includes(v))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v, n]) => ({ v, n })),
+  ];
+}
+const countOpts = (map) => [...map.entries()]
+  .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  .map(([v, n]) => ({ v, n }));
+const chipGroups = computed(() => [
+  { key: 'level', label: '级别', options: canonOpts(tally((h) => [h.award_level]), LEVEL_OPTS) },
+  { key: 'rank', label: '奖等', options: canonOpts(tally((h) => [h.prize_rank]), RANK_OPTS) },
+  { key: 'cls', label: '班级', options: countOpts(tally((h) => h.class_tags)) },
+  { key: 'event', label: '赛项', options: countOpts(tally((h) => [h.event_name])) },
+]);
+function pickChip(key, v) { fv[key] = fv[key] === v ? '' : v; }
+
+// 选中值已不在选项里（换数据/标签被删）→ 这一维视同「全部」，避免永久空筛选
+const filteredList = computed(() => {
+  const valid = {};
+  for (const g of chipGroups.value) valid[g.key] = new Set(g.options.map((o) => o.v));
+  return list.value.filter((h) =>
+    (!fv.level || !valid.level.has(fv.level) || h.award_level === fv.level) &&
+    (!fv.rank || !valid.rank.has(fv.rank) || h.prize_rank === fv.rank) &&
+    (!fv.cls || !valid.cls.has(fv.cls) || (h.class_tags || []).includes(fv.cls)) &&
+    (!fv.event || !valid.event.has(fv.event) || h.event_name === fv.event)
+  );
+});
+
 const rowCount = computed(() => {
-  const n = list.value.length;
+  const n = filteredList.value.length;
   if (!n) return 0;
   return Math.min(narrow.value ? 2 : 3, Math.max(1, Math.ceil(n / PER_ROW)));
 });
@@ -60,7 +106,7 @@ const rowCount = computed(() => {
 const buckets = computed(() => {
   const R = rowCount.value;
   const out = Array.from({ length: R }, () => []);
-  list.value.forEach((h, i) => out[i % R].push(h));
+  filteredList.value.forEach((h, i) => out[i % R].push(h));
   return out;
 });
 
@@ -182,6 +228,11 @@ watch(rowsRef, (el) => {
   }
 });
 watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); });
+// 筛选后 .ecard 节点整批重建（v-for key 是 honor id），新节点必须重新进观察器，
+// 否则筛选后滚出来的卡片永远停在隐藏态。bindReveal 内先 disconnect，已 .in 的卡片类名不受影响
+watch(filteredList, () => {
+  if (mode.value === 'editorial' && editorialRef.value) nextTick(() => bindReveal(editorialRef.value));
+});
 </script>
 
 <template>
@@ -205,27 +256,51 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
       </div>
 
       <template v-else>
+        <!-- ===== ① 精选 hero（满屏着陆；与卡片列表拆成兄弟节点，好让筛选栏夹在中间） ===== -->
+        <header v-if="mode === 'editorial'" class="e-hero">
+          <p class="e-eyebrow">HALL&nbsp;&nbsp;OF&nbsp;&nbsp;HONOR</p>
+          <h1 class="e-title">荣誉墙</h1>
+          <p class="e-sub">每一块奖牌背后，都是一整个赛季的加班</p>
+          <p class="e-statline">
+            {{ stat.n }} 项荣誉<i>·</i>国家级 / 国际级 {{ stat.top }} 项
+            <template v-if="stat.years"><i>·</i>跨越 {{ stat.years }} 个获奖年份</template>
+          </p>
+          <button v-if="auth.user?.is_admin" class="e-adm" type="button" @click="router.push('/admin-console')">
+            ⚙️ 后台维护
+          </button>
+          <span class="e-cue" aria-hidden="true">
+            <span class="e-cue-txt">向下滚动</span>
+            <span class="e-cue-line"></span>
+          </span>
+        </header>
+
+        <!-- ===== 四维筛选（三视图共用；选中态本地留存，不进 URL） ===== -->
+        <div class="honor-filters card" role="group" aria-label="按标签筛选荣誉">
+          <div class="hf-row" v-for="g in chipGroups" :key="g.key">
+            <span class="hf-label">{{ g.label }}</span>
+            <div class="hf-chips">
+              <button class="hchip" type="button" :class="{ on: !fv[g.key] }" @click="fv[g.key] = ''">
+                全部
+              </button>
+              <button
+                v-for="o in g.options" :key="o.v" type="button"
+                class="hchip" :class="{ on: fv[g.key] === o.v }"
+                @click="pickChip(g.key, o.v)"
+              >{{ o.v }}<i>{{ o.n }}</i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 筛选无结果（三视图共用的空态） -->
+        <div v-if="!filteredList.length" class="card honor-rstate">
+          <el-empty description="该筛选条件下暂无奖状" />
+        </div>
+
         <!-- ===== ① 精选：Apple 极简编辑流（默认） ===== -->
         <div v-if="mode === 'editorial'" class="editorial" ref="editorialRef">
-          <header class="e-hero">
-            <p class="e-eyebrow">HALL&nbsp;&nbsp;OF&nbsp;&nbsp;HONOR</p>
-            <h1 class="e-title">荣誉墙</h1>
-            <p class="e-sub">每一块奖牌背后，都是一整个赛季的加班</p>
-            <p class="e-statline">
-              {{ stat.n }} 项荣誉<i>·</i>国家级 / 国际级 {{ stat.top }} 项
-              <template v-if="stat.years"><i>·</i>跨越 {{ stat.years }} 个获奖年份</template>
-            </p>
-            <button v-if="auth.user?.is_admin" class="e-adm" type="button" @click="router.push('/admin-console')">
-              ⚙️ 后台维护
-            </button>
-            <span class="e-cue" aria-hidden="true">
-              <span class="e-cue-txt">向下滚动</span>
-              <span class="e-cue-line"></span>
-            </span>
-          </header>
-
+          <template v-if="filteredList.length">
           <section
-            v-for="(h, i) in list" :key="h.id"
+            v-for="(h, i) in filteredList" :key="h.id"
             class="ecard" :class="[`t-${tierOf(h)}`, { 'is-feature': i === 0 }]"
           >
             <p class="e-kicker">
@@ -234,6 +309,8 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
               <span class="e-lvl" v-if="h.award_level">
                 <i class="tdot" aria-hidden="true"></i>{{ h.award_level }}
               </span>
+              <span class="e-kicker-sep" v-if="h.prize_rank">·</span>
+              <span class="e-lvl" v-if="h.prize_rank">{{ h.prize_rank }}</span>
             </p>
             <h2 class="e-name">{{ h.title }}</h2>
 
@@ -250,6 +327,11 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
             </button>
             <span class="e-zoomhint" v-if="showImg(h)">点击图片查看大图</span>
 
+            <p class="e-tags" v-if="h.event_name || (h.class_tags && h.class_tags.length)">
+              <i class="etag etag-event" v-if="h.event_name">🎯 {{ h.event_name }}</i>
+              <i class="etag" v-for="c in (h.class_tags || [])" :key="c">🏫 {{ c }}</i>
+            </p>
+
             <p class="e-meta">
               <span v-if="h.award_date">🗓 {{ h.award_date }}</span>
               <span v-if="h.winner">👤 {{ h.winner }}</span>
@@ -258,8 +340,9 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
           </section>
 
           <footer class="e-foot">
-            <i></i><span>已展示全部 {{ stat.n }} 项荣誉</span><i></i>
+            <i></i><span>已展示全部 {{ filteredList.length }} 项荣誉</span><i></i>
           </footer>
+          </template>
         </div>
 
         <!-- ===== ② 流动展厅：跑马灯（reduced 时同一套 DOM 退化成可横滚的静态行） ===== -->
@@ -287,8 +370,15 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
                     <span v-else class="hph">🏅</span>
                   </span>
                   <b class="httl">{{ h.title }}</b>
-                  <span class="htier" v-if="h.award_level">
-                    <i class="tdot" aria-hidden="true"></i>{{ h.award_level }}
+                  <span class="htiers" v-if="h.award_level || h.prize_rank">
+                    <span class="htier" v-if="h.award_level">
+                      <i class="tdot" aria-hidden="true"></i>{{ h.award_level }}
+                    </span>
+                    <span class="htier htier-rank" v-if="h.prize_rank">{{ h.prize_rank }}</span>
+                  </span>
+                  <span class="hevent" v-if="h.event_name">🎯 {{ h.event_name }}</span>
+                  <span class="hclass" v-if="h.class_tags && h.class_tags.length">
+                    🏫 {{ h.class_tags.join('、') }}
                   </span>
                   <span class="hmeta" v-if="h.award_date">🗓 {{ h.award_date }}</span>
                   <span class="hwin" v-if="h.winner">👤 {{ h.winner }}</span>
@@ -296,13 +386,13 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
               </div>
             </div>
           </div>
-          <p class="honor-tip" v-if="!reduced">把鼠标停在某一行可以暂停滚动 · 点奖状看大图</p>
+          <p class="honor-tip" v-if="!reduced && filteredList.length">把鼠标停在某一行可以暂停滚动 · 点奖状看大图</p>
         </div>
 
         <!-- ===== ③ 荣誉殿堂：证书网格（更大、带描述） ===== -->
         <div v-if="mode === 'hall'" class="hall-grid">
           <button
-            v-for="h in list" :key="h.id"
+            v-for="h in filteredList" :key="h.id"
             class="gcard" type="button" draggable="false"
             :class="[`t-${tierOf(h)}`, { 'is-static': !showImg(h) }]"
             @click="showImg(h) && openImage(h.image_url, h.title)"
@@ -316,8 +406,15 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
               <span v-else class="gph">🏅</span>
             </span>
             <b class="gttl">{{ h.title }}</b>
-            <span class="htier" v-if="h.award_level">
-              <i class="tdot" aria-hidden="true"></i>{{ h.award_level }}
+            <span class="htiers" v-if="h.award_level || h.prize_rank">
+              <span class="htier" v-if="h.award_level">
+                <i class="tdot" aria-hidden="true"></i>{{ h.award_level }}
+              </span>
+              <span class="htier htier-rank" v-if="h.prize_rank">{{ h.prize_rank }}</span>
+            </span>
+            <span class="hevent" v-if="h.event_name">🎯 {{ h.event_name }}</span>
+            <span class="hclass" v-if="h.class_tags && h.class_tags.length">
+              🏫 {{ h.class_tags.join('、') }}
             </span>
             <span class="gdesc" v-if="h.description">{{ h.description }}</span>
             <span class="gfoot">
@@ -393,6 +490,36 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
   background: color-mix(in srgb, var(--t) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--t) 26%, transparent);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+// ==================== 四维筛选栏（级别/奖等/班级/赛项，三视图共用） ====================
+.honor-filters {
+  position: sticky; top: 8px; z-index: 20;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 16px; margin-bottom: 16px;
+  background: color-mix(in srgb, var(--card-bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.hf-row { display: flex; align-items: flex-start; gap: 10px; }
+.hf-label {
+  flex: none; width: 34px; padding-top: 4px;
+  font-size: 12px; letter-spacing: 1px; color: var(--text-3);
+}
+.hf-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.hchip {
+  font: inherit; font-size: 12px; line-height: 1; white-space: nowrap; cursor: pointer;
+  padding: 5px 12px; border-radius: 999px;
+  color: var(--text-2); background: var(--card-bg);
+  border: 1px solid var(--border);
+  transition: color .18s ease, border-color .18s ease, background .18s ease;
+  i { margin-left: 5px; font-style: normal; font-size: 10px; color: var(--text-3); }
+  &:hover { color: var(--text); border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+  &.on {
+    color: var(--primary); font-weight: 600;
+    background: var(--primary-tint);
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    i { color: var(--primary); }
+  }
 }
 
 // ==================== 悬浮视图切换 ====================
@@ -498,6 +625,22 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
 
 .e-zoomhint { margin-top: 14px; font-size: 11px; letter-spacing: 1px; color: var(--text-3); }
 
+// 赛项/班级胶囊行（精选视图，居中）
+.e-tags {
+  margin: 20px auto 0; max-width: 640px;
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 8px;
+}
+.etag {
+  font-style: normal; font-size: 12px; line-height: 1;
+  padding: 5px 13px; border-radius: 999px;
+  color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.etag-event {
+  color: var(--primary); background: var(--primary-tint);
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
 .e-meta {
   margin: 26px 0 0; display: flex; justify-content: center; gap: 22px; flex-wrap: wrap;
   font-size: 13px; color: var(--text-2);
@@ -561,9 +704,10 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
   flex: none;
   width: var(--hw);
   margin-right: var(--hg);     /* ★ 间距做进卡片自身，不能用容器 gap（见文件头注释①） */
-  /* 固定卡高 = 图盒 + 文本区最坏情况（padding 20 + 4×gap 24 + 标题 2 行 36.4 + 等级胶囊 19
-     + 日期 13.2 + 获奖者 13.2）。用 min-height 不用 height：字体度量有偏差时卡片长高。 */
-  min-height: calc(var(--bh) + 126px);
+  /* 固定卡高 = 图盒 + 文本区最坏情况（padding 20 + 6×gap 36 + 标题 2 行 36.4
+     + 级别/奖等胶囊最坏换行 2 行 42 + 赛项 13.2 + 班级 13.2 + 日期 13.2 + 获奖者 13.2 ≈ 188）。
+     用 min-height 不用 height：字体度量有偏差时卡片长高；卡高不齐会破坏 -50% 无缝循环 */
+  min-height: calc(var(--bh) + 188px);
   display: flex; flex-direction: column; gap: 6px;
   padding: 10px; text-align: left; cursor: pointer;
   background: var(--card-bg);
@@ -596,10 +740,14 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
   font-size: 13px; line-height: 1.4; color: var(--text);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.hmeta, .hwin {
+// 级别 + 奖等两个胶囊一行排，太窄允许换行（换行最坏高度已做进卡高常数）
+.htiers { display: flex; flex-wrap: wrap; gap: 4px; }
+.htier-rank { color: var(--text-2); background: var(--surface-2); border-color: var(--border); }
+.hclass, .hevent, .hmeta, .hwin {
   font-size: 11px; color: var(--text-2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.hevent { color: var(--primary); }
 .hwin { color: var(--text-3); }
 
 .honor-tip { margin: 2px 0 0; text-align: center; font-size: 12px; color: var(--text-3); }
@@ -664,6 +812,8 @@ watch(editorialRef, (el) => { if (el) bindReveal(el); else rvObs?.disconnect(); 
 
 @media (max-width: 768px) {
   .honor-page { padding-top: 8px; }
+  .honor-filters { top: 6px; padding: 10px 12px; gap: 6px; }
+  .hf-label { width: 28px; font-size: 11px; }
   .e-hero { min-height: calc(100vh - 140px); padding-top: 40px; }
   .e-title { font-size: 56px; }
   .ecard { padding: 36px 0; }
