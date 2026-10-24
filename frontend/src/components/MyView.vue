@@ -655,6 +655,18 @@ onMounted(() => {
   color: #fff; border-radius: 14px; padding: 22px 24px;
   box-shadow: 0 6px 20px color-mix(in srgb, var(--primary) 25%, transparent);
 
+  .me-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+  // 窄屏：头像+信息一行，两个操作按钮换行铺满（否则信息列被挤成竖排文字）
+  @media (max-width: 768px) {
+    flex-wrap: wrap; gap: 12px; padding: 16px;
+    .me-info { flex: 1 1 180px; }
+    .me-actions {
+      flex: 1 1 100%;
+      :deep(.el-button) { flex: 1; margin-left: 0; }
+    }
+  }
+
   .me-avatar {
     width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; position: relative;
     display: flex; align-items: center; justify-content: center; overflow: hidden;

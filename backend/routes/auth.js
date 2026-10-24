@@ -90,6 +90,7 @@ export const userCard = (u) => ({
   perms: parseAdminPerms(u.admin_perms), is_ghost: !!u.is_ghost,
   email: u.email || '', avatar: u.avatar || null,
   password_set: u.password_set !== 0, phone: u.phone || '', real_name: u.real_name || '',
+  student_no: u.student_no || '',
 });
 
 // POST /api/auth/send-code — 发送邮箱验证码（注册/登录共用；未注册邮箱登录时自动注册）
@@ -299,6 +300,16 @@ r.put('/real-name', authRequired, (req, res) => {
   else logAudit(req, 'realname-set', name);
   const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
   res.json({ message: '实名认证信息已保存', user: userCard(u) });
+});
+
+// PUT /api/auth/student-no — 设置/修改学号（实验室借用登记用）
+r.put('/student-no', authRequired, (req, res) => {
+  const sno = String(req.body?.student_no ?? '').trim();
+  if (!/^\d{4,20}$/.test(sno)) return res.status(400).json({ error: '学号须为 4-20 位数字' });
+  db.prepare('UPDATE user SET student_no = ? WHERE id = ?').run(sno, req.user.id);
+  logAudit(req, 'student-no-set', sno);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.json({ message: '学号已保存', user: userCard(u) });
 });
 
 // POST /api/auth/logout — 登出（删除当前会话 + 审计）

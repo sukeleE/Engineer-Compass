@@ -9,10 +9,10 @@ import { setAuth } from '../auth.js';
 const router = useRouter();
 const tab = ref('email'); // email | pwd
 
-// 登录成功后回跳（/login?redirect=/team），默认去「我的」个人中心
+// 登录成功后回跳（/login?redirect=/lab），没带目标就回家首页
 const redirect = typeof router.currentRoute.value.query.redirect === 'string'
   ? router.currentRoute.value.query.redirect : '';
-const afterLogin = () => router.push(redirect || '/me');
+const afterLogin = () => router.push(redirect || '/');
 
 // ---- 邮箱验证码 ----
 const email = ref('');
@@ -324,8 +324,6 @@ onBeforeUnmount(() => {
           <el-button type="primary" :loading="resetSaving" @click="submitReset">确认重置</el-button>
         </template>
       </el-dialog>
-
-      <div class="auth-back"><router-link to="/">← 返回竞赛时间轴</router-link></div>
     </div>
   </div>
 </template>
@@ -351,9 +349,6 @@ onBeforeUnmount(() => {
   .auth-switch { margin-top: 14px; text-align: center; font-size: 13px; color: var(--text-2);
     a { color: var(--primary); cursor: pointer; }
     .switch-dot { margin: 0 4px; color: var(--text-3); }
-  }
-  .auth-back { margin-top: 10px; text-align: center; font-size: 12.5px;
-    a { color: #94a3b8; text-decoration: none; &:hover { color: var(--primary); } }
   }
 }
 </style>
