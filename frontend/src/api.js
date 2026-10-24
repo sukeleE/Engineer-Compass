@@ -513,12 +513,9 @@ export const api = {
   bookingApprove: (bid, comment = '') => req(`/booking/bookings/${bid}/approve`, { method: 'POST', body: JSON.stringify({ comment }) }),
   bookingReject: (bid, reason) => req(`/booking/bookings/${bid}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   bookingCancel: (bid, comment = '') => req(`/booking/bookings/${bid}/cancel`, { method: 'POST', body: JSON.stringify({ comment }) }),
-  // 实验室管理（复用 booking：设备=item，教室=space）
-  bookingLabProject: () => req('/booking/lab-project', { method: 'POST', body: JSON.stringify({}) }),
-  // 借用登记：设备/教室都没有台账，只记「照片 + 名称（物品名/教室编号）+ 姓名 + 学号」，时间由服务端记录
-  bookingBorrowRegister: (b) => req('/booking/borrow-registrations', { method: 'POST', body: JSON.stringify(b) }),
-  bookingLabOverview: (projectId) => req(`/booking/lab-overview${qs({ project_id: projectId })}`),
-  // 实验室管理员全局借用记录（需「实验室借用」权限）：筛选参数 kind / status / from / to / q
+  // 借用登记：任意项目通用，设备/教室都没有台账，只记「照片 + 名称（物品名/教室编号）+ 姓名 + 学号」，时间由服务端记录
+  bookingBorrowRegister: (projectId, b) => req(`/booking/projects/${projectId}/borrow-registrations`, { method: 'POST', body: JSON.stringify(b) }),
+  // 借用记录管理员：跨项目全局借用记录（需「借用记录」权限）；筛选参数 project_id / kind / status / from / to / q
   bookingBorrowRecords: (params) => req(`/booking/borrow-records${qs(params)}`),
   // 导出 Excel：走 blob（token 只进请求头），文件名取响应头 filename*（UTF-8）
   bookingBorrowExport: async (params) => {
@@ -530,7 +527,7 @@ export const api = {
       const d = await res.json().catch(() => ({}));
       throw new Error(d.error || `导出失败（${res.status}）`);
     }
-    let name = `实验室借用记录-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    let name = `借用记录-${new Date().toISOString().slice(0, 10)}.xlsx`;
     const cd = res.headers.get('content-disposition') || '';
     const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
     if (star) { try { name = decodeURIComponent(star[1]); } catch { /* 用默认名 */ } }

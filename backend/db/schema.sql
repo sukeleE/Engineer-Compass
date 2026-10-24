@@ -761,6 +761,7 @@ CREATE TABLE IF NOT EXISTS booking_resource (
   damaged_qty  INTEGER NOT NULL DEFAULT 0,     -- 物品损坏数量（不计入可借库存）
   approve_mode TEXT NOT NULL DEFAULT 'approval', -- 资源级审批开关：approval / first_come
   status       TEXT NOT NULL DEFAULT 'active', -- active / archived（被预约引用后只能归档）
+  is_carrier   INTEGER NOT NULL DEFAULT 0,     -- 1=借用登记占位资源（每项目至多一个，不进列表/甘特/库存）
   created_by   INTEGER REFERENCES user(id) ON DELETE SET NULL,
   create_time  TEXT DEFAULT (datetime('now','localtime')),
   update_time  TEXT DEFAULT (datetime('now','localtime')),

@@ -23,7 +23,6 @@ const moreLinks = computed(() => {
     { to: '/team', ic: '🏗️', txt: '项目小组' },
     { to: '/share', ic: '📤', txt: '资源分享' },
     { to: '/expense', ic: '🧾', txt: '报销整理' },
-    { to: '/booking', ic: '🏢', txt: '预约排期' },
     { to: '/purchase', ic: '🛒', txt: '物料采购' },
     { to: '/honor', ic: '🏅', txt: '荣誉墙' },
     { to: '/me', ic: '👤', txt: '我的主页' },
@@ -90,7 +89,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
         <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
         <router-link to="/expense"><span class="ic">🧾</span><span class="txt">报销整理</span></router-link>
         <router-link to="/purchase"><span class="ic">🛒</span><span class="txt">物料采购</span></router-link>
-        <router-link to="/resources"><span class="ic">📦</span><span class="txt">资源借用</span></router-link>
+        <router-link to="/booking"><span class="ic">🏢</span><span class="txt">预约排期</span></router-link>
         <router-link v-if="canAdmin('lab')" to="/lab-admin"><span class="ic">🗂️</span><span class="txt">借用记录</span></router-link>
         <!-- 🏅 而非 🏆：🏆 在本站已被"竞赛"语义占满（时间轴图例、日程 tab、备赛计划），再用会与"竞赛时间轴"撞义 -->
         <router-link to="/honor"><span class="ic">🏅</span><span class="txt">荣誉墙</span></router-link>
@@ -112,7 +111,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
     <nav v-if="!bare && !isLogin" class="tabbar">
       <router-link to="/"><span class="ic">🗓️</span><span>竞赛</span></router-link>
       <router-link to="/schedule"><span class="ic">📅</span><span>日程</span></router-link>
-      <router-link to="/resources"><span class="ic">📦</span><span>资源</span></router-link>
+      <router-link to="/booking"><span class="ic">🏢</span><span>预约</span></router-link>
       <button class="tb-more" :class="{ on: moreOpen }" @click="moreOpen = true"><span class="ic">☰</span><span>更多</span></button>
     </nav>
     <!-- 「更多」面板：底部主导航只放 5 个高频入口，其余功能收在这里 -->

@@ -14,6 +14,14 @@ export const STATUS_META = {
   canceled: { label: '已取消', type: 'info' },
 };
 
+// 拍照快速借用登记（写在预约模块里的零时长记录，不进甘特）：item_kind=device / room
+export const REG_KIND_META = {
+  device: { label: '设备登记', icon: '📦' },
+  room: { label: '教室登记', icon: '🏫' },
+};
+export const isRegBooking = (b) => !!b && (b.item_kind === 'device' || b.item_kind === 'room');
+export const regTitle = (b) => (b && (b.item_name || b.resource_name)) || '借用登记';
+
 export const OPEN_HH = 7;
 export const CLOSE_HH = 22;
 export const SLOT_MIN = 30;

@@ -3,8 +3,8 @@
     <!-- 页头 -->
     <div class="pv-hero card">
       <div>
-        <h2>🗂️ 借用记录管理 <el-tag size="small" type="danger" effect="light">仅实验室管理员</el-tag></h2>
-        <p class="sub2">全部学生的设备借用、教室借用登记汇总在这里：按类型/状态/日期/关键字筛选，点缩略图看原图，一键导出 Excel 表格。</p>
+        <h2>🗂️ 借用记录管理 <el-tag size="small" type="danger" effect="light">仅借用记录管理员</el-tag></h2>
+        <p class="sub2">全部项目、全部学生的设备借用、教室借用登记汇总在这里：按类型/状态/日期/关键字筛选，点缩略图看原图，一键导出 Excel 表格。</p>
       </div>
       <el-button type="primary" :loading="exporting" @click="doExport">
         {{ exporting ? '导出中…' : '⬇️ 导出借用记录表格' }}
@@ -61,7 +61,7 @@
           <table v-if="records.length" class="rq-table">
             <thead>
               <tr>
-                <th>照片</th><th>类型</th><th>借用物品 / 教室</th><th>姓名</th><th>学号</th>
+                <th>照片</th><th>所属项目</th><th>类型</th><th>借用物品 / 教室</th><th>姓名</th><th>学号</th>
                 <th>登记时间</th><th>状态</th><th></th>
               </tr>
             </thead>
@@ -71,6 +71,7 @@
                   <img v-if="b.item_thumb" :src="b.item_thumb" class="rec-thumb" alt="借用照片" @click="viewPhoto(b)" />
                   <span v-else class="rec-thumb ph">{{ b.has_image ? '📷' : '—' }}</span>
                 </td>
+                <td class="dim">{{ b.project_name || '—' }}</td>
                 <td>{{ kindLabel(b.kind) }}</td>
                 <td><b>{{ b.item_name || '—' }}</b></td>
                 <td>{{ b.booker_name || '—' }}</td>
@@ -102,7 +103,7 @@
                 </el-tag>
               </div>
               <div class="rc-sub">{{ kindLabel(b.kind) }} · {{ b.booker_name || '—' }} {{ b.booker_student_no || '未填学号' }}</div>
-              <div class="rc-sub">{{ b.start_time }}</div>
+              <div class="rc-sub">{{ b.project_name || '—' }} · 登记于 {{ b.start_time }}</div>
             </div>
           </div>
         </div>
