@@ -17,7 +17,7 @@ export function verifyPassword(pw, stored) {
 // ---- Bearer token 会话 ----
 // 支持 query 的 ?token=（供 <img src> / <a href> 直连预览与下载，浏览器不会带 Authorization 头）
 // 封禁（status=1）用户拒绝一切认证请求
-const USER_COLS = 's.user_id, u.username, u.nickname, u.is_admin, u.is_ghost, u.email, u.avatar, u.status, u.real_name';
+const USER_COLS = 's.user_id, u.username, u.nickname, u.is_admin, u.admin_perms, u.is_ghost, u.email, u.avatar, u.status, u.real_name';
 export function authRequired(req, res, next) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token || '';
   if (!token) return res.status(401).json({ error: '未登录' });
@@ -26,7 +26,7 @@ export function authRequired(req, res, next) {
   ).get(token);
   if (!s) return res.status(401).json({ error: '登录已失效，请重新登录' });
   if (s.status === 1) return res.status(403).json({ error: '账号已被封禁，无法继续使用' });
-  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
+  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
   next();
 }
 
@@ -37,16 +37,71 @@ export function optionalAuth(req, res, next) {
   const s = db.prepare(
     `SELECT ${USER_COLS} FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?`
   ).get(token);
-  if (s && s.status !== 1) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
+  if (s && s.status !== 1) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
   next();
 }
 
 // ---- 后台管理 / 封禁禁言 ----
 
-// 仅管理员可访问（需先经过 authRequired）
+// 全站管理员模块权限：is_admin=1 的用户按授权模块访问后台；admin_perms 为空数组=超级管理员（全权）。
+// 散落在业务模块（预约/采购审批、幽灵帖巡检等）的"管理员全权"仅超管拥有，用 isSuperAdmin 判断。
+export const ADMIN_PERMS = {
+  user: '用户管理',        // 封禁/禁言/用户列表详情/改密与实名提醒
+  content: '内容管理',     // 删帖/删评论（含前台越权编辑）
+  competition: '竞赛审核', // AI 收录待审核列表/采纳/拒绝
+  announce: '公告管理',    // 公告 CRUD/群发提醒
+  honor: '荣誉墙',         // 荣誉条目与奖状图管理
+  resource: '资源管理',    // 全站用户资源列表/删除/越权下载
+  feedback: '用户反馈',    // 反馈列表/删除
+  log: '日志审计',         // 操作日志 + 访问记录
+  server: '服务器状态',    // 服务器状态面板
+};
+
+// 解析 user.admin_perms（TEXT JSON）；非法值/未知 key 一律忽略，空数组=超管口径
+export function parseAdminPerms(v) {
+  if (v == null) return [];
+  try {
+    const a = typeof v === 'string' ? JSON.parse(v || '[]') : v;
+    if (!Array.isArray(a)) return [];
+    return [...new Set(a.map(String))].filter((k) => k in ADMIN_PERMS);
+  } catch { return []; }
+}
+
+// 超级管理员：is_admin=1 且未限定模块（现有 is_admin 老用户自动成为超管，完全向后兼容）
+export const isSuperAdmin = (u) => !!u?.is_admin && parseAdminPerms(u.admin_perms).length === 0;
+
+// 模块权限判断：非管理员 false；超管全权；受限管理员需显式授权
+export const hasAdminPerm = (u, key) => {
+  if (!u?.is_admin) return false;
+  const perms = parseAdminPerms(u.admin_perms);
+  return perms.length === 0 || perms.includes(key);
+};
+
+// 仅管理员可访问（需先经过 authRequired）：任意管理员（含受限）即可通过，细粒度用 adminPermRequired
 export function adminRequired(req, res, next) {
   if (!req.user?.is_admin) return res.status(403).json({ error: '需要管理员权限' });
   next();
+}
+
+// 仅超级管理员（分配管理员权限、最后超管保护类操作专用；需先经过 authRequired）
+export function superAdminRequired(req, res, next) {
+  if (!req.user?.is_admin) return res.status(403).json({ error: '需要管理员权限' });
+  if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '需要超级管理员权限' });
+  next();
+}
+
+// 模块权限守卫工厂：router.get(path, authRequired, adminPermRequired('content'), handler)
+// 多个 key 为"任一满足"；超管恒通过。必须挂在 authRequired 之后。
+export function adminPermRequired(...keys) {
+  const need = keys.flat().filter(Boolean);
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: '未登录' });
+    if (!req.user.is_admin) return res.status(403).json({ error: '需要管理员权限' });
+    if (need.length && !need.some((k) => hasAdminPerm(req.user, k))) {
+      return res.status(403).json({ error: `需要「${ADMIN_PERMS[need[0]] || need[0]}」管理权限` });
+    }
+    next();
+  };
 }
 
 // 幽灵守卫：仅幽灵模式用户可访问（需先经过 authRequired；怪奇小队名单等幽灵专属接口用）

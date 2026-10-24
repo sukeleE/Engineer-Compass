@@ -8,7 +8,7 @@ import { join, dirname, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import db from '../db/database.js';
-import { authRequired, mutedGuard, logAudit } from './middleware.js';
+import { authRequired, mutedGuard, logAudit, hasAdminPerm } from './middleware.js';
 import { FEISHU, parentFolder, getBind, userToken } from '../lib/feishuClient.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -170,7 +170,7 @@ r.get('/', (req, res) => {
 r.get('/:id/download', (req, res) => {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
   if (!f) return res.status(404).json({ error: '资源不存在' });
-  if (f.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: '无权下载该资源' });
+  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource')) return res.status(403).json({ error: '无权下载该资源' });
   if (basename(f.store_path) !== f.store_path) return res.status(404).json({ error: '资源不存在' }); // 防路径穿越
   const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
   if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失，请联系管理员' });
@@ -181,11 +181,12 @@ r.get('/:id/download', (req, res) => {
 export function deleteResource(req, res, id) {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(id);
   if (!f) return res.status(404).json({ error: '资源不存在' });
-  if (f.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: '仅资源所有者或管理员可删除' });
+  const asAdmin = f.user_id !== req.user.id && hasAdminPerm(req.user, 'resource');
+  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource')) return res.status(403).json({ error: '仅资源所有者或管理员可删除' });
   const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
   try { if (existsSync(abs)) unlinkSync(abs); } catch { return res.status(500).json({ error: '文件删除失败' }); }
   db.prepare('DELETE FROM user_resource WHERE id = ?').run(id);
-  logAudit(req, req.user.is_admin ? 'resource-admin-delete' : 'resource-delete', f.file_name, { rid: id, size: f.file_size });
+  logAudit(req, asAdmin ? 'resource-admin-delete' : 'resource-delete', f.file_name, { rid: id, size: f.file_size });
   res.json({ message: '资源已删除' });
 }
 r.delete('/:id', (req, res) => deleteResource(req, res, Number(req.params.id)));

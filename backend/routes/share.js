@@ -7,7 +7,7 @@ import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { extname, basename } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import db from '../db/database.js';
-import { authRequired, optionalAuth, logAudit, mutedGuard } from './middleware.js';
+import { authRequired, optionalAuth, logAudit, mutedGuard, isSuperAdmin, hasAdminPerm } from './middleware.js';
 import { buildZip } from '../lib/zipStore.js';
 import { Readable } from 'node:stream';
 import { GiteeError, parseRepo, parseRefFromUrl, fetchTree, giteeRawBase } from '../lib/gitee.js';
@@ -81,18 +81,19 @@ function ghostClause(req, scope, ghostOnly, alias = 'p') {
   // 普通大厅（/share）对所有人同口径：只见非幽灵帖——管理员巡检走后台 /admin/posts，
   // 在这里放行会让管理员在「开源大厅」看到幽灵帖（与私密豁免同一类泄露观感）。
   // /ghost-share（ghostOnly）才是幽灵帖的专属入口。
-  if (req.user?.is_admin) return ghostOnly ? `AND ${alias}.is_ghost = 1` : `AND ${alias}.is_ghost = 0`;
+  if (isSuperAdmin(req.user)) return ghostOnly ? `AND ${alias}.is_ghost = 1` : `AND ${alias}.is_ghost = 0`;
   if (req.user?.is_ghost) return ghostOnly ? `AND ${alias}.is_ghost = 1` : `AND ${alias}.is_ghost = 0`;
   return `AND ${alias}.is_ghost = 0`;
 }
 
 // 幽灵帖可见性：普通用户对幽灵帖一律 404（防 ID 探测，与"帖子不存在"同语义）
 function ghostVisible(req, p) {
-  return !p?.is_ghost || req.user?.is_ghost || req.user?.is_admin;
+  return !p?.is_ghost || req.user?.is_ghost || isSuperAdmin(req.user);
 }
 
 // 写权限：作者本人或管理员（PUT/DELETE 行、附件、Gitee 同步共用一套，避免各处漂移）
-const canEdit = (p, req) => Number(p?.user_id) === uid(req) || !!req.user?.is_admin;
+// 受限管理员需「内容管理」权限；幽灵帖巡检/豁免仍仅限超级管理员
+const canEdit = (p, req) => Number(p?.user_id) === uid(req) || hasAdminPerm(req.user, 'content');
 
 // 开源/私密 + 幽灵统一可见性：私密帖仅作者本人/管理员；私密与幽灵双隔离并行。
 // 对不可见者统一 404（不区分"不存在"与"没权限"，防探测）。
@@ -102,7 +103,7 @@ function postVisible(req, p) {
   // 详情查询把作者列别名成 author_id（SELECT * 的行才是 user_id），两处都认
   const ownerId = p.user_id ?? p.author_id;
   const isOwner = Number(ownerId) === uid(req);
-  if (Number(p.is_public) === 0 && !isOwner && !req.user?.is_admin) return false;
+  if (Number(p.is_public) === 0 && !isOwner && !hasAdminPerm(req.user, 'content')) return false;
   return true;
 }
 
@@ -244,12 +245,12 @@ r.get('/u/:username', optionalAuth, (req, res) => {
     .get(String(req.params.username));
   if (!u) return res.status(404).json({ error: '用户不存在' });
   const isOwner = me === Number(u.id);
-  if (u.is_ghost && !isOwner && !req.user?.is_admin) {
+  if (u.is_ghost && !isOwner && !isSuperAdmin(req.user)) {
     return res.status(404).json({ error: '用户不存在' });
   }
   const conds = ['p.user_id = ?'];
   const params = [u.id];
-  if (!isOwner && !req.user?.is_admin) conds.push('p.is_public = 1', 'p.is_ghost = 0');
+  if (!isOwner && !isSuperAdmin(req.user)) conds.push('p.is_public = 1', 'p.is_ghost = 0');
   const projects = db.prepare(
     `SELECT p.id, p.title, p.content, p.slug, p.is_public, p.gitee_repo, p.create_time, p.update_time,
             (SELECT COUNT(*) FROM share_like l WHERE l.post_id = p.id) AS like_count,
@@ -278,7 +279,7 @@ r.get('/p/:username/:slug', optionalAuth, (req, res) => {
 // GET /api/share/tags — 子板块标签（按帖子数降序）
 // 幽灵帖隔离：普通用户只统计普通帖（COUNT(sp.id) 排除幽灵帖），幽灵专属标签整体隐藏（HAVING）
 r.get('/tags', optionalAuth, (req, res) => {
-  const all = req.user?.is_ghost || req.user?.is_admin;
+  const all = req.user?.is_ghost || isSuperAdmin(req.user);
   const rows = db.prepare(
     `SELECT t.name, ${all ? 'COUNT(pt.post_id)' : 'COUNT(sp.id)'} AS count
      FROM share_tag t LEFT JOIN share_post_tag pt ON pt.tag_id = t.id
@@ -734,7 +735,7 @@ r.delete('/comments/:id', authRequired, (req, res) => {
     `SELECT c.*, p.user_id AS post_owner FROM share_comment c JOIN share_post p ON p.id = c.post_id WHERE c.id = ?`
   ).get(Number(req.params.id));
   if (!c) return res.status(404).json({ error: '评论不存在' });
-  if (c.user_id !== me && c.post_owner !== me && !req.user.is_admin) {
+  if (c.user_id !== me && c.post_owner !== me && !hasAdminPerm(req.user, 'content')) {
     return res.status(403).json({ error: '只能删除自己的评论' });
   }
   db.prepare('DELETE FROM share_comment WHERE id = ?').run(c.id);

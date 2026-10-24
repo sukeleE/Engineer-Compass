@@ -9,7 +9,7 @@ import multer from 'multer';
 import { mkdirSync, existsSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import db from '../db/database.js';
-import { authRequired, logAudit, realNameRequired, displayNameOf } from './middleware.js';
+import { authRequired, logAudit, realNameRequired, displayNameOf, isSuperAdmin } from './middleware.js';
 import { callDeepSeek } from './ai.js';
 import {
   dirs, MAX_FILE, REQUEST_QUOTA,
@@ -52,12 +52,12 @@ const myApproverEventIds = (userId) => new Set(
   db.prepare('SELECT event_id FROM purchase_event_approver WHERE user_id = ?').all(Number(userId)).map((x) => x.event_id)
 );
 // 审批权：管理员或本档案审批人（leader/teacher 均可，任一通过即生效）
-const canApproveEvent = (req, ev) => !!req.user.is_admin || !!approverRow(ev.id, req.user.id);
+const canApproveEvent = (req, ev) => !!isSuperAdmin(req.user) || !!approverRow(ev.id, req.user.id);
 // 成员管理（加/减审批人）：管理员、建档者、本档案 leader
 const canManageApprovers = (req, ev) =>
-  !!req.user.is_admin || ev.created_by === req.user.id || approverRow(ev.id, req.user.id)?.role === 'leader';
+  !!isSuperAdmin(req.user) || ev.created_by === req.user.id || approverRow(ev.id, req.user.id)?.role === 'leader';
 // 档案设置（改名/关闭）：仅管理员或建档者
-const canManageSettings = (req, ev) => !!req.user.is_admin || ev.created_by === req.user.id;
+const canManageSettings = (req, ev) => !!isSuperAdmin(req.user) || ev.created_by === req.user.id;
 
 const eventOut = (ev, req) => {
   const row = approverRow(ev.id, req.user.id);
@@ -73,7 +73,7 @@ const eventOut = (ev, req) => {
 
 const getRequest = (id) => db.prepare('SELECT * FROM purchase_request WHERE id = ?').get(Number(id));
 function canViewRequest(req, rq, ev) {
-  return rq.user_id === req.user.id || !!req.user.is_admin || canApproveEvent(req, ev);
+  return rq.user_id === req.user.id || !!isSuperAdmin(req.user) || canApproveEvent(req, ev);
 }
 
 // 明细入参白名单归一（金额一律服务端算；qty/price 范围兜底防呆）
@@ -140,7 +140,7 @@ function detailOf(rqId, req) {
     perm: {
       canEdit: owner && EDITABLE.has(rq.status),
       canDelete: owner && EDITABLE.has(rq.status),
-      canApprove: (!owner || req.user.is_admin) && rq.status === 'pending' && (!!req.user.is_admin || !!approverRow(ev.id, req.user.id)),
+      canApprove: (!owner || isSuperAdmin(req.user)) && rq.status === 'pending' && (!!isSuperAdmin(req.user) || !!approverRow(ev.id, req.user.id)),
       canInvoice: owner && INVOICEABLE.has(rq.status),
       isOwner: owner,
       isApprover: canApproveEvent(req, ev),
@@ -170,7 +170,7 @@ r.get('/events', (req, res) => {
   const rows = db.prepare('SELECT * FROM purchase_event ORDER BY status ASC, id DESC').all();
   const out = [];
   for (const ev of rows) {
-    if (ev.status === 'open' || req.user.is_admin || ev.created_by === req.user.id
+    if (ev.status === 'open' || isSuperAdmin(req.user) || ev.created_by === req.user.id
       || approverRow(ev.id, req.user.id)
       || db.prepare('SELECT 1 FROM purchase_request WHERE event_id = ? AND user_id = ?').get(ev.id, req.user.id)) {
       out.push(eventOut(ev, req));
@@ -350,9 +350,9 @@ function listFilter(req) {
   const myEvents = myApproverEventIds(req.user.id);
   const mine = String(req.query.mine || '') === '1';
   const isApprover = myEvents.size > 0;
-  if (mine || (!req.user.is_admin && !isApprover)) {
+  if (mine || (!isSuperAdmin(req.user) && !isApprover)) {
     where.push('rq.user_id = ?'); params.push(req.user.id);
-  } else if (!req.user.is_admin) {
+  } else if (!isSuperAdmin(req.user)) {
     const eid = Number(req.query.event_id);
     if (eid) {
       if (!myEvents.has(eid)) throw new HttpError(403, '你不是该比赛/项目的审批人');
@@ -502,9 +502,9 @@ function adjudicate(req, res, result, comment) {
   if (!rq) throw new HttpError(404, '申请不存在');
   const ev = getEvent(rq.event_id);
   if (!canApproveEvent(req, ev)) throw new HttpError(403, '你不是该比赛/项目的审批人');
-  if (rq.user_id === req.user.id && !req.user.is_admin) throw new HttpError(403, '不能审批自己提交的申请');
+  if (rq.user_id === req.user.id && !isSuperAdmin(req.user)) throw new HttpError(403, '不能审批自己提交的申请');
   if (rq.status !== 'pending') throw new HttpError(400, '该申请已审批过了');
-  const role = req.user.is_admin && !approverRow(ev.id, req.user.id) ? 'leader' : approverRow(ev.id, req.user.id)?.role || 'leader';
+  const role = isSuperAdmin(req.user) && !approverRow(ev.id, req.user.id) ? 'leader' : approverRow(ev.id, req.user.id)?.role || 'leader';
   const name = displayNameOf(req.user);
   db.exec('BEGIN');
   try {
@@ -657,7 +657,7 @@ r.delete('/files/:fid', (req, res) => {
     if (rq.user_id !== req.user.id) throw new HttpError(403, '只能删除自己申请的截图');
     if (!EDITABLE.has(rq.status)) throw new HttpError(400, '当前状态不能删除截图');
   } else {
-    const isAdmin = !!req.user.is_admin;
+    const isAdmin = !!isSuperAdmin(req.user);
     const isOwner = rq.user_id === req.user.id && INVOICEABLE.has(rq.status);
     if (!isAdmin && !isOwner) throw new HttpError(403, '无权删除该发票');
   }
@@ -682,7 +682,7 @@ function queryRequests(req) {
 // GET /stats — 审批人/管理员（学生走 mine=1 个人统计也允许）
 r.get('/stats', (req, res) => {
   const mine = String(req.query.mine || '') === '1';
-  if (!mine && !req.user.is_admin && !myApproverEventIds(req.user.id).size) {
+  if (!mine && !isSuperAdmin(req.user) && !myApproverEventIds(req.user.id).size) {
     throw new HttpError(403, '仅审批人可查看整体统计');
   }
   const rows = queryRequests(req);

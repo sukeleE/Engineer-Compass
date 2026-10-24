@@ -11,6 +11,7 @@ import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import AuthView from './AuthView.vue';
 import DmDialog from './DmDialog.vue'; // 公共私聊弹窗（3s 轮询，关闭即停）
 import { fmtDateTime } from '../utils/time.js';
+import { canAdmin } from '../utils/adminPerms.js';
 
 const router = useRouter();
 // 小组角色摘要：组长显示「组长 · 角色」（组长也可多角色），普通成员显示角色名/组员
@@ -437,7 +438,7 @@ onMounted(() => {
               <router-link to="/team" class="quick-btn">🏗️ 项目小组</router-link>
               <router-link to="/" class="quick-btn">🗓️ 竞赛时间轴</router-link>
               <router-link to="/share" class="quick-btn">📤 资源分享</router-link>
-              <router-link v-if="auth.user?.is_admin" to="/admin" class="quick-btn">🧠 AI 收录管理</router-link>
+              <router-link v-if="canAdmin('competition')" to="/admin" class="quick-btn">🧠 AI 收录管理</router-link>
               <router-link v-if="auth.user?.is_admin" to="/admin-console" class="quick-btn">⚙️ 后台管理</router-link>
             </div>
           </section>

@@ -299,7 +299,10 @@ export const api = {
   adminRealnameRemind: () => req('/admin/notices/realname-remind', { method: 'POST' }),
   // 用户详情 + 角色管理
   adminUserDetail: (id) => req(`/admin/users/${id}/detail`),
-  adminSetRole: (id, is_admin) => req(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ is_admin: is_admin ? 1 : 0 }) }),
+  // 管理员分权：is_admin=1 + perms=[] 为超级管理员；perms 非空为受限管理员；is_admin=0 取消管理员
+  adminSetRole: (id, is_admin, perms = []) => req(`/admin/users/${id}/role`, {
+    method: 'PUT', body: JSON.stringify({ is_admin: is_admin ? 1 : 0, perms }),
+  }),
   // 后台：资源管理（全部用户上传）
   adminResources: (params) => req(`/admin/resources${qs(params)}`),
   adminResourceDelete: (id) => req(`/admin/resources/${id}`, { method: 'DELETE' }),

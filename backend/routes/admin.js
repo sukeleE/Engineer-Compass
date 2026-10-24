@@ -1,19 +1,27 @@
-// 后台管理接口（挂载 /api/admin）：用户管理 / 操作日志 / 公告 / 服务器状态
-// 全部接口先 authRequired 再 adminRequired（仅管理员可访问）
+// 后台管理接口（挂载 /api/admin）：用户管理 / 内容 / 日志 / 公告 / 资源 / 反馈 / 服务器状态
+// 全部接口先 authRequired 再 adminRequired（任意管理员可进入），各路由再按 admin_perms 模块分权；
+// 超级管理员（is_admin=1 且 admin_perms 为空）拥有全部权限
 import { Router } from 'express';
 import os from 'node:os';
 import { statfsSync, statSync } from 'node:fs';
 import db, { DB_PATH } from '../db/database.js';
-import { authRequired, adminRequired, logAudit } from './middleware.js';
+import {
+  authRequired, adminRequired, adminPermRequired, superAdminRequired,
+  isSuperAdmin, parseAdminPerms, ADMIN_PERMS, logAudit,
+} from './middleware.js';
 import { deleteResource } from './resource.js';
 import { purgePostFiles } from '../lib/shareFiles.js';
 
 const r = Router();
 r.use(authRequired);
-r.use(adminRequired);
+r.use(adminRequired); // 兜底：受限管理员若漏挂细粒度守卫，仍不会放行给普通用户
+
+// 模块守卫简写：ap('user') / ap('content')…（超管恒通过）
+const ap = (...keys) => adminPermRequired(...keys);
 
 const safeUser = (u) => u && ({
   id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin,
+  perms: parseAdminPerms(u.admin_perms),
   email: u.email || '', avatar: u.avatar || null, status: u.status || 0, create_time: u.create_time || null,
   password_set: u.password_set !== 0, phone: u.phone || '', real_name: u.real_name || '',
 });
@@ -25,7 +33,7 @@ const PASSWORD_NOTICE = {
 };
 
 // GET /api/admin/users?page&size&q — 用户列表（q 模糊搜昵称/邮箱/用户名）
-r.get('/users', (req, res) => {
+r.get('/users', ap('user'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -34,20 +42,21 @@ r.get('/users', (req, res) => {
   const params = q ? [like, like, like, like] : [];
   const total = db.prepare(`SELECT COUNT(*) AS n FROM user ${where}`).get(...params).n;
   const list = db.prepare(
-    `SELECT id, username, nickname, is_admin, email, avatar, status, password_set, phone, real_name, create_time
+    `SELECT id, username, nickname, is_admin, admin_perms, email, avatar, status, password_set, phone, real_name, create_time
      FROM user ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
   ).all(...params, size, (page - 1) * size).map(safeUser);
   res.json({ total, page, size, list });
 });
 
 // PUT /api/admin/users/:id/status — 封禁(1)/禁言(2)/解封(0)；不可操作自己，管理员不可被封
-r.put('/users/:id/status', (req, res) => {
+r.put('/users/:id/status', ap('user'), (req, res) => {
   const id = Number(req.params.id);
   const status = Number(req.body?.status);
   if (![0, 1, 2].includes(status)) return res.status(400).json({ error: 'status 仅支持 0 正常 / 1 封禁 / 2 禁言' });
   if (id === req.user.id) return res.status(400).json({ error: '不能操作自己的账号' });
   const u = db.prepare('SELECT id, username, nickname, is_admin, status FROM user WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
+  if (u.is_admin && !isSuperAdmin(req.user)) return res.status(403).json({ error: '管理员账号仅超级管理员可操作' });
   if (u.is_admin && status !== 0) return res.status(400).json({ error: '管理员账号不可封禁/禁言' });
   db.prepare('UPDATE user SET status = ? WHERE id = ?').run(status, id);
   const label = { 0: '解除限制', 1: '封禁', 2: '禁言' }[status];
@@ -56,7 +65,7 @@ r.put('/users/:id/status', (req, res) => {
 });
 
 // GET /api/admin/logs?page&size&userId&action&q — 操作日志（q 模糊搜 target/username）
-r.get('/logs', (req, res) => {
+r.get('/logs', ap('log'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -81,7 +90,7 @@ r.get('/logs', (req, res) => {
 // ---- 公告管理 ----
 // POST /api/admin/notices/password-remind — 给所有仍用初始密码的用户补发个人公告
 // （已有同 type 未读公告的不重复发），返回新发送数
-r.post('/notices/password-remind', (req, res) => {
+r.post('/notices/password-remind', ap('user'), (req, res) => {
   const targets = db.prepare('SELECT id FROM user WHERE password_set = 0').all();
   const exists = db.prepare(
     "SELECT 1 FROM personal_notice WHERE user_id = ? AND type = 'password_init' AND is_read = 0"
@@ -104,7 +113,7 @@ const REALNAME_NOTICE = {
   content: '资源预约、经费报销、物料采购需填写真实姓名后才能使用，请在账号安全页完成实名认证。',
   link: '/account-security',
 };
-r.post('/notices/realname-remind', (req, res) => {
+r.post('/notices/realname-remind', ap('user'), (req, res) => {
   const targets = db.prepare("SELECT id FROM user WHERE COALESCE(real_name, '') = ''").all();
   const exists = db.prepare(
     "SELECT 1 FROM personal_notice WHERE user_id = ? AND type = 'realname_required' AND is_read = 0"
@@ -120,14 +129,14 @@ r.post('/notices/realname-remind', (req, res) => {
   res.json({ sent, total: targets.length, message: `已向 ${sent} 位未实名用户补发提醒（共 ${targets.length} 位待实名）` });
 });
 
-r.get('/announcements', (req, res) => {
+r.get('/announcements', ap('announce'), (req, res) => {
   res.json(db.prepare(
     `SELECT a.*, u.username AS admin_name FROM announcement a
      LEFT JOIN user u ON u.id = a.admin_id ORDER BY a.pinned DESC, a.id DESC`
   ).all());
 });
 
-r.post('/announcements', (req, res) => {
+r.post('/announcements', ap('announce'), (req, res) => {
   const title = String(req.body?.title || '').trim();
   const content = String(req.body?.content || '').trim();
   if (!title || title.length > 60) return res.status(400).json({ error: '公告标题必填（≤60 字）' });
@@ -139,7 +148,7 @@ r.post('/announcements', (req, res) => {
   res.status(201).json({ id: Number(info.lastInsertRowid), message: '公告已发布' });
 });
 
-r.put('/announcements/:id', (req, res) => {
+r.put('/announcements/:id', ap('announce'), (req, res) => {
   const id = Number(req.params.id);
   const a = db.prepare('SELECT * FROM announcement WHERE id = ?').get(id);
   if (!a) return res.status(404).json({ error: '公告不存在' });
@@ -153,7 +162,7 @@ r.put('/announcements/:id', (req, res) => {
   res.json({ message: '公告已更新' });
 });
 
-r.delete('/announcements/:id', (req, res) => {
+r.delete('/announcements/:id', ap('announce'), (req, res) => {
   const id = Number(req.params.id);
   const a = db.prepare('SELECT * FROM announcement WHERE id = ?').get(id);
   if (!a) return res.status(404).json({ error: '公告不存在' });
@@ -163,7 +172,7 @@ r.delete('/announcements/:id', (req, res) => {
 });
 
 // GET /api/admin/server-status — 服务器状态 + 基础统计
-r.get('/server-status', (req, res) => {
+r.get('/server-status', ap('server'), (req, res) => {
   let disk = null;
   try {
     const s = statfsSync(DB_PATH);
@@ -189,7 +198,7 @@ r.get('/server-status', (req, res) => {
 
 // ---- 内容管理：帖子（评论/点赞/收藏/通知随 share_post 外键 ON DELETE CASCADE 级联清理）----
 // GET /api/admin/posts?page&size&q&userId — 帖子列表（标题/作者模糊搜，附评论点赞计数）
-r.get('/posts', (req, res) => {
+r.get('/posts', ap('content'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -210,7 +219,7 @@ r.get('/posts', (req, res) => {
 });
 
 // DELETE /api/admin/posts/:id — 删帖（评论/点赞/收藏/通知全部级联清理）
-r.delete('/posts/:id', (req, res) => {
+r.delete('/posts/:id', ap('content'), (req, res) => {
   const id = Number(req.params.id);
   const p = db.prepare('SELECT id, title FROM share_post WHERE id = ?').get(id);
   if (!p) return res.status(404).json({ error: '帖子不存在' });
@@ -221,7 +230,7 @@ r.delete('/posts/:id', (req, res) => {
 });
 
 // GET /api/admin/comments?page&size&postId&q — 评论列表（可按帖子/内容搜）
-r.get('/comments', (req, res) => {
+r.get('/comments', ap('content'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -242,7 +251,7 @@ r.get('/comments', (req, res) => {
 });
 
 // DELETE /api/admin/comments/:id — 删评论（同时清 notification 表关联项）
-r.delete('/comments/:id', (req, res) => {
+r.delete('/comments/:id', ap('content'), (req, res) => {
   const id = Number(req.params.id);
   const c = db.prepare('SELECT id, content, post_id FROM share_comment WHERE id = ?').get(id);
   if (!c) return res.status(404).json({ error: '评论不存在' });
@@ -253,7 +262,7 @@ r.delete('/comments/:id', (req, res) => {
 });
 
 // GET /api/admin/users/:id/detail — 用户详情：基本信息 + 内容统计 + 最近 20 条操作日志
-r.get('/users/:id/detail', (req, res) => {
+r.get('/users/:id/detail', ap('user'), (req, res) => {
   const id = Number(req.params.id);
   const u = db.prepare('SELECT * FROM user WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
@@ -276,21 +285,51 @@ r.get('/users/:id/detail', (req, res) => {
   res.json({ user: safeUser(u), stats, resources, logs });
 });
 
-// PUT /api/admin/users/:id/role {is_admin} — 设为/取消管理员；禁止操作自己
-r.put('/users/:id/role', (req, res) => {
+// PUT /api/admin/users/:id/role {is_admin, perms} — 管理员分权（仅超级管理员）
+// is_admin=1 + perms=[] → 超级管理员（全权）；is_admin=1 + perms=['content',…] → 受限管理员；
+// is_admin=0 → 取消管理员（perms 一并清空）。禁止操作自己；系统至少保留一名超管。
+r.put('/users/:id/role', superAdminRequired, (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.status(400).json({ error: '不能修改自己的管理员身份' });
   const is_admin = req.body?.is_admin ? 1 : 0;
-  const u = db.prepare('SELECT id, username, nickname, is_admin, status FROM user WHERE id = ?').get(id);
+  const reqPerms = Array.isArray(req.body?.perms)
+    ? [...new Set(req.body.perms.map(String))].filter((k) => k in ADMIN_PERMS)
+    : [];
+  if (is_admin === 1 && req.body?.perms != null && !Array.isArray(req.body.perms)) {
+    return res.status(400).json({ error: 'perms 必须是权限 key 数组' });
+  }
+  const u = db.prepare('SELECT id, username, nickname, is_admin, admin_perms, status FROM user WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
   if (is_admin === 1 && u.status !== 0) return res.status(400).json({ error: '请先解除封禁/禁言再设为管理员' });
-  db.prepare('UPDATE user SET is_admin = ? WHERE id = ?').run(is_admin, id);
-  logAudit(req, 'user-role', u.nickname || u.username, { target_id: id, is_admin: !!is_admin, from: !!u.is_admin });
-  res.json({ message: is_admin ? `已将 ${u.nickname || u.username} 设为管理员` : `已取消 ${u.nickname || u.username} 的管理员身份` });
+
+  const fromSuper = !!u.is_admin && parseAdminPerms(u.admin_perms).length === 0;
+  // 目标当前是超管，本次操作将取消或降级 → 必须保证至少还剩一名超管
+  if (fromSuper && (is_admin === 0 || reqPerms.length > 0)) {
+    const left = db.prepare("SELECT COUNT(*) AS n FROM user WHERE is_admin = 1 AND COALESCE(admin_perms, '') = ''").get().n;
+    if (left <= 1) return res.status(400).json({ error: '系统至少需要保留一名超级管理员' });
+  }
+
+  // 存储口径：空串=超级管理员（与老库迁移的默认值一致），非空 JSON 数组=受限管理员
+  const permsJson = is_admin === 1 && reqPerms.length ? JSON.stringify(reqPerms) : '';
+  db.prepare('UPDATE user SET is_admin = ?, admin_perms = ? WHERE id = ?').run(is_admin, permsJson, id);
+  logAudit(req, 'user-role', u.nickname || u.username, {
+    target_id: id, is_admin: !!is_admin, perms: is_admin ? reqPerms : [],
+    from: { is_admin: !!u.is_admin, perms: parseAdminPerms(u.admin_perms) },
+  });
+  const name = u.nickname || u.username;
+  const message = is_admin === 0
+    ? `已取消 ${name} 的管理员身份`
+    : reqPerms.length === 0
+      ? `已将 ${name} 设为超级管理员（全部权限）`
+      : `已将 ${name} 设为管理员（${reqPerms.map((k) => ADMIN_PERMS[k]).join('、')}）`;
+  res.json({ message, perms: is_admin ? reqPerms : [] });
 });
 
+// GET /api/admin/perms — 权限 key→中文名（前端权限分配弹窗渲染用）
+r.get('/perms', superAdminRequired, (_req, res) => res.json(ADMIN_PERMS));
+
 // GET /api/admin/resources?page&size&q — 资源管理：全部用户上传的资源（q 模糊搜文件名/昵称/用户名）
-r.get('/resources', (req, res) => {
+r.get('/resources', ap('resource'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -307,10 +346,10 @@ r.get('/resources', (req, res) => {
 });
 
 // DELETE /api/admin/resources/:id — 删除任意用户资源（复用 resource.js 的 deleteResource，审计记 admin 变体）
-r.delete('/resources/:id', (req, res) => deleteResource(req, res, Number(req.params.id)));
+r.delete('/resources/:id', ap('resource'), (req, res) => deleteResource(req, res, Number(req.params.id)));
 
 // GET /api/admin/visits?page&size&userId&q — 访问记录（含游客：user_id 为 NULL 即未登录；q 模糊 ip/用户名/路径）
-r.get('/visits', (req, res) => {
+r.get('/visits', ap('log'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const userId = req.query.userId ? Number(req.query.userId) : null;
@@ -330,7 +369,7 @@ r.get('/visits', (req, res) => {
 
 // GET /api/admin/feedback?page&size&q — 用户反馈（feedback 表留档；提交时另发邮件给 FEEDBACK_TO）
 // q 模糊反馈正文 / 联系邮箱 / 用户名 / 昵称 / 真名；LEFT JOIN 防用户行缺失（正常 FK 级联不会发生）
-r.get('/feedback', (req, res) => {
+r.get('/feedback', ap('feedback'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -355,7 +394,7 @@ r.get('/feedback', (req, res) => {
 });
 
 // DELETE /api/admin/feedback/:id — 删除反馈（清理垃圾/已处理反馈；审计留痕）
-r.delete('/feedback/:id', (req, res) => {
+r.delete('/feedback/:id', ap('feedback'), (req, res) => {
   const id = Number(req.params.id);
   const f = db.prepare('SELECT id, user_id, substr(content, 1, 40) AS preview FROM feedback WHERE id = ?').get(id);
   if (!f) return res.status(404).json({ error: '反馈不存在' });

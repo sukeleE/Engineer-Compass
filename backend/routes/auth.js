@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { randomBytes, randomInt } from 'node:crypto';
 import db from '../db/database.js';
-import { hashPassword, verifyPassword, authRequired, logAudit } from './middleware.js';
+import { hashPassword, verifyPassword, authRequired, logAudit, parseAdminPerms } from './middleware.js';
 import sendMail from './mailer.js';
 
 const r = Router();
@@ -86,7 +86,8 @@ function genUsername(mail) {
 // 返回给前端的 user 形状（统一含 email / avatar，avatar 未设置为 null）
 // 导出供 ghost.js 复用（enter/exit 后返回最新 userCard）
 export const userCard = (u) => ({
-  id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin, is_ghost: !!u.is_ghost,
+  id: u.id, username: u.username, nickname: u.nickname, is_admin: !!u.is_admin,
+  perms: parseAdminPerms(u.admin_perms), is_ghost: !!u.is_ghost,
   email: u.email || '', avatar: u.avatar || null,
   password_set: u.password_set !== 0, phone: u.phone || '', real_name: u.real_name || '',
 });

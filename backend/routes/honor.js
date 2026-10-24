@@ -14,7 +14,7 @@ import { existsSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import db from '../db/database.js';
-import { optionalAuth, authRequired, adminRequired, logAudit } from './middleware.js';
+import { optionalAuth, authRequired, adminPermRequired, hasAdminPerm, logAudit } from './middleware.js';
 import { isInlineOk, discardUploads } from '../lib/shareFiles.js';
 import {
   HONOR_DIR, MAX_IMAGE, BULK_MAX, HONOR_QUOTA, ALLOW_MIME,
@@ -164,11 +164,11 @@ r.get('/tags', (req, res) => {
 
 // GET /api/honor/:id/image —— 公开出图
 // 「公开 / 需登录」的全部差别就是下面这一行闸门：想改成登录可见，
-// 把 `!h.is_active && !req.user?.is_admin` 换成 `!req.user` 即可（前端需同步改成 blob 取图）。
+// 把 `!h.is_active && !hasAdminPerm(req.user, 'honor')` 换成 `!req.user` 即可（前端需同步改成 blob 取图）。
 r.get('/:id/image', (req, res) => {
   const h = db.prepare('SELECT id, title, store_name, image_mime, is_active FROM honor WHERE id = ?').get(Number(req.params.id));
   if (!h?.store_name) return res.status(404).json({ error: '图片不存在' });
-  if (!h.is_active && !req.user?.is_admin) return res.status(404).json({ error: '图片不存在' });
+  if (!h.is_active && !hasAdminPerm(req.user, 'honor')) return res.status(404).json({ error: '图片不存在' });
   const abs = absPathOf(h);
   if (!abs || !existsSync(abs)) return res.status(404).json({ error: '图片文件已丢失，请在后台重新上传' });
   // 用嗅探时定下的 mime，不按扩展名猜；image_ver 变了 URL 才变，故可以放心 immutable
@@ -180,7 +180,7 @@ r.get('/:id/image', (req, res) => {
 // 鉴权自包含：两行写在文件内，将来谁挂这个 router 都不会漏
 export const adminR = Router();
 adminR.use(authRequired);
-adminR.use(adminRequired);
+adminR.use(adminPermRequired('honor'));
 
 // GET /api/admin/honors —— 全量（含下架）
 adminR.get('/', (_req, res) => {

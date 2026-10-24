@@ -1,6 +1,6 @@
 // 资源预约模块路由（挂载 /api/booking，整路由需登录）
 // 与小组域 team_device/device_booking 设备预约完全独立，互不影响。
-// 身份两层：建档者=项目负责人（管资源/组队/审批/取消），is_admin 全权；任何登录用户可建档/浏览开放项目/下单。
+// 身份两层：建档者=项目负责人（管资源/组队/审批/取消），超级管理员全权；任何登录用户可建档/浏览开放项目/下单。
 // 审批为**资源级**开关：approve_mode=first_come 创建即确认（冲突即拒）；approval 走 pending→confirmed/rejected。
 // 时间口径：start_time/end_time 为北京时间朴素串 'YYYY-MM-DD HH:MM'，定宽字符串直接半开区间字典序比较，
 //   全链路禁止 toLocal 补 Z（否则再差 8 小时）。30 分钟一格，每日开放 07:00–22:00，可跨天连续占用（最长 7 天）。
@@ -8,7 +8,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { basename, extname } from 'node:path';
 import db from '../db/database.js';
-import { authRequired, logAudit, realNameRequired, displayNameOf } from './middleware.js';
+import { authRequired, logAudit, realNameRequired, displayNameOf, isSuperAdmin } from './middleware.js';
 import {
   BookingImportError, recognizeBookingXlsx, recognizeBookingCsv, buildBookingTemplate,
   BOOKING_IMPORT_LIMIT_BYTES,
@@ -121,7 +121,7 @@ const getResource = (id) => db.prepare('SELECT * FROM booking_resource WHERE id 
 const getBooking = (id) => db.prepare('SELECT * FROM booking WHERE id = ?').get(Number(id));
 const getTeam = (id) => db.prepare('SELECT * FROM booking_team WHERE id = ?').get(Number(id));
 
-const canManageProject = (req, p) => !!req.user.is_admin || p.created_by === req.user.id;
+const canManageProject = (req, p) => !!isSuperAdmin(req.user) || p.created_by === req.user.id;
 // 开放项目所有登录用户可见；关闭项目仅负责人/管理员/在该项目有预约者可见
 function canViewProject(req, p) {
   if (!p) return false;
@@ -224,7 +224,7 @@ function normParticipants(projectId, body, me) {
     if (!teamId) throw new HttpError(400, '请选择固定组队');
     const team = getTeam(teamId);
     if (!team || team.project_id !== projectId) throw new HttpError(400, '组队不存在或不属于本项目');
-    if (team.owner_id !== me.id && !me.is_admin) throw new HttpError(403, '只有队长可以用该组队预约');
+    if (team.owner_id !== me.id && !isSuperAdmin(me)) throw new HttpError(403, '只有队长可以用该组队预约');
     for (const m of db.prepare('SELECT user_id FROM booking_team_member WHERE team_id = ?').all(teamId)) idSet.add(m.user_id);
   } else if (source === 'custom') {
     if (!Array.isArray(body.participant_ids)) throw new HttpError(400, '请选择参与人');
@@ -595,7 +595,7 @@ function teamOut(t, req) {
     owner_id: t.owner_id, owner_name: t.owner_name,
     create_time: t.create_time,
     members: members.map((m) => ({ user_id: m.user_id, user_name: m.user_name })),
-    canManage: !!req.user.is_admin || t.owner_id === req.user.id || canManageProject(req, p),
+    canManage: !!isSuperAdmin(req.user) || t.owner_id === req.user.id || canManageProject(req, p),
     isOwner: t.owner_id === req.user.id,
   };
 }
@@ -649,7 +649,7 @@ r.put('/teams/:tid', ah((req, res) => {
   const t = getTeam(req.params.tid);
   if (!t) throw new HttpError(404, '队伍不存在');
   const p = getProject(t.project_id);
-  if (!req.user.is_admin && t.owner_id !== req.user.id && !canManageProject(req, p))
+  if (!isSuperAdmin(req.user) && t.owner_id !== req.user.id && !canManageProject(req, p))
     throw new HttpError(403, '只有队长或项目负责人可以管理该组队');
   tx(() => {
     if (req.body?.name !== undefined) {
@@ -673,7 +673,7 @@ r.delete('/teams/:tid', ah((req, res) => {
   const t = getTeam(req.params.tid);
   if (!t) throw new HttpError(404, '队伍不存在');
   const p = getProject(t.project_id);
-  if (!req.user.is_admin && t.owner_id !== req.user.id && !canManageProject(req, p))
+  if (!isSuperAdmin(req.user) && t.owner_id !== req.user.id && !canManageProject(req, p))
     throw new HttpError(403, '只有队长或项目负责人可以删除该组队');
   // booking.team_id ON DELETE SET NULL 自动解绑，历史参与人快照保留
   tx(() => db.prepare('DELETE FROM booking_team WHERE id = ?').run(t.id));
@@ -711,8 +711,8 @@ function bookingPerm(b, req, p) {
   const manager = canManageProject(req, p || getProject(b.project_id));
   const active = b.status === 'pending' || b.status === 'confirmed';
   return {
-    canApprove: manager && b.status === 'pending' && (!!req.user.is_admin || b.booker_id !== req.user.id),
-    canReject: manager && b.status === 'pending' && (!!req.user.is_admin || b.booker_id !== req.user.id),
+    canApprove: manager && b.status === 'pending' && (!!isSuperAdmin(req.user) || b.booker_id !== req.user.id),
+    canReject: manager && b.status === 'pending' && (!!isSuperAdmin(req.user) || b.booker_id !== req.user.id),
     canCancel: active && (b.booker_id === req.user.id || manager),
     isManager: manager,
   };
@@ -887,7 +887,7 @@ r.post('/bookings/:id/approve', ah((req, res) => {
   const p = getProject(b.project_id);
   if (!canManageProject(req, p)) throw new HttpError(404, '预约不存在');
   if (b.status !== 'pending') throw new HttpError(400, '该预约已结案，无需审批');
-  if (b.booker_id === req.user.id && !req.user.is_admin) throw new HttpError(403, '不能审批自己提交的预约');
+  if (b.booker_id === req.user.id && !isSuperAdmin(req.user)) throw new HttpError(403, '不能审批自己提交的预约');
   const rs = getResource(b.resource_id);
 
   tx(() => {
@@ -917,7 +917,7 @@ r.post('/bookings/:id/reject', ah((req, res) => {
   const p = getProject(b.project_id);
   if (!canManageProject(req, p)) throw new HttpError(404, '预约不存在');
   if (b.status !== 'pending') throw new HttpError(400, '该预约已结案，无需审批');
-  if (b.booker_id === req.user.id && !req.user.is_admin) throw new HttpError(403, '不能审批自己提交的预约');
+  if (b.booker_id === req.user.id && !isSuperAdmin(req.user)) throw new HttpError(403, '不能审批自己提交的预约');
   const reason = trim(req.body?.reason);
   if (!reason) throw new HttpError(400, '驳回必须填写理由');
   if (reason.length > 200) throw new HttpError(400, '驳回理由过长（≤200 字）');

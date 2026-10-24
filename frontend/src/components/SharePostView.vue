@@ -9,6 +9,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
+import { canAdmin } from '../utils/adminPerms.js';
 import { normAtts } from './team/AttachmentList.vue';
 import { fmtSize } from '../utils/share.js';
 import ShareReadme from './share/ShareReadme.vue';
@@ -33,7 +34,7 @@ const feishuBusy = ref(false);
 const commentSending = ref(false);
 const tagList = ref([]);
 
-const isMine = (p) => !!auth.user && (Number(p.author_id) === Number(auth.user.id) || auth.user.is_admin);
+const isMine = (p) => !!auth.user && (Number(p.author_id) === Number(auth.user.id) || canAdmin('content'));
 const needLogin = () => {
   if (auth.token) return false;
   ElMessage.warning('请先登录');

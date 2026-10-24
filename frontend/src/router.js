@@ -28,6 +28,7 @@ import AdminConsole from './components/AdminConsole.vue';
 import auth, { patchUser } from './auth.js';
 import { api } from './api.js';
 import { openGate } from './realNameGate.js';
+import { canAdmin } from './utils/adminPerms.js';
 
 // 幽灵页守卫（/ghost-share 与 /ghost-share/:id 共用）：仅 is_ghost 可进，前端守卫 + 后端 share 过滤双重校验
 async function ghostGuard(to, _from, next) {
@@ -41,6 +42,22 @@ async function ghostGuard(to, _from, next) {
     } catch { /* 网络失败按原缓存判断 */ }
     return next('/');
   }
+  next();
+}
+
+// 后台模块守卫：任意管理员可进 /admin-console；/admin（AI 收录审核）需「竞赛审核」权限。
+// 进入前统一 me() 刷新——权限刚被超管调整后，本地缓存可能过期（后端各接口仍有硬校验兜底）。
+async function consoleGuard(_to, _from, next) {
+  if (!auth.token) return next('/login');
+  try { const { user } = await api.me(); patchUser(user); } catch { /* 网络失败按缓存判断 */ }
+  if (!auth.user?.is_admin) return next('/me');
+  next();
+}
+
+async function competitionGuard(to, _from, next) {
+  if (!auth.token) return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`);
+  try { const { user } = await api.me(); patchUser(user); } catch { /* 网络失败按缓存判断 */ }
+  if (!canAdmin('competition')) return next('/me');
   next();
 }
 
@@ -118,23 +135,12 @@ const router = createRouter({
     // 用户公开主页（只读）：小组内点击成员头像/昵称进入
     { path: '/user/:id', name: 'user-profile', component: ProfileView },
     { path: '/login', name: 'login', component: AuthView },
-    { path: '/admin', name: 'admin', component: AdminView },
-    // 后台管理：仅管理员（前端守卫 + 后端 adminRequired 双重校验）
+    // AI 收录管理端：需「竞赛审核」权限（前端守卫 + 后端 adminPermRequired 双重校验）
+    { path: '/admin', name: 'admin', component: AdminView, beforeEnter: competitionGuard },
+    // 后台管理：任意管理员可进入，页内按模块权限显隐 Tab（前端守卫 + 后端逐路由分权）
     {
       path: '/admin-console', name: 'admin-console', component: AdminConsole,
-      beforeEnter: async (_to, _from, next) => {
-        if (!auth.token) return next('/login');
-        if (!auth.user?.is_admin) {
-          // 缓存可能过期（管理员权限刚被授予/撤销），拉取最新状态再判断
-          try {
-            const { user } = await api.me();
-            patchUser(user);
-            if (user.is_admin) return next();
-          } catch { /* 网络失败按原缓存判断 */ }
-          return next('/me');
-        }
-        next();
-      },
+      beforeEnter: consoleGuard,
     },
 
     // ===== GitHub 风动态路由：必须放最后，所有静态路径（/me /share /admin …）优先匹配 =====

@@ -1,8 +1,11 @@
 // 竞赛接口：列表 / 详情 / 搜索 / 知识收录（pending 审核流程）
 import { Router } from 'express';
 import db from '../db/database.js';
+import { authRequired, adminPermRequired } from './middleware.js';
 
 const r = Router();
+// 审核类操作守卫：需「竞赛审核」模块权限（超管恒通过）；POST / 公开（任何用户可提交库外竞赛）
+const reviewRequired = [authRequired, adminPermRequired('competition')];
 
 // 获取单条竞赛详情（含子赛项流程 + 技术栈树）
 function getDetail(id) {
@@ -64,7 +67,7 @@ r.get('/search', (req, res) => {
 });
 
 // GET /api/competition/pending — 待审核列表（管理端）
-r.get('/pending', (req, res) => {
+r.get('/pending', ...reviewRequired, (req, res) => {
   const rows = db.prepare(
     `SELECT id, name, short_name, type, difficulty, source_type, source_url, confidence, create_time
      FROM competition WHERE status = 'pending' ORDER BY create_time DESC`
@@ -108,7 +111,7 @@ r.post('/', (req, res) => {
 });
 
 // POST /api/competition/:id/verify — 采纳转正（pending → active）
-r.post('/:id/verify', (req, res) => {
+r.post('/:id/verify', ...reviewRequired, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   const r2 = db.prepare(`UPDATE competition SET status = 'active' WHERE id = ?`).run(id);
@@ -117,7 +120,7 @@ r.post('/:id/verify', (req, res) => {
 });
 
 // DELETE /api/competition/:id — 删除（拒绝收录或数据有误；级联删子赛项与技术栈）
-r.delete('/:id', (req, res) => {
+r.delete('/:id', ...reviewRequired, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id 非法' });
   const r2 = db.prepare('DELETE FROM competition WHERE id = ?').run(id);

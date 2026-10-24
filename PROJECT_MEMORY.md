@@ -112,6 +112,15 @@
 - 计划勾选限权：`dept==='通用'` 全员可勾；部门任务仅 `role.name===dept` 成员可勾；组长/team 权限可勾一切
 - 组长也可拥有角色（≤3），transfer 保留双方角色；成员行角色 select 需 `perms.member`
 
+### 全站管理员分权（2026-10-24，RBAC 轻量版）
+- `user.is_admin=1` + `admin_perms`（TEXT，migCol 已加，老库自动 `''`）：**空串=超级管理员全权；非空=JSON 权限 key 数组=受限管理员**。注意落库口径：超管存 `''` 不存 `'[]'`（COUNT 超管 SQL 按空串计），前端拿到的 `perms:[]` 由 `parseAdminPerms` 计算
+- 权限 key（middleware.js `ADMIN_PERMS`）：`user / content / competition / announce / honor / resource / feedback / log / server`
+- 守卫：`adminPermRequired('content')`（挂 authRequired 后；多 key=任一）、`superAdminRequired`（任命管理员）、`hasAdminPerm(u,key)`、`isSuperAdmin(u)`；`adminRequired` 语义变为"任意管理员"作兜底
+- `/api/admin/*` 逐路由挂模块守卫；`PUT /admin/users/:id/role` 仅超管：协议 `{is_admin,perms:[]}`，禁操作自己、最后超管不可降级/取消、非法 key 过滤
+- 业务散点收口：booking/purchase 的"管理员全权"只认真超管（`isSuperAdmin`）；share 删帖删评论/私密帖可见=`content`，幽灵帖巡检仍仅超管；resource 越权下载/删除=`resource`；honor 下架图=`honor`
+- **修了既有越权**：`/api/competition/pending|verify|DELETE` 原本零鉴权，现挂 `competition` 守卫（POST / 公开不变）；前端 /admin 路由补守卫
+- 前端：`utils/adminPerms.js`（canAdmin/isSuperAdmin/permSummary/PERM_OPTIONS），AdminConsole Tab 按权显隐+懒加载+权限分配弹窗（超管 radio/受限 checkbox），`/admin-console?tab=honors` 深链；冒烟 `scripts/smoke_admin_perms.js`（29 项）
+
 ---
 
 ## 6. 关键设计决策
@@ -215,6 +224,7 @@ cd /opt/compass && sudo git pull && cd backend && pm2 restart compass --update-e
 - **请求 S**：组长多角色（transfer 保留双方角色）
 - **请求 T**：对话式 AI 计划（plan-chat 7 模式，§8）
 - **请求 U（2026-08-25）**：移动端适配（§9）
+- **2026-10-24 管理员分权**：全站管理员从 is_admin 布尔升级为「超管 + 9 模块 perms」（§5），修竞赛审核接口越权，冒烟 smoke_admin_perms 29 项
 
 ---
 

@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS user (
   email         TEXT,                          -- 邮箱（登录/绑定；唯一索引允许多 NULL）
   avatar        TEXT,                          -- 头像（128px JPEG 压缩 dataURL，~10-20KB）
   is_admin      INTEGER DEFAULT 0,             -- 系统管理员（可进管理端）
+  admin_perms   TEXT DEFAULT '',                -- 管理员模块权限（JSON 数组；is_admin=1 且为空=超级管理员全权，非空=受限管理员）
   is_ghost      INTEGER DEFAULT 0,             -- 幽灵模式（秘密通道「水手冰淇淋」激活，仅幽灵可见内容）
   password_set  INTEGER NOT NULL DEFAULT 1,    -- 1=已设自有密码 0=初始密码 gkjsdh123 待修改（邮箱验证码注册为 0）
   phone         TEXT DEFAULT '',               -- 手机号（本期仅号段校验、未接 SMS，phone_verified 恒 0 预留）

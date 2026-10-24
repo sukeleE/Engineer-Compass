@@ -1,6 +1,8 @@
 <script setup>
-// 后台管理控制台（/admin-console，仅管理员）：用户管理 / 操作日志 / 公告 / 服务器状态
-import { ref, reactive, onMounted } from 'vue';
+// 后台管理控制台（/admin-console，管理员分权）：按当前账号 admin_perms 显隐模块，
+// 超级管理员（perms 为空）全权；Tab 数据懒加载，避免无权限模块刷 403
+import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
@@ -9,8 +11,17 @@ import { displayName } from '../utils/displayName.js';
 import { compressImage, shrinkHint } from '../utils/imageCompress.js';
 import { openImage } from '../utils/imageViewer.js';
 import { LEVEL_OPTS, RANK_OPTS } from '../utils/honorMeta.js';
+import { canAdmin, isSuperAdmin, PERM_OPTIONS, PERM_LABELS, permSummary } from '../utils/adminPerms.js';
 
 const tab = ref('users');
+
+// Tab → 所需模块权限（与后端 admin.js 各路由守卫一一对应）
+const TAB_PERMS = {
+  users: 'user', content: 'content', logs: 'log', visits: 'log', feedback: 'feedback',
+  anns: 'announce', resources: 'resource', honors: 'honor', status: 'server',
+};
+const visibleTabs = computed(() => Object.keys(TAB_PERMS).filter((t) => canAdmin(TAB_PERMS[t])));
+const route = useRoute();
 
 // ---- 操作日志：action 中文映射（与后端 audit_log 埋点一一对应） ----
 const ACTION_LABELS = {
@@ -79,20 +90,51 @@ async function openDetail(u) {
   try { detail.value = await api.adminUserDetail(u.id); } catch (e) { ElMessage.error(e.message); detailDlg.value = false; } finally { detailLoading.value = false; }
 }
 
-// 设为/取消管理员（带确认；后端禁止操作自己）
+// 取消管理员（快捷按钮；任命/改权走权限分配弹窗，后端仅超级管理员可操作且禁止操作自己）
 async function setRole(u, is_admin) {
-  const act = is_admin ? '设为管理员' : '取消管理员';
-  const tip = is_admin
-    ? `确定将「${u.nickname || u.username}」设为管理员？其将获得后台管理全部权限。`
-    : `确定取消「${u.nickname || u.username}」的管理员身份？`;
+  if (is_admin) return openPermDlg(u);
   try {
-    await ElMessageBox.confirm(tip, `${act}确认`, { type: 'warning' });
+    await ElMessageBox.confirm(`确定取消「${u.nickname || u.username}」的管理员身份？`, '取消管理员确认', { type: 'warning' });
   } catch { return; }
   try {
-    await api.adminSetRole(u.id, is_admin);
-    ElMessage.success(`已${act} ${u.nickname || u.username}`);
+    const r = await api.adminSetRole(u.id, 0, []);
+    ElMessage.success(r.message || '已取消管理员');
     loadUsers();
   } catch (e) { ElMessage.error(e.message); }
+}
+
+// ---- 管理员权限分配弹窗（超管 / 受限管理员）----
+const permDlg = reactive({ open: false, saving: false, target: null, mode: 'super', perms: [] });
+function openPermDlg(u) {
+  const perms = Array.isArray(u.perms) ? u.perms.filter((k) => k in PERM_LABELS) : [];
+  Object.assign(permDlg, {
+    open: true, saving: false, target: u,
+    mode: u.is_admin ? (perms.length ? 'custom' : 'super') : 'custom',
+    perms: [...perms],
+  });
+}
+async function savePerms(keepAdmin) {
+  const target = permDlg.target;
+  if (keepAdmin && permDlg.mode === 'custom' && permDlg.perms.length === 0) {
+    ElMessage.warning('受限管理员至少勾选一个模块，或直接选择超级管理员');
+    return;
+  }
+  const perms = keepAdmin && permDlg.mode === 'custom' ? permDlg.perms : [];
+  const act = !keepAdmin ? '取消管理员' : perms.length ? '设为受限管理员' : '设为超级管理员';
+  try {
+    await ElMessageBox.confirm(`确定对「${target.nickname || target.username}」执行：${act}？`, '权限变更确认', { type: 'warning' });
+  } catch { return; }
+  permDlg.saving = true;
+  try {
+    const r = await api.adminSetRole(target.id, keepAdmin ? 1 : 0, perms);
+    ElMessage.success(r.message || '权限已保存');
+    permDlg.open = false;
+    loadUsers();
+  } catch (e) {
+    ElMessage.error(e.message);
+  } finally {
+    permDlg.saving = false;
+  }
 }
 
 // 一键提醒所有仍用初始密码的用户（后端对已有未读提醒的去重，返回新发送数）
@@ -503,7 +545,32 @@ const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 // el-table 时间列 formatter：UTC 串 → 本地 'YYYY-MM-DD HH:MM'（DB CURRENT_TIMESTAMP 是 UTC）
 const fmtT = (_r, _c, v) => fmtDateTime(v);
 
-onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisits(); loadFeedback(); loadAnns(); loadResources(); loadHonors(); loadStatus(); });
+// Tab 数据懒加载：仅拉取当前账号有权限的模块，切换时才首次加载
+const TAB_LOADERS = {
+  users: loadUsers,
+  content: () => { loadPosts(); loadComments(); },
+  logs: loadLogs,
+  visits: loadVisits,
+  feedback: loadFeedback,
+  anns: loadAnns,
+  resources: loadResources,
+  honors: loadHonors,
+  status: loadStatus,
+};
+const loadedTabs = new Set();
+function ensureTabLoaded(t) {
+  if (!TAB_PERMS[t] || loadedTabs.has(t)) return;
+  loadedTabs.add(t);
+  TAB_LOADERS[t]?.();
+}
+watch(tab, (t) => ensureTabLoaded(t));
+onMounted(() => {
+  const qtab = String(route.query.tab || '');
+  const first = visibleTabs.value.includes(qtab) ? qtab : visibleTabs.value[0];
+  if (!first) return;
+  tab.value = first;
+  ensureTabLoaded(first);
+});
 </script>
 
 <template>
@@ -513,9 +580,11 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       <p class="sub">用户操作审计 · 封禁/禁言 · 全局公告 · 服务器状态</p>
     </div>
 
+    <el-alert v-if="!visibleTabs.length" type="warning" :closable="false" show-icon style="margin-bottom:12px"
+      title="当前账号没有任何后台模块权限，请联系超级管理员授权" />
     <el-tabs v-model="tab">
       <!-- ========== Tab1 用户管理 ========== -->
-      <el-tab-pane label="👤 用户管理" name="users">
+      <el-tab-pane v-if="canAdmin('user')" label="👤 用户管理" name="users">
         <div class="toolbar">
           <el-input v-model="users.q" placeholder="搜索昵称 / 真名 / 邮箱 / 用户名" clearable style="width: 280px"
             @keyup.enter="users.page = 1; loadUsers()" @clear="users.page = 1; loadUsers()">
@@ -556,19 +625,25 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="STATUS_LABELS[row.status][1]">{{ STATUS_LABELS[row.status][0] }}</el-tag>
-              <el-tag v-if="row.is_admin" size="small" type="primary" style="margin-left:4px">管理员</el-tag>
+              <el-tooltip v-if="row.is_admin && row.perms && row.perms.length" :content="permSummary(row)" placement="top">
+                <el-tag size="small" type="primary" style="margin-left:4px">受限管理员</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.is_admin" size="small" type="danger" effect="dark" style="margin-left:4px">超级管理员</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="300">
+          <el-table-column label="操作" width="320">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
               <template v-if="row.is_admin">
-                <el-button v-if="row.id !== auth.user?.id" link type="warning" size="small" @click="setRole(row, 0)">取消管理员</el-button>
-                <span v-else class="cell-sub">当前账号</span>
-                <el-button v-if="row.id !== auth.user?.id" link type="danger" size="small" @click="setStatus(row, 1)" :disabled="row.status === 1">封禁</el-button>
+                <span v-if="row.id === auth.user?.id" class="cell-sub">当前账号</span>
+                <template v-else-if="isSuperAdmin()">
+                  <el-button link type="primary" size="small" @click="openPermDlg(row)">权限设置</el-button>
+                  <el-button link type="warning" size="small" @click="setRole(row, 0)">取消管理员</el-button>
+                </template>
+                <span v-else class="cell-sub">管理员账号</span>
               </template>
               <template v-else>
-                <el-button link type="primary" size="small" @click="setRole(row, 1)">设为管理员</el-button>
+                <el-button v-if="isSuperAdmin()" link type="primary" size="small" @click="openPermDlg(row)">权限设置</el-button>
                 <el-button v-if="row.status !== 1" link type="danger" size="small" @click="setStatus(row, 1)">封禁</el-button>
                 <el-button v-if="row.status !== 2" link type="warning" size="small" @click="setStatus(row, 2)">禁言</el-button>
                 <el-button v-if="row.status !== 0" link type="success" size="small" @click="setStatus(row, 0)">解封</el-button>
@@ -581,7 +656,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab2 内容管理（帖子 / 评论） ========== -->
-      <el-tab-pane label="📄 内容管理" name="content">
+      <el-tab-pane v-if="canAdmin('content')" label="📄 内容管理" name="content">
         <div class="toolbar">
           <el-radio-group v-model="contentTab">
             <el-radio-button value="posts">📝 帖子</el-radio-button>
@@ -656,7 +731,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab3 操作日志 ========== -->
-      <el-tab-pane label="🧾 操作日志" name="logs">
+      <el-tab-pane v-if="canAdmin('log')" label="🧾 操作日志" name="logs">
         <div class="toolbar">
           <el-input v-model="logs.q" placeholder="搜索目标 / 用户名" clearable style="width: 220px"
             @keyup.enter="logs.page = 1; loadLogs()" @clear="logs.page = 1; loadLogs()" />
@@ -688,7 +763,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab 访问记录（含游客） ========== -->
-      <el-tab-pane label="🌐 访问记录" name="visits">
+      <el-tab-pane v-if="canAdmin('log')" label="🌐 访问记录" name="visits">
         <div class="toolbar">
           <el-input v-model="visits.q" placeholder="搜索 IP / 用户名 / 路径" clearable style="width: 240px"
             @keyup.enter="visits.page = 1; loadVisits()" @clear="visits.page = 1; loadVisits()" />
@@ -715,7 +790,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab 用户反馈 ========== -->
-      <el-tab-pane label="📮 用户反馈" name="feedback">
+      <el-tab-pane v-if="canAdmin('feedback')" label="📮 用户反馈" name="feedback">
         <div class="toolbar">
           <el-input v-model="feedback.q" placeholder="搜索正文 / 邮箱 / 用户名" clearable style="width: 260px"
             @keyup.enter="feedback.page = 1; loadFeedback()" @clear="feedback.page = 1; loadFeedback()" />
@@ -754,7 +829,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab 公告管理 ========== -->
-      <el-tab-pane label="📢 公告管理" name="anns">
+      <el-tab-pane v-if="canAdmin('announce')" label="📢 公告管理" name="anns">
         <div class="toolbar">
           <el-button type="primary" size="small" @click="openAnnDlg(null)">＋ 发布公告</el-button>
           <span class="tip">置顶公告显示在全站顶部横幅</span>
@@ -784,7 +859,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab4 资源管理 ========== -->
-      <el-tab-pane label="📁 资源管理" name="resources">
+      <el-tab-pane v-if="canAdmin('resource')" label="📁 资源管理" name="resources">
         <div class="toolbar">
           <el-input v-model="resources.q" placeholder="搜索文件名 / 昵称 / 用户名" clearable style="width: 260px"
             @keyup.enter="resources.page = 1; loadResources()" @clear="resources.page = 1; loadResources()">
@@ -817,7 +892,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab7 荣誉墙（前台 /honor 公开可见） ========== -->
-      <el-tab-pane label="🏅 荣誉墙" name="honors">
+      <el-tab-pane v-if="canAdmin('honor')" label="🏅 荣誉墙" name="honors">
         <div class="toolbar">
           <el-button type="primary" size="small" @click="openHonorDlg(null)">＋ 添加荣誉</el-button>
           <el-button size="small" :loading="bulkLoading" @click="bulkInput?.click()">
@@ -879,7 +954,7 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
       </el-tab-pane>
 
       <!-- ========== Tab5 服务器状态 ========== -->
-      <el-tab-pane label="🖥️ 服务器状态" name="status">
+      <el-tab-pane v-if="canAdmin('server')" label="🖥️ 服务器状态" name="status">
         <div class="toolbar">
           <el-button :loading="statLoading" @click="loadStatus">刷新</el-button>
         </div>
@@ -925,7 +1000,9 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
             <b class="ud-nick">{{ detail.user.nickname || detail.user.username }}</b>
             <el-tag size="small">@{{ detail.user.username }}</el-tag>
             <el-tag size="small" :type="STATUS_LABELS[detail.user.status][1]">{{ STATUS_LABELS[detail.user.status][0] }}</el-tag>
-            <el-tag v-if="detail.user.is_admin" size="small" type="primary">管理员</el-tag>
+            <el-tag v-if="detail.user.is_admin" size="small" :type="detail.user.perms && detail.user.perms.length ? 'primary' : 'danger'">
+              {{ permSummary(detail.user) }}
+            </el-tag>
             <span class="cell-sub">{{ detail.user.email }} · 注册于 {{ fmtDateTime(detail.user.create_time) }}</span>
           </div>
           <div class="ud-stats">
@@ -1072,6 +1149,37 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
         <el-button type="primary" @click="saveHonor">{{ honorForm.id ? '保存' : '添加' }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 管理员权限分配（仅超级管理员可操作；后端 superAdminRequired 兜底） -->
+    <el-dialog v-model="permDlg.open" title="🔑 管理员权限设置" width="560px" :close-on-click-modal="false">
+      <div v-if="permDlg.target" class="perm-dlg">
+        <p class="perm-target">
+          账号：<b>{{ permDlg.target.nickname || permDlg.target.username }}</b>
+          <span class="cell-sub">@{{ permDlg.target.username }}</span>
+        </p>
+        <el-radio-group v-model="permDlg.mode" class="perm-mode">
+          <el-radio value="super">超级管理员</el-radio>
+          <el-radio value="custom">受限管理员（按模块授权）</el-radio>
+        </el-radio-group>
+        <el-alert v-if="permDlg.mode === 'super'" type="warning" :closable="false" show-icon
+          title="超级管理员拥有后台全部模块，并自动拥有预约/采购审批、幽灵内容巡检、任命其他管理员等最高权限，仅授予完全信任的账号。"
+          style="margin: 10px 0" />
+        <div v-else class="perm-checks">
+          <el-checkbox v-for="o in PERM_OPTIONS" :key="o.key" v-model="permDlg.perms" :value="o.key" border class="perm-check">
+            <span class="perm-check-label">{{ o.label }}</span>
+            <span class="perm-check-desc">{{ o.desc }}</span>
+          </el-checkbox>
+          <el-alert v-if="!permDlg.perms.length" type="info" :closable="false"
+            title="未勾选任何模块时无法保存；受限管理员只能进入已授权的后台模块。" style="margin-top:10px" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="permDlg.open = false">取消</el-button>
+        <el-button v-if="permDlg.target && permDlg.target.is_admin" type="danger" plain
+          :loading="permDlg.saving" @click="savePerms(false)">取消管理员</el-button>
+        <el-button type="primary" :loading="permDlg.saving" @click="savePerms(true)">保存</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -1154,4 +1262,15 @@ onMounted(() => { loadUsers(); loadPosts(); loadComments(); loadLogs(); loadVisi
 .hon-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
 .hon-tagsel { width: 100%; }
 .hon-clstag { margin: 2px 4px 2px 0; }
+
+/* 管理员权限分配弹窗 */
+.perm-target { margin: 0 0 12px; .cell-sub { margin-left: 8px; } }
+.perm-mode { display: flex; gap: 20px; margin-bottom: 10px; }
+.perm-checks { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.perm-check {
+  height: auto; min-height: 42px; padding: 8px 12px; margin-right: 0; white-space: normal;
+  :deep(.el-checkbox__label) { display: flex; flex-direction: column; line-height: 1.5; }
+}
+.perm-check-label { font-weight: 600; }
+.perm-check-desc { font-size: 12px; color: var(--text-2, #94a3b8); font-weight: 400; }
 </style>

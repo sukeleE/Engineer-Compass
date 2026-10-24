@@ -22,6 +22,7 @@ import { api } from '../api.js';
 import auth from '../auth.js';
 import { openImage } from '../utils/imageViewer.js';
 import { LEVEL_OPTS, RANK_OPTS } from '../utils/honorMeta.js';
+import { canAdmin } from '../utils/adminPerms.js';
 
 const router = useRouter();
 
@@ -250,7 +251,7 @@ watch(filteredList, () => {
 
       <div v-else-if="!list.length" class="card honor-rstate">
         <el-empty description="荣誉墙正在建设中" />
-        <button v-if="auth.user?.is_admin" class="adm" type="button" @click="router.push('/admin-console')">
+        <button v-if="canAdmin('honor')" class="adm" type="button" @click="router.push('/admin-console?tab=honors')">
           🏅 去上传第一张奖状
         </button>
       </div>
@@ -265,7 +266,7 @@ watch(filteredList, () => {
             {{ stat.n }} 项荣誉<i>·</i>国家级 / 国际级 {{ stat.top }} 项
             <template v-if="stat.years"><i>·</i>跨越 {{ stat.years }} 个获奖年份</template>
           </p>
-          <button v-if="auth.user?.is_admin" class="e-adm" type="button" @click="router.push('/admin-console')">
+          <button v-if="canAdmin('honor')" class="e-adm" type="button" @click="router.push('/admin-console?tab=honors')">
             ⚙️ 后台维护
           </button>
           <span class="e-cue" aria-hidden="true">
