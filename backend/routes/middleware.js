@@ -17,7 +17,7 @@ export function verifyPassword(pw, stored) {
 // ---- Bearer token 会话 ----
 // 支持 query 的 ?token=（供 <img src> / <a href> 直连预览与下载，浏览器不会带 Authorization 头）
 // 封禁（status=1）用户拒绝一切认证请求
-const USER_COLS = 's.user_id, u.username, u.nickname, u.is_admin, u.admin_perms, u.is_ghost, u.email, u.avatar, u.status, u.real_name, u.student_no';
+const USER_COLS = 's.user_id, u.username, u.nickname, u.is_admin, u.admin_perms, u.is_ghost, u.email, u.avatar, u.status, u.real_name';
 export function authRequired(req, res, next) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token || '';
   if (!token) return res.status(401).json({ error: '未登录' });
@@ -26,7 +26,7 @@ export function authRequired(req, res, next) {
   ).get(token);
   if (!s) return res.status(401).json({ error: '登录已失效，请重新登录' });
   if (s.status === 1) return res.status(403).json({ error: '账号已被封禁，无法继续使用' });
-  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', student_no: s.student_no || '', token };
+  req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
   next();
 }
 
@@ -37,7 +37,7 @@ export function optionalAuth(req, res, next) {
   const s = db.prepare(
     `SELECT ${USER_COLS} FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?`
   ).get(token);
-  if (s && s.status !== 1) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', student_no: s.student_no || '', token };
+  if (s && s.status !== 1) req.user = { id: s.user_id, username: s.username, nickname: s.nickname, is_admin: !!s.is_admin, admin_perms: s.admin_perms || '', is_ghost: !!s.is_ghost, email: s.email || '', avatar: s.avatar || null, status: s.status || 0, real_name: s.real_name || '', token };
   next();
 }
 
@@ -55,7 +55,6 @@ export const ADMIN_PERMS = {
   feedback: '用户反馈',    // 反馈列表/删除
   log: '日志审计',         // 操作日志 + 访问记录
   server: '服务器状态',    // 服务器状态面板
-  lab: '实验室借用',       // 借用记录全局查看/导出（借设备/借教室管理端）
 };
 
 // 解析 user.admin_perms（TEXT JSON）；非法值/未知 key 一律忽略，空数组=超管口径

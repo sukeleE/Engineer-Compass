@@ -109,12 +109,6 @@ onBeforeUnmount(() => clearInterval(unreadTimer));
   position: fixed; right: 22px; bottom: 86px; z-index: 1000;
   display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
 }
-
-// 窄屏有底部主导航（App.vue .tabbar，约 58px + 安全区），浮标整体上移避免遮挡
-@media (max-width: 768px) {
-  .dock-fab { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
-  .dock-tools { bottom: calc(136px + env(safe-area-inset-bottom, 0px)); }
-}
 .dock-tool {
   position: relative; width: 48px; height: 48px; border-radius: 50%;
   border: 1px solid var(--border); cursor: pointer; font-size: 22px;

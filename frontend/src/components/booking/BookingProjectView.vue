@@ -174,10 +174,7 @@ const bookableResources = computed(() => (timeline.value?.resources || []).filte
 
 async function loadProject() {
   const d = await api.bookingProject(route.params.id);
-  // 实验室项目走「资源」板块（借设备/借教室），通用项目页不再提供第二个借入口
-  if (d.project?.name === '实验室') { router.replace('/resources'); return false; }
   project.value = d.project;
-  return true;
 }
 async function loadTimeline() {
   tlLoading.value = true;
@@ -191,7 +188,7 @@ async function loadTimeline() {
 }
 async function onDataChanged() {
   // 资源/审批/预约动作后：项目计数 + 甘特 + 预约列表 + 子面板一起刷新
-  try { if (!(await loadProject())) return; } catch { /* 404 等已在详情内提示 */ }
+  try { await loadProject(); } catch { /* 404 等已在详情内提示 */ }
   loadTimeline();
   if (tabLoaded.value.approvals) loadBookings();
   resourcePanelRef.value?.reload?.();
@@ -300,7 +297,7 @@ onMounted(async () => {
     // ?date=YYYY-MM-DD 定位到所在周；?bid= 自动打开详情
     const qd = parseLocal(`${route.query.date} 12:00`);
     if (qd) weekFrom.value = mondayOf(qd);
-    if (!(await loadProject())) return; // 实验室项目已转「资源」板块
+    await loadProject();
     await loadTimeline();
     if (route.query.bid) detailId.value = Number(route.query.bid);
   } catch (e) {

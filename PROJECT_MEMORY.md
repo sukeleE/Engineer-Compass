@@ -114,13 +114,12 @@
 
 ### 全站管理员分权（2026-10-24，RBAC 轻量版）
 - `user.is_admin=1` + `admin_perms`（TEXT，migCol 已加，老库自动 `''`）：**空串=超级管理员全权；非空=JSON 权限 key 数组=受限管理员**。注意落库口径：超管存 `''` 不存 `'[]'`（COUNT 超管 SQL 按空串计），前端拿到的 `perms:[]` 由 `parseAdminPerms` 计算
-- 权限 key（middleware.js `ADMIN_PERMS`）：`user / content / competition / announce / honor / resource / feedback / log / server / lab`（lab=实验室借用记录全局查看/导出，2026-10-24 合并 feature/lab-management-h5 时加入）
-- 实验室借用模块（feature/lab-management-h5 合入）：`/resources` 借设备/教室（拍照+名称+学号一次性登记，写 booking.item_kind/item_name/item_image 占位资源承载），`/lab-admin` 借用记录管理；`user.student_no` 学号、`booking_resource.image/damaged_qty`、booking 5 个 item_* 列；后端守卫 booking.js `requireLabAdmin = hasAdminPerm(req.user,'lab')`（不看项目 created_by——实验室项目可能由首个学生创建）；该分支同时引入**全站登录硬门禁**（router PUBLIC_ROUTES 白名单外未登录一律跳登录页）
+- 权限 key（middleware.js `ADMIN_PERMS`）：`user / content / competition / announce / honor / resource / feedback / log / server`
 - 守卫：`adminPermRequired('content')`（挂 authRequired 后；多 key=任一）、`superAdminRequired`（任命管理员）、`hasAdminPerm(u,key)`、`isSuperAdmin(u)`；`adminRequired` 语义变为"任意管理员"作兜底
 - `/api/admin/*` 逐路由挂模块守卫；`PUT /admin/users/:id/role` 仅超管：协议 `{is_admin,perms:[]}`，禁操作自己、最后超管不可降级/取消、非法 key 过滤
 - 业务散点收口：booking/purchase 的"管理员全权"只认真超管（`isSuperAdmin`）；share 删帖删评论/私密帖可见=`content`，幽灵帖巡检仍仅超管；resource 越权下载/删除=`resource`；honor 下架图=`honor`
 - **修了既有越权**：`/api/competition/pending|verify|DELETE` 原本零鉴权，现挂 `competition` 守卫（POST / 公开不变）；前端 /admin 路由补守卫
-- 前端：`utils/adminPerms.js`（canAdmin/isSuperAdmin/permSummary/PERM_OPTIONS），AdminConsole Tab 按权显隐+懒加载+权限分配弹窗（超管 radio/受限 checkbox），`/admin-console?tab=honors` 深链；冒烟 `scripts/smoke_admin_perms.js`（36 项，含 lab）
+- 前端：`utils/adminPerms.js`（canAdmin/isSuperAdmin/permSummary/PERM_OPTIONS），AdminConsole Tab 按权显隐+懒加载+权限分配弹窗（超管 radio/受限 checkbox），`/admin-console?tab=honors` 深链；冒烟 `scripts/smoke_admin_perms.js`（29 项）
 
 ---
 

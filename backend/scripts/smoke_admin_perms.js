@@ -135,30 +135,6 @@ const filtered = JSON.parse(db.prepare('SELECT admin_perms FROM user WHERE id = 
 ok('落库仅保留 content', JSON.stringify(filtered) === JSON.stringify(['content']), JSON.stringify(filtered));
 await req(`/admin/users/${plainId}/role`, { token: superTok, method: 'PUT', body: JSON.stringify({ is_admin: 0 }) });
 
-console.log('— 实验室借用权限（lab）');
-// booking 模块实名硬门禁：直库给普通用户补真名（管理员也不豁免）
-db.prepare("UPDATE user SET real_name = ? WHERE id IN (?,?)").run('冒烟真名', plainId, limitedId);
-r = await req('/booking/borrow-records', { token: plainTok });
-ok('普通用户看借用记录 → 403', r.status === 403, `got ${r.status}`);
-// 授予 lab 模块
-r = await req(`/admin/users/${plainId}/role`, { token: superTok, method: 'PUT', body: JSON.stringify({ is_admin: 1, perms: ['lab'] }) });
-ok('授予 lab 权限 → 200', r.status === 200, lastResp(r));
-const labTok = (await req('/auth/login', { method: 'POST', body: JSON.stringify({ email: PLAIN_MAIL, password: 'test123456' }) })).data.token;
-r = await req('/booking/borrow-records', { token: labTok });
-ok('lab 权限：借用记录列表 → 200', r.status === 200, `got ${r.status} ${r.data.error || ''}`);
-r = await req('/booking/borrow-records/export', { token: labTok });
-ok('lab 权限：Excel 导出 → 200 xlsx', r.status === 200, `got ${r.status}`);
-r = await req('/admin/announcements', { token: labTok });
-ok('lab 权限：访问公告管理仍 → 403', r.status === 403, `got ${r.status}`);
-// 换成不含 lab 的受限管理员
-r = await req(`/admin/users/${plainId}/role`, { token: superTok, method: 'PUT', body: JSON.stringify({ is_admin: 1, perms: ['content'] }) });
-ok('改授 content → 200', r.status === 200, lastResp(r));
-const contentTok = (await req('/auth/login', { method: 'POST', body: JSON.stringify({ email: PLAIN_MAIL, password: 'test123456' }) })).data.token;
-r = await req('/booking/borrow-records', { token: contentTok });
-ok('content-only 看借用记录 → 403', r.status === 403, `got ${r.status}`);
-// 还原普通用户
-await req(`/admin/users/${plainId}/role`, { token: superTok, method: 'PUT', body: JSON.stringify({ is_admin: 0 }) });
-
 console.log('— 清理测试数据');
 db.prepare('DELETE FROM audit_log WHERE user_id IN (?,?,?,?)').run(superId, limitedId, plainId, tmpId);
 db.prepare('DELETE FROM session WHERE user_id IN (?,?,?,?)').run(superId, limitedId, plainId, tmpId);

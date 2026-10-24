@@ -13,7 +13,6 @@ export const PERM_LABELS = {
   feedback: '用户反馈',
   log: '日志审计',
   server: '服务器状态',
-  lab: '实验室借用',
 };
 
 // 权限分配弹窗的展示顺序
@@ -27,7 +26,6 @@ export const PERM_OPTIONS = [
   { key: 'feedback', label: '📮 用户反馈', desc: '查看与删除用户反馈' },
   { key: 'log', label: '🧾 日志审计', desc: '操作日志与访问记录' },
   { key: 'server', label: '🖥️ 服务器状态', desc: '服务器运行状态面板' },
-  { key: 'lab', label: '🗂️ 实验室借用', desc: '查看/导出全部借设备、借教室登记记录' },
 ];
 
 export function adminPerms(u = auth.user) {

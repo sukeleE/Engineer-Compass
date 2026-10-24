@@ -49,14 +49,6 @@ migCol('user', 'real_name', "ALTER TABLE user ADD COLUMN real_name TEXT NOT NULL
 migCol('honor', 'prize_rank', "ALTER TABLE honor ADD COLUMN prize_rank TEXT DEFAULT ''");              // 荣誉墙：奖等（特等/一/二/三等奖…）
 migCol('honor', 'comp_id', 'ALTER TABLE honor ADD COLUMN comp_id INTEGER');                            // 荣誉墙：赛项→competition.id（无外键，同 team_plan）
 migCol('honor', 'event_name', "ALTER TABLE honor ADD COLUMN event_name TEXT DEFAULT ''");              // 荣誉墙：赛项名快照（库选/手填统一展示）
-migCol('user', 'student_no', "ALTER TABLE user ADD COLUMN student_no TEXT NOT NULL DEFAULT ''");       // 学号（实验室借用登记）
-migCol('booking_resource', 'image', "ALTER TABLE booking_resource ADD COLUMN image TEXT DEFAULT ''");   // 物品图片 dataURL
-migCol('booking_resource', 'damaged_qty', 'ALTER TABLE booking_resource ADD COLUMN damaged_qty INTEGER NOT NULL DEFAULT 0'); // 物品损坏数
-migCol('booking', 'booker_student_no', "ALTER TABLE booking ADD COLUMN booker_student_no TEXT NOT NULL DEFAULT ''"); // 学号快照
-migCol('booking', 'item_name', "ALTER TABLE booking ADD COLUMN item_name TEXT DEFAULT ''");   // 借用登记：所借物品名称 / 教室编号
-migCol('booking', 'item_image', "ALTER TABLE booking ADD COLUMN item_image TEXT DEFAULT ''"); // 借用登记：照片 dataURL
-migCol('booking', 'item_thumb', "ALTER TABLE booking ADD COLUMN item_thumb TEXT DEFAULT ''"); // 借用登记：照片缩略图（列表用）
-migCol('booking', 'item_kind', "ALTER TABLE booking ADD COLUMN item_kind TEXT DEFAULT ''");   // 借用登记类型：device / room
 
 // ---- user_version 闸门：只对「升级前的老库」执行一次的存量数据回填 ----
 // 新库（schema 直接建成新结构、零行）同样过一遍但 0 行受影响，随即落版本号。
