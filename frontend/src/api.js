@@ -107,6 +107,7 @@ export const api = {
   setPhone: (phone) => req('/auth/phone', { method: 'PUT', body: JSON.stringify({ phone }) }),
   // 实名认证（设置/修改真实姓名，无审核；成功返回最新 user）
   setRealName: (real_name) => req('/auth/real-name', { method: 'PUT', body: JSON.stringify({ real_name }) }),
+  setStudentNo: (student_no) => req('/auth/student-no', { method: 'PUT', body: JSON.stringify({ student_no }) }),
   feedback: (card) => req('/feedback', { method: 'POST', body: JSON.stringify(card) }),
   // 公开主页（只读）：基本资料 + 竞赛计划 + 学习日程 + 参加的小组
   userPublic: (id) => req(`/users/${id}/public`),
@@ -512,6 +513,29 @@ export const api = {
   bookingApprove: (bid, comment = '') => req(`/booking/bookings/${bid}/approve`, { method: 'POST', body: JSON.stringify({ comment }) }),
   bookingReject: (bid, reason) => req(`/booking/bookings/${bid}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   bookingCancel: (bid, comment = '') => req(`/booking/bookings/${bid}/cancel`, { method: 'POST', body: JSON.stringify({ comment }) }),
+  // 实验室管理（复用 booking：设备=item，教室=space）
+  bookingLabProject: () => req('/booking/lab-project', { method: 'POST', body: JSON.stringify({}) }),
+  // 借用登记：设备/教室都没有台账，只记「照片 + 名称（物品名/教室编号）+ 姓名 + 学号」，时间由服务端记录
+  bookingBorrowRegister: (b) => req('/booking/borrow-registrations', { method: 'POST', body: JSON.stringify(b) }),
+  bookingLabOverview: (projectId) => req(`/booking/lab-overview${qs({ project_id: projectId })}`),
+  // 实验室管理员全局借用记录（需「实验室借用」权限）：筛选参数 kind / status / from / to / q
+  bookingBorrowRecords: (params) => req(`/booking/borrow-records${qs(params)}`),
+  // 导出 Excel：走 blob（token 只进请求头），文件名取响应头 filename*（UTF-8）
+  bookingBorrowExport: async (params) => {
+    const token = localStorage.getItem('ec_token');
+    const res = await fetch(`${BASE}/booking/borrow-records/export${qs(params)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `导出失败（${res.status}）`);
+    }
+    let name = `实验室借用记录-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const cd = res.headers.get('content-disposition') || '';
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+    if (star) { try { name = decodeURIComponent(star[1]); } catch { /* 用默认名 */ } }
+    return { blob: await res.blob(), name };
+  },
   // 文件预览必须走 blob（token 绝不进 URL）：图片交 ImageViewer，PDF 用 objectURL 新开页
   purchaseFileBlob: async (fid) => {
     const token = localStorage.getItem('ec_token');

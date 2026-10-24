@@ -18,6 +18,8 @@ import ExpenseGuide from './components/ExpenseGuide.vue';
 import PurchaseView from './components/purchase/PurchaseView.vue';
 import BookingView from './components/booking/BookingView.vue';
 import BookingProjectView from './components/booking/BookingProjectView.vue';
+import ResourcesView from './components/booking/ResourcesView.vue';
+import LabAdminView from './components/booking/LabAdminView.vue';
 import HonorView from './components/HonorView.vue';
 import MyView from './components/MyView.vue';
 import AccountSecurityView from './components/account/AccountSecurityView.vue';
@@ -109,6 +111,27 @@ const router = createRouter({
     // 资源预约：大厅 + 项目页（周视图甘特/资源台账/固定组队/预约审批）；必须在 /:username 兜底之前；实名硬门禁
     { path: '/booking', name: 'booking', component: BookingView, meta: { requiresRealName: true } },
     { path: '/booking/:id', name: 'booking-project', component: BookingProjectView, meta: { requiresRealName: true } },
+    // 资源：借设备 / 借教室（实验室）的唯一入口，复用 booking 的 item/space 两种资源；
+    // 原 /lab 与 /booking 大厅的实验室项目都收口到这里，避免同一批设备有两个借入口。实名硬门禁
+    { path: '/resources', name: 'resources', component: ResourcesView, meta: { requiresRealName: true } },
+    { path: '/lab', redirect: '/resources' },
+    // 借用记录管理：需「实验室借用」权限（后端 requireLabAdmin 二次校验）。
+    // 不用 canManage —— 实验室项目的 created_by 可能是首个打开「资源」的学生，不可信
+    {
+      path: '/lab-admin', name: 'lab-admin', component: LabAdminView,
+      beforeEnter: async (to, _from, next) => {
+        if (!auth.token) return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`);
+        if (!canAdmin('lab')) {
+          try {
+            const { user } = await api.me();
+            patchUser(user);
+            if (canAdmin('lab', user)) return next();
+          } catch { /* 网络失败按原缓存判断 */ }
+          return next('/resources');
+        }
+        next();
+      },
+    },
     // 荣誉墙（公开免登录；内容由管理员在后台维护。复数路径只做重定向，全站单数口径）
     { path: '/honor', name: 'honor', component: HonorView },
     { path: '/honors', redirect: '/honor' },
@@ -153,16 +176,28 @@ const router = createRouter({
   ],
 });
 
+// 未登录可看的页面：登录页、公开项目/分享页（GitHub 风分享链接）、报销教程与邀请认领、
+// 荣誉墙。其余路由（含首页 / 与 /lab）一律先登录，不再出现「逛到一半被拦」。
+const PUBLIC_ROUTES = new Set([
+  'login', 'expense-guide', 'honor', 'share-post', 'share-html-frame',
+  'user-projects', 'project', 'project-tree', 'project-blob',
+]);
+
 // 离开每条路由前记下滚动位置（beforeEach 时 DOM 还没换，scrollY 仍是上一页的）；
 // Map 有界：满了就丢最早的，防长会话无界增长。
+// 登录硬门禁（全站口径）：未登录且目标不是公开页 → 去登录页并带上目标，登录后原路返回。
 // 实名硬门禁（全站口径）：只要登录且 real_name 为空，任何页面（含首页）都弹不可关弹窗，
-// 弹窗遮罩本身阻断页内一切操作；未登录态（含 /expense?code= 匿名邀请面）直接放行。
+// 弹窗遮罩本身阻断页内一切操作。
 // booking/purchase 额外 return false 取消导航：页内组件不挂载、不发必然 403 的请求，
 // pendingTo 记目标，填名成功后 App.vue 自动跳转；其他路由放行，弹窗压在页面上。
 // 老缓存没有 real_name 键时强制 me() 补刷；网络失败按 fail-open（后端三模块 403 兜底）。
 router.beforeEach(async (to, from) => {
   scrollMemo.set(from.fullPath, window.scrollY);
   if (scrollMemo.size > 100) scrollMemo.delete(scrollMemo.keys().next().value);
+
+  if (!auth.token && !PUBLIC_ROUTES.has(to.name) && !(to.name === 'expense' && to.query.code)) {
+    return { name: 'login', query: { redirect: to.fullPath } };
+  }
 
   if (auth.token && to.name !== 'login') {
     let user = auth.user;

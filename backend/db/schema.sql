@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS user (
   phone         TEXT DEFAULT '',               -- 手机号（本期仅号段校验、未接 SMS，phone_verified 恒 0 预留）
   phone_verified INTEGER NOT NULL DEFAULT 0,
   real_name     TEXT NOT NULL DEFAULT '',      -- 真实姓名（预约/报销/采购三模块硬门禁；空=未实名）
+  student_no    TEXT NOT NULL DEFAULT '',      -- 学号（实验室借用登记用；空=未填写）
   create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 -- idx_user_phone 部分唯一索引在 database.js 迁移链创建（老库 phone 列后补，建索引须在 migCol 后）
@@ -756,6 +757,8 @@ CREATE TABLE IF NOT EXISTS booking_resource (
   quantity     INTEGER NOT NULL DEFAULT 1,     -- 物品：库存总数；空间恒 1
   unit         TEXT DEFAULT '',                -- 物品单位：件/台/套…
   params       TEXT NOT NULL DEFAULT '{}',     -- JSON：空间 {"equipment":["投影仪",…]}，物品自由扩展
+  image        TEXT DEFAULT '',                -- 物品图片（压缩 dataURL）；空间留空
+  damaged_qty  INTEGER NOT NULL DEFAULT 0,     -- 物品损坏数量（不计入可借库存）
   approve_mode TEXT NOT NULL DEFAULT 'approval', -- 资源级审批开关：approval / first_come
   status       TEXT NOT NULL DEFAULT 'active', -- active / archived（被预约引用后只能归档）
   created_by   INTEGER REFERENCES user(id) ON DELETE SET NULL,
@@ -805,6 +808,11 @@ CREATE TABLE IF NOT EXISTS booking (
   team_id        INTEGER REFERENCES booking_team(id) ON DELETE SET NULL,
   booker_id      INTEGER REFERENCES user(id) ON DELETE CASCADE,
   booker_name    TEXT NOT NULL,
+  booker_student_no TEXT NOT NULL DEFAULT '',  -- 下单瞬间的学号快照（实验室借用登记）
+  item_name      TEXT DEFAULT '',              -- 借用登记：所借物品名称 / 教室编号（实验室暂未建台账，按次登记）
+  item_image     TEXT DEFAULT '',              -- 借用登记：实物/教室内环境照片 dataURL
+  item_thumb     TEXT DEFAULT '',              -- 借用登记：照片缩略图 dataURL（管理端列表用，原图在 item_image）
+  item_kind      TEXT DEFAULT '',              -- 借用登记类型：device / room
   approver_id    INTEGER,
   approver_name  TEXT DEFAULT '',
   approve_time   TEXT,

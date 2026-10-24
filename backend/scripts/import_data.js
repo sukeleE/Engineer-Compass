@@ -154,7 +154,7 @@ try {
   let compCount = 0, subCount = 0, nodeCount = 0;
 
   for (const file of files) {
-    const content = readFileSync(join(DATA_DIR, file), 'utf8');
+    const content = readFileSync(join(DATA_DIR, file), 'utf8').replace(/\r\n?/g, '\n');
     const blocks = content.split(/(?=^###\s*第\d+项)/m);
     for (const block of blocks) {
       const comp = parseCompetitionBlock(block);
