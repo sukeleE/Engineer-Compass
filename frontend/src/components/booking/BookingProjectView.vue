@@ -27,6 +27,7 @@
       <button class="tabchip" :class="{ on: tab === 'week' }" @click="switchTab('week')">🗓 周视图</button>
       <button class="tabchip" :class="{ on: tab === 'resources' }" @click="switchTab('resources')">📦 可用资源</button>
       <button class="tabchip" :class="{ on: tab === 'teams' }" @click="switchTab('teams')">👥 固定组队</button>
+      <button class="tabchip" :class="{ on: tab === 'register' }" @click="switchTab('register')">📸 借用登记</button>
       <button class="tabchip" :class="{ on: tab === 'approvals' }" @click="switchTab('approvals')">
         📑 预约与审批<i v-if="project.pending_count" class="tab-badge">{{ project.pending_count }}</i>
       </button>
@@ -49,6 +50,11 @@
       <TeamPanel v-if="tabLoaded.teams" ref="teamPanelRef" :project="project" />
     </div>
 
+    <!-- 借用登记（拍照快速登记，不进甘特） -->
+    <div v-show="tab === 'register'" class="card">
+      <BorrowRegisterPanel v-if="tabLoaded.register" :project="project" @registered="onRegistered" />
+    </div>
+
     <!-- 预约与审批 -->
     <div v-show="tab === 'approvals'" class="card">
       <div class="filter-bar">
@@ -66,14 +72,31 @@
       <div v-if="bookings.length" class="table-scroll">
         <table class="rq-table">
           <thead>
-            <tr><th>资源</th><th>时段</th><th>人/量</th><th>预约人</th><th>状态</th><th style="width: 210px">操作</th></tr>
+            <tr><th style="width: 96px">类型</th><th>资源 / 物品</th><th>时间</th><th>人/量</th><th>预约人</th><th>状态</th><th style="width: 210px">操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="b in bookings" :key="b.id" class="row-click" @click="openDetail(b.id)">
-              <td>{{ KIND_MAP[b.kind]?.icon }} {{ b.resource_name }}</td>
-              <td class="dim">{{ b.start_time }}<br />～ {{ b.end_time }}</td>
-              <td>{{ b.is_space ? `👥 ${b.headcount} 人` : `×${b.qty} ${b.unit || '件'}` }}</td>
-              <td>{{ b.booker_name }}<span class="bk-src">{{ SRC_ZH[b.source] }}</span></td>
+              <td>
+                <el-tag v-if="isRegBooking(b)" size="small" :type="b.item_kind === 'room' ? 'warning' : 'success'" effect="plain">
+                  {{ REG_KIND_META[b.item_kind]?.icon }} {{ REG_KIND_META[b.item_kind]?.label }}
+                </el-tag>
+                <el-tag v-else size="small" type="info" effect="plain">{{ KIND_MAP[b.kind]?.icon }} 预约</el-tag>
+              </td>
+              <td>
+                <img v-if="isRegBooking(b) && b.item_thumb" :src="b.item_thumb" class="row-thumb" alt="" />
+                <b v-if="isRegBooking(b)">{{ b.item_name }}</b>
+                <template v-else>{{ KIND_MAP[b.kind]?.icon }} {{ b.resource_name }}</template>
+              </td>
+              <td class="dim">
+                <template v-if="isRegBooking(b)">登记于 {{ b.start_time }}</template>
+                <template v-else>{{ b.start_time }}<br />～ {{ b.end_time }}</template>
+              </td>
+              <td>{{ isRegBooking(b) ? '—' : (b.is_space ? `👥 ${b.headcount} 人` : `×${b.qty} ${b.unit || '件'}`) }}</td>
+              <td>
+                {{ b.booker_name }}
+                <span v-if="isRegBooking(b) && b.booker_student_no" class="bk-src">{{ b.booker_student_no }}</span>
+                <span v-else class="bk-src">{{ SRC_ZH[b.source] }}</span>
+              </td>
               <td><el-tag :type="STATUS_META[b.status]?.type" size="small">{{ STATUS_META[b.status]?.label }}</el-tag></td>
               <td @click.stop>
                 <el-button v-if="b.status === 'pending' && b.perm?.canApprove"
@@ -128,7 +151,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import auth from '../../auth.js';
 import { api } from '../../api.js';
@@ -138,10 +161,10 @@ import ResourcePanel from './ResourcePanel.vue';
 import TeamPanel from './TeamPanel.vue';
 import BookingDialog from './BookingDialog.vue';
 import BookingDetailDialog from './BookingDetailDialog.vue';
-import { MODE_ZH, STATUS_META, KIND_MAP, fmtDate, mondayOf, parseLocal } from '../../utils/booking.js';
+import BorrowRegisterPanel from './BorrowRegisterPanel.vue';
+import { MODE_ZH, STATUS_META, KIND_MAP, REG_KIND_META, isRegBooking, fmtDate, mondayOf, parseLocal } from '../../utils/booking.js';
 
 const route = useRoute();
-const router = useRouter();
 
 const SRC_ZH = { solo: '', team: ' · 组队', custom: ' · 临时多人' };
 
@@ -151,7 +174,7 @@ const project = ref({});
 const timeline = ref(null);
 const tlLoading = ref(false);
 const tab = ref('week');
-const tabLoaded = ref({ resources: false, teams: false, approvals: false });
+const tabLoaded = ref({ resources: false, teams: false, approvals: false, register: false });
 const weekFrom = ref(mondayOf(new Date()));
 const allHistory = ref(false);
 
@@ -174,8 +197,6 @@ const bookableResources = computed(() => (timeline.value?.resources || []).filte
 
 async function loadProject() {
   const d = await api.bookingProject(route.params.id);
-  // 实验室项目走「资源」板块（借设备/借教室），通用项目页不再提供第二个借入口
-  if (d.project?.name === '实验室') { router.replace('/resources'); return false; }
   project.value = d.project;
   return true;
 }
@@ -213,6 +234,12 @@ function switchTab(t) {
   }
   if (t === 'resources' && !tabLoaded.value.resources) tabLoaded.value.resources = true;
   if (t === 'teams' && !tabLoaded.value.teams) tabLoaded.value.teams = true;
+  if (t === 'register' && !tabLoaded.value.register) tabLoaded.value.register = true;
+}
+
+// 借用登记完成：刷新项目计数 / 甘特 / 审批表（登记行不进甘特，但计数与列表要更新）
+function onRegistered() {
+  onDataChanged();
 }
 
 async function loadBookings() {
@@ -300,7 +327,7 @@ onMounted(async () => {
     // ?date=YYYY-MM-DD 定位到所在周；?bid= 自动打开详情
     const qd = parseLocal(`${route.query.date} 12:00`);
     if (qd) weekFrom.value = mondayOf(qd);
-    if (!(await loadProject())) return; // 实验室项目已转「资源」板块
+    await loadProject();
     await loadTimeline();
     if (route.query.bid) detailId.value = Number(route.query.bid);
   } catch (e) {
@@ -324,4 +351,8 @@ onMounted(async () => {
   padding: 0 6px; margin-left: 4px; line-height: 16px;
 }
 .bk-src { color: var(--text-3); font-size: 12px; margin-left: 4px; }
+.row-thumb {
+  width: 30px; height: 30px; border-radius: 6px; object-fit: cover;
+  border: 1px solid var(--border); margin-right: 6px; vertical-align: middle;
+}
 </style>

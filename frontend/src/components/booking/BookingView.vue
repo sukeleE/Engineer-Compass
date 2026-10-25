@@ -71,9 +71,15 @@
         <tbody>
           <tr v-for="b in mineList" :key="b.id" class="row-click" @click="openDetail(b.id)">
             <td>{{ b.project_name }}</td>
-            <td>{{ b.resource_name }}</td>
-            <td class="dim">{{ b.start_time }}<br />～ {{ b.end_time }}</td>
-            <td>{{ b.is_space ? `👥 ${b.headcount} 人` : `×${b.qty} ${b.unit || '件'}` }}</td>
+            <td>
+              <span v-if="isRegBooking(b)">{{ REG_KIND_META[b.item_kind]?.icon }} {{ b.item_name }}</span>
+              <span v-else>{{ b.resource_name }}</span>
+            </td>
+            <td class="dim">
+              <template v-if="isRegBooking(b)">登记于 {{ b.start_time }}</template>
+              <template v-else>{{ b.start_time }}<br />～ {{ b.end_time }}</template>
+            </td>
+            <td>{{ isRegBooking(b) ? '—' : (b.is_space ? `👥 ${b.headcount} 人` : `×${b.qty} ${b.unit || '件'}`) }}</td>
             <td><el-tag :type="STATUS_META[b.status]?.type || 'info'" size="small">{{ STATUS_META[b.status]?.label || b.status }}</el-tag></td>
             <td><el-button link type="primary" size="small">查看</el-button></td>
           </tr>
@@ -84,11 +90,11 @@
       <div class="rq-cards">
         <div v-for="b in mineList" :key="b.id" class="rq-card" @click="openDetail(b.id)">
           <div class="rc-top">
-            <b>{{ b.resource_name }}</b>
+            <b>{{ isRegBooking(b) ? `${REG_KIND_META[b.item_kind]?.icon} ${b.item_name}` : b.resource_name }}</b>
             <el-tag :type="STATUS_META[b.status]?.type || 'info'" size="small">{{ STATUS_META[b.status]?.label || b.status }}</el-tag>
           </div>
-          <div class="rc-mid">{{ b.project_name }} · {{ b.is_space ? `${b.headcount} 人` : `×${b.qty}${b.unit || '件'}` }}</div>
-          <div class="rc-bot"><span class="dim">{{ b.start_time }} ~ {{ b.end_time }}</span></div>
+          <div class="rc-mid">{{ b.project_name }} · {{ isRegBooking(b) ? REG_KIND_META[b.item_kind]?.label : (b.is_space ? `${b.headcount} 人` : `×${b.qty}${b.unit || '件'}`) }}</div>
+          <div class="rc-bot"><span class="dim">{{ isRegBooking(b) ? `登记于 ${b.start_time}` : `${b.start_time} ~ ${b.end_time}` }}</span></div>
         </div>
       </div>
     </div>
@@ -128,7 +134,7 @@ import auth from '../../auth.js';
 import { api } from '../../api.js';
 import AuthView from '../AuthView.vue';
 import BookingDetailDialog from './BookingDetailDialog.vue';
-import { STATUS_META } from '../../utils/booking.js';
+import { STATUS_META, REG_KIND_META, isRegBooking } from '../../utils/booking.js';
 
 const router = useRouter();
 const tab = ref('all');

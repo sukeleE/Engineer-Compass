@@ -148,13 +148,14 @@ const resourceOut = (rs) => {
     capacity: rs.capacity, quantity: rs.quantity, unit: rs.unit || '',
     image: rs.image || '', damaged_qty: rs.damaged_qty || 0,
     params, approve_mode: rs.approve_mode, status: rs.status,
+    is_carrier: !!rs.is_carrier,
     created_by: rs.created_by, create_time: rs.create_time, update_time: rs.update_time,
   };
 };
 
 function projectOut(p, req) {
   const resourceCount = db.prepare(
-    "SELECT COUNT(*) AS n FROM booking_resource WHERE project_id = ? AND status = 'active'"
+    "SELECT COUNT(*) AS n FROM booking_resource WHERE project_id = ? AND status = 'active' AND is_carrier = 0"
   ).get(p.id).n;
   const pendingCount = db.prepare(
     "SELECT COUNT(*) AS n FROM booking WHERE project_id = ? AND status = 'pending'"
@@ -190,6 +191,7 @@ function normResourceBody(kind, body, fallbackMode) {
   const name = trim(body.name);
   if (!name) throw new HttpError(400, '资源名称不能为空');
   if (name.length > 30) throw new HttpError(400, '资源名称过长（≤30 字）');
+  if (name === REGISTRATION_CARRIER_NAME) throw new HttpError(400, '「借用登记」是系统占位名称，请换一个资源名称');
   const spec = trim(body.spec).slice(0, 40);
   const location = trim(body.location).slice(0, 60);
   const approve_mode = normMode(body.approve_mode, fallbackMode);
@@ -330,101 +332,42 @@ function notify(userIds, type, title, content, link) {
 }
 const bookingLink = (pId, b) => `/booking/${pId}?bid=${b.id}&date=${b.start_time.slice(0, 10)}`;
 
-// ==================== 项目 ====================
-// 实验室专属项目名：实验室借设备/借教室全部挂在这一个项目下，前端「资源」板块专用页面
-// 展示，不出现在预约大厅里（否则同一批设备会有两个入口）。
-const LAB_PROJECT_NAME = '实验室';
-
-// 实验室概览：设备总量 / 当前借出 / 损坏 / 可借，以及空间的实时占用
-r.get('/lab-overview', ah((req, res) => {
-  const onlyPid = Number(req.query.project_id) || 0;
-  // 必须 SELECT *：canViewProject 依赖 p.status / p.created_by，只取 id,name 会把所有项目过滤掉
-  const projects = db.prepare("SELECT * FROM booking_project WHERE status = 'open'").all()
-    .filter((p) => (!onlyPid || p.id === onlyPid) && canViewProject(req, p));
-  if (!projects.length) {
-    return res.json({ devices: [], rooms: [], stats: { total: 0, available: 0, borrowed: 0, damaged: 0, device_count: 0, room_count: 0 } });
-  }
-  const pMap = new Map(projects.map((p) => [p.id, p.name]));
-  const now = nowSlot();
-  const used = new Map(db.prepare(
-    `SELECT resource_id, COALESCE(SUM(qty), 0) AS n FROM booking
-      WHERE status IN ('pending','confirmed') AND start_time <= ? AND end_time > ?
-      GROUP BY resource_id`
-  ).all(now, now).map((r) => [r.resource_id, r.n]));
-
-  const devices = [], rooms = [];
-  for (const pid of pMap.keys()) {
-    const rows = db.prepare(
-      "SELECT * FROM booking_resource WHERE project_id = ? AND status = 'active' ORDER BY is_space, name"
-    ).all(pid);
-    for (const rs of rows) {
-      // 「借用登记」只是承载 booking.resource_id 非空约束的占位资源，不作为设备出现在列表/统计里
-      if (!rs.is_space && rs.name === LAB_REGISTRATION_RESOURCE_NAME) continue;
-      if (rs.is_space) {
-        rooms.push({
-          id: rs.id, project_id: pid, project_name: pMap.get(pid),
-          name: rs.name, location: rs.location || '', capacity: rs.capacity,
-          busy: (used.get(rs.id) || 0) > 0,
-        });
-      } else {
-        const borrowed = used.get(rs.id) || 0;
-        const damaged = rs.damaged_qty || 0;
-        devices.push({
-          id: rs.id, project_id: pid, project_name: pMap.get(pid),
-          name: rs.name, spec: rs.spec || '', location: rs.location || '', unit: rs.unit || '',
-          image: rs.image || '', total: rs.quantity + damaged,
-          available: Math.max(0, rs.quantity - borrowed), borrowed, damaged,
-        });
-      }
-    }
-  }
-  const stats = devices.reduce(
-    (a, d) => ({ total: a.total + d.total, available: a.available + d.available, borrowed: a.borrowed + d.borrowed, damaged: a.damaged + d.damaged }),
-    { total: 0, available: 0, borrowed: 0, damaged: 0 }
-  );
-  res.json({ devices, rooms, stats: { ...stats, device_count: devices.length, room_count: rooms.length } });
-}));
-
-// 实验室默认项目：幂等获取/创建（借教室与设备借用登记都挂在这个项目下）
-function ensureLabProject(req) {
-  let p = db.prepare('SELECT * FROM booking_project WHERE name = ?').get(LAB_PROJECT_NAME);
-  if (!p) {
-    const info = tx(() => db.prepare(
-      `INSERT INTO booking_project (name, description, default_approve_mode, created_by) VALUES (?,?,?,?)`
-    ).run(LAB_PROJECT_NAME, '实验室教室借用与设备借用登记', 'first_come', req.user.id));
-    p = getProject(info.lastInsertRowid);
-    logAudit(req, 'booking-project-create', LAB_PROJECT_NAME, { project_id: p.id, auto: 'lab' });
-  }
-  return p;
-}
-
-r.post('/lab-project', ah((req, res) => {
-  res.json({ project: projectOut(ensureLabProject(req), req) });
-}));
-
-// ==================== 借用登记（设备 / 教室） ====================
-// 实验室设备与教室都还没有台账：「借设备」「借教室」都只做一次性登记 —— 拍照 + 名称（物品名 / 教室编号）
-// + 姓名 + 学号，时间按提交时刻自动记录。登记写 booking（item_kind/item_name/item_image），由一个
-// 占位资源承载 resource_id 的非空约束；该资源不出现在任何资源列表里，也不参与库存/时段冲突检测。
-const LAB_REGISTRATION_RESOURCE_NAME = '借用登记';
+// ==================== 借用登记（任意预约项目通用：拍照快速登记设备 / 教室） ====================
+// 没有台账的物品/教室只做一次性登记：拍照 + 名称（物品名 / 教室编号）+ 姓名 + 学号，时间按提交时刻记录。
+// 登记写 booking（item_kind/item_name/item_image，start=end=now，confirmed），由每项目一个的占位资源
+// 承载 resource_id 非空约束；占位资源 is_carrier=1，不进资源列表 / 甘特 / 统计，也不参与库存与冲突检测。
+const REGISTRATION_CARRIER_NAME = '借用登记';
 const REG_KINDS = {
   device: { label: '设备', nameRequired: '请填写所借物品名称', nameOverflow: '物品名称过长（≤40 字）', imageRequired: '请拍摄或上传所借物品照片', action: '设备借用登记' },
   room: { label: '教室', nameRequired: '请填写所借教室编号', nameOverflow: '教室编号过长（≤40 字）', imageRequired: '请拍摄或上传教室内环境照片', action: '教室借用登记' },
 };
 
+// 幂等取得本项目的登记占位资源（老库按名兜底，并补打 is_carrier 标记）
 function ensureRegistrationCarrier(p) {
-  let rs = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? AND name = ?').get(p.id, LAB_REGISTRATION_RESOURCE_NAME);
+  let rs = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? AND is_carrier = 1').get(p.id);
+  if (!rs) rs = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? AND name = ?').get(p.id, REGISTRATION_CARRIER_NAME);
+  if (rs && !rs.is_carrier) {
+    db.prepare('UPDATE booking_resource SET is_carrier = 1 WHERE id = ?').run(rs.id);
+    rs = getResource(rs.id);
+  }
   if (!rs) {
     const info = db.prepare(
-      `INSERT INTO booking_resource (project_id, kind, is_space, name, quantity, unit, approve_mode, params)
-       VALUES (?,?,?,?,?,?,?,?)`
-    ).run(p.id, 'item', 0, LAB_REGISTRATION_RESOURCE_NAME, 999999, '件', 'first_come', '{}');
+      `INSERT INTO booking_resource (project_id, kind, is_space, name, quantity, unit, approve_mode, params, is_carrier, created_by)
+       VALUES (?,?,?,?,?,?,?,?,1,?)`
+    ).run(p.id, 'item', 0, REGISTRATION_CARRIER_NAME, 999999, '件', 'first_come', '{}', p.created_by);
     rs = getResource(info.lastInsertRowid);
   }
   return rs;
 }
 
-r.post('/borrow-registrations', ah((req, res) => {
+const assertNotCarrier = (rs) => {
+  if (rs?.is_carrier) throw new HttpError(400, '该资源是借用登记的系统占位资源，不能修改或删除');
+};
+
+r.post('/projects/:id/borrow-registrations', ah((req, res) => {
+  const p = getProject(req.params.id);
+  requireViewProject(req, p);
+  if (p.status === 'closed') throw new HttpError(403, '项目已关闭，暂时不能登记');
   const kind = REG_KINDS[String(req.body?.kind || '')] ? String(req.body.kind) : 'device';
   const meta = REG_KINDS[kind];
   const itemName = trim(req.body?.item_name);
@@ -433,16 +376,14 @@ r.post('/borrow-registrations', ah((req, res) => {
   const image = String(req.body?.item_image || '');
   if (!image.startsWith('data:image/')) throw new HttpError(400, meta.imageRequired);
   if (image.length > 400000) throw new HttpError(400, '照片过大，请重新拍摄');
-  // 缩略图只用于管理端列表展示（原图仍是 item_image），缺失时留空不影响登记
+  // 缩略图只用于列表展示（原图最大 40 万字符），缺失时留空不影响登记
   const thumb = String(req.body?.item_thumb || '');
   const itemThumb = thumb.startsWith('data:image/') && thumb.length <= 60000 ? thumb : '';
-  const p = ensureLabProject(req);
-  if (p.status === 'closed') throw new HttpError(403, '实验室已关闭，暂时不能登记');
-  const rs = ensureRegistrationCarrier(p);
   const now = nowSlot();
   const purpose = trim(req.body?.purpose).slice(0, 200);
 
   const bId = tx(() => {
+    const rs = ensureRegistrationCarrier(p);
     const info = db.prepare(
       `INSERT INTO booking (project_id, resource_id, start_time, end_time, qty, headcount, purpose,
          status, source, booker_id, booker_name, booker_student_no, item_kind, item_name, item_image, item_thumb)
@@ -455,26 +396,26 @@ r.post('/borrow-registrations', ah((req, res) => {
       .run(info.lastInsertRowid, 'created', req.user.id, displayNameOf(req.user), meta.action);
     return info.lastInsertRowid;
   });
-  logAudit(req, 'booking-borrow-register', itemName, { booking_id: bId, kind });
+  logAudit(req, 'booking-borrow-register', `${p.name}/${itemName}`, { booking_id: bId, kind });
   res.status(201).json({ booking: bookingOut(getBooking(bId), req), message: `${meta.label}借用登记成功` });
 }));
 
-// ==================== 借用记录（实验室管理员：全局查看 / 导出） ====================
-// 独立管理页用：跨全部学生、全部设备/教室登记的全局列表 + 统计 + Excel 导出；需「实验室借用」权限。
+// ==================== 借用记录（借用记录管理员：跨项目全局查看 / 导出） ====================
+// 独立管理页用：跨全部项目、全部学生的设备/教室登记全局列表 + 统计 + Excel 导出；需「借用记录」权限。
 const REC_STATUS = { pending: '待审批', confirmed: '已确认', rejected: '已驳回', canceled: '已取消' };
 const REC_KIND = { device: '设备', room: '教室' };
 
-// 实验室借用管理：需「实验室借用」模块权限（超管恒通过；不看 canManageProject——
-// 实验室项目 created_by 可能是首个打开「资源」页的学生，不可信）
+// 不看 canManageProject —— 登记分散在学生自建的任意项目里，项目建档者不等于借用管理员
 function requireLabAdmin(req) {
-  if (!hasAdminPerm(req.user, 'lab')) throw new HttpError(403, '需要「实验室借用」管理权限');
+  if (!hasAdminPerm(req.user, 'lab')) throw new HttpError(403, '需要「借用记录」管理权限');
 }
 
-// 全局筛选：kind（设备/教室）/ status / from~to（登记日期，含端点）/ q（物品名、教室编号、姓名、学号）
+// 全局筛选：project_id / kind（设备/教室）/ status / from~to（登记日期，含端点）/ q（物品名、教室编号、姓名、学号）
 function borrowRecordsWhere(req) {
-  const p = ensureLabProject(req);
-  const where = ['b.project_id = ?', "b.item_kind IN ('device','room')"];
-  const vals = [p.id];
+  const where = ["b.item_kind IN ('device','room')"];
+  const vals = [];
+  const projectId = Number(req.query.project_id) || 0;
+  if (projectId) { where.push('b.project_id = ?'); vals.push(projectId); }
   const kind = String(req.query.kind || '');
   if (kind === 'device' || kind === 'room') { where.push('b.item_kind = ?'); vals.push(kind); }
   const status = String(req.query.status || '');
@@ -484,29 +425,37 @@ function borrowRecordsWhere(req) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(to)) { where.push('b.start_time <= ?'); vals.push(`${to} 23:59`); }
   const q = trim(req.query.q).slice(0, 40);
   if (q) {
-    where.push('(b.item_name LIKE ? OR b.booker_name LIKE ? OR b.booker_student_no LIKE ?)');
-    vals.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    where.push('(b.item_name LIKE ? OR b.booker_name LIKE ? OR b.booker_student_no LIKE ? OR p.name LIKE ?)');
+    vals.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
-  return { projectId: p.id, where: where.join(' AND '), vals };
+  return { where: where.join(' AND '), vals };
 }
 
 // 列表只回缩略图（原图最大 40 万字符，几十条就传不动）；点开单条再取原图
 const borrowRecordOut = (b) => ({
   id: b.id, kind: b.item_kind, item_name: b.item_name || '', item_thumb: b.item_thumb || '',
-  has_image: !!b.item_image, booker_id: b.booker_id, booker_name: b.booker_name || '',
+  has_image: !!b.item_image, project_id: b.project_id, project_name: b.project_name || '',
+  booker_id: b.booker_id, booker_name: b.booker_name || '',
   booker_student_no: b.booker_student_no || '', start_time: b.start_time,
   status: b.status, purpose: b.purpose || '',
 });
 
 r.get('/borrow-records', ah((req, res) => {
   requireLabAdmin(req);
-  const { projectId, where, vals } = borrowRecordsWhere(req);
-  const rows = db.prepare(`SELECT * FROM booking b WHERE ${where} ORDER BY b.start_time DESC, b.id DESC LIMIT 500`).all(...vals);
-  const matched = db.prepare(`SELECT COUNT(*) AS n FROM booking b WHERE ${where}`).get(...vals).n;
+  const { where, vals } = borrowRecordsWhere(req);
+  const rows = db.prepare(
+    `SELECT b.*, p.name AS project_name FROM booking b
+       JOIN booking_project p ON p.id = b.project_id
+      WHERE ${where} ORDER BY b.start_time DESC, b.id DESC LIMIT 500`
+  ).all(...vals);
+  const matched = db.prepare(
+    `SELECT COUNT(*) AS n FROM booking b JOIN booking_project p ON p.id = b.project_id WHERE ${where}`
+  ).get(...vals).n;
 
   const all = db.prepare(
-    "SELECT status, item_kind, start_time, booker_id, booker_student_no FROM booking WHERE project_id = ? AND item_kind IN ('device','room')"
-  ).all(projectId);
+    `SELECT b.status, b.item_kind, b.start_time, b.booker_id, b.booker_student_no
+       FROM booking b JOIN booking_project p ON p.id = b.project_id WHERE ${where}`
+  ).all(...vals);
   const today = nowSlot().slice(0, 10);
   const stats = {
     total: all.length,
@@ -522,21 +471,25 @@ r.get('/borrow-records', ah((req, res) => {
 r.get('/borrow-records/export', ah((req, res) => {
   requireLabAdmin(req);
   const { where, vals } = borrowRecordsWhere(req);
-  const rows = db.prepare(`SELECT * FROM booking b WHERE ${where} ORDER BY b.start_time DESC, b.id DESC LIMIT 5000`).all(...vals);
+  const rows = db.prepare(
+    `SELECT b.*, p.name AS project_name FROM booking b
+       JOIN booking_project p ON p.id = b.project_id
+      WHERE ${where} ORDER BY b.start_time DESC, b.id DESC LIMIT 5000`
+  ).all(...vals);
 
-  const aoa = [['序号', '类型', '借用物品 / 教室', '姓名', '学号', '登记时间', '状态', '备注']];
+  const aoa = [['序号', '所属项目', '类型', '借用物品 / 教室', '姓名', '学号', '登记时间', '状态', '备注']];
   rows.forEach((b, i) => aoa.push([
-    i + 1, REC_KIND[b.item_kind] || '', b.item_name || '', b.booker_name || '',
+    i + 1, b.project_name || '', REC_KIND[b.item_kind] || '', b.item_name || '', b.booker_name || '',
     b.booker_student_no || '', b.start_time, REC_STATUS[b.status] || b.status, b.purpose || '',
   ]));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 6 }, { wch: 8 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 10 }, { wch: 24 }];
-  ws['!autofilter'] = { ref: `A1:H${aoa.length}` };
+  ws['!cols'] = [{ wch: 6 }, { wch: 18 }, { wch: 8 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 10 }, { wch: 24 }];
+  ws['!autofilter'] = { ref: `A1:I${aoa.length}` };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '借用记录');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-  const fname = `实验室借用记录-${nowSlot().slice(0, 10)}.xlsx`;
+  const fname = `借用记录-${nowSlot().slice(0, 10)}.xlsx`;
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="borrow-records.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
@@ -544,9 +497,7 @@ r.get('/borrow-records/export', ah((req, res) => {
 
 r.get('/projects', ah((req, res) => {
   const scope = ['mine', 'managed'].includes(String(req.query.scope)) ? String(req.query.scope) : 'all';
-  // 实验室项目只在「资源」板块里维护，不进预约大厅 —— 否则同一批设备/教室会有两个借入口
-  let ps = db.prepare('SELECT * FROM booking_project ORDER BY id DESC LIMIT 500').all()
-    .filter((p) => p.name !== LAB_PROJECT_NAME);
+  let ps = db.prepare('SELECT * FROM booking_project ORDER BY id DESC LIMIT 500').all();
   if (scope === 'managed') ps = ps.filter((p) => canManageProject(req, p));
   else if (scope === 'mine') {
     const partIds = new Set(db.prepare(
@@ -631,6 +582,7 @@ r.get('/projects/:id/resources', ah((req, res) => {
   const status = ['active', 'archived', 'all'].includes(String(req.query.status)) ? String(req.query.status) : 'active';
   const kind = String(req.query.kind || '');
   let rows = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? ORDER BY is_space DESC, kind, id').all(p.id);
+  rows = rows.filter((x) => !x.is_carrier); // 借用登记占位资源不进台账
   if (status !== 'all') rows = rows.filter((x) => x.status === status);
   if (KINDS.has(kind)) rows = rows.filter((x) => x.kind === kind);
   res.json({ resources: rows.map(resourceOut), canManage: canManageProject(req, p) });
@@ -727,6 +679,7 @@ r.post('/projects/:id/resources/parse-import', importMem, ah((req, res) => {
 r.put('/resources/:rid', ah((req, res) => {
   const rs = getResource(req.params.rid);
   if (!rs) throw new HttpError(404, '资源不存在');
+  assertNotCarrier(rs);
   const p = getProject(rs.project_id);
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以修改资源');
   const b = req.body || {};
@@ -780,6 +733,7 @@ r.put('/resources/:rid', ah((req, res) => {
 r.delete('/resources/:rid', ah((req, res) => {
   const rs = getResource(req.params.rid);
   if (!rs) throw new HttpError(404, '资源不存在');
+  assertNotCarrier(rs);
   const p = getProject(rs.project_id);
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以删除资源');
   const used = db.prepare('SELECT COUNT(*) AS n FROM booking WHERE resource_id = ?').get(rs.id).n;
@@ -791,6 +745,7 @@ r.delete('/resources/:rid', ah((req, res) => {
 r.post('/resources/:rid/archive', ah((req, res) => {
   const rs = getResource(req.params.rid);
   if (!rs) throw new HttpError(404, '资源不存在');
+  assertNotCarrier(rs);
   const p = getProject(rs.project_id);
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以归档资源');
   tx(() => db.prepare("UPDATE booking_resource SET status = 'archived', update_time = datetime('now','localtime') WHERE id = ?").run(rs.id));
@@ -917,13 +872,15 @@ const participantRows = (bookingId) => db.prepare(
   avatar: x.avatar || null, is_booker: !!x.is_booker,
 }));
 
-const bookingOut = (b, req) => {
+// fullImage：列表/我的预约不带原图（dataURL 最大 40 万字符），仅单条详情回原图
+const bookingOut = (b, req, { fullImage = false } = {}) => {
   const rs = getResource(b.resource_id);
   const p = getProject(b.project_id);
   // booker_name/approver_name/cancel_by_name 均为落库署名快照（displayNameOf 文本），前端原样渲染即可，
   // 不再附实时 real_name —— 快照已含「真名（昵称）」，再与实时真名组合只会叠成双层。
   return {
     ...b,
+    item_image: fullImage ? (b.item_image || '') : '',
     is_space: !!rs?.is_space, kind: rs?.kind, resource_name: rs?.name || '',
     resource_status: rs?.status, approve_mode: rs?.approve_mode,
     project_name: p?.name || '',
@@ -950,6 +907,7 @@ function createBooking(req, p, body, { conflictsOnly = false, excludeId = 0 } = 
   const rs = getResource(Number(body.resource_id));
   if (!rs || rs.project_id !== p.id) throw new HttpError(400, '资源不存在或不属于本项目');
   if (rs.status !== 'active' && !conflictsOnly) throw new HttpError(400, '资源已归档，不能预约');
+  if (rs.is_carrier) throw new HttpError(400, '不能直接预约借用登记占位资源');
 
   const { start, end } = validateSlotWindow(body.start_time, body.end_time);
   const startStr = fmtSlot(start), endStr = fmtSlot(end);
@@ -1056,11 +1014,14 @@ r.get('/projects/:id/timeline', ah((req, res) => {
 
   const includeAll = String(req.query.all) === '1';
   let resources = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? ORDER BY is_space DESC, kind, id').all(p.id);
+  resources = resources.filter((x) => !x.is_carrier); // 借用登记占位资源不画进甘特
   if (!includeAll) resources = resources.filter((x) => x.status === 'active');
 
   const statusCond = includeAll ? '' : "AND b.status IN ('pending','confirmed')";
   const bookings = db.prepare(
-    `SELECT b.* FROM booking b WHERE b.project_id = ? AND b.start_time < ? AND b.end_time > ? ${statusCond}
+    `SELECT b.* FROM booking b
+      WHERE b.project_id = ? AND b.start_time < ? AND b.end_time > ?
+        AND COALESCE(b.item_kind, '') = '' ${statusCond}
      ORDER BY b.start_time`
   ).all(p.id, winEnd, winStart).map((b) => ({
     id: b.id, resource_id: b.resource_id, start_time: b.start_time, end_time: b.end_time,
@@ -1097,13 +1058,15 @@ r.get('/bookings/:id', ah((req, res) => {
   const b = getBooking(req.params.id);
   if (!b) throw new HttpError(404, '预约不存在');
   const p = getProject(b.project_id);
-  if (!canViewProject(req, p)) throw new HttpError(404, '预约不存在');
+  // 借用记录管理员可跨项目打开登记行（全局记录页点开看原图）；其他单仍按项目可见性
+  if (!canViewProject(req, p) && !(b.item_kind && hasAdminPerm(req.user, 'lab')))
+    throw new HttpError(404, '预约不存在');
   // actor_name 为操作时的署名快照，原样返回
   const logs = db.prepare(
     `SELECT bl.* FROM booking_log bl
       WHERE bl.booking_id = ? ORDER BY bl.id`
   ).all(b.id);
-  res.json({ booking: bookingOut(b, req), logs });
+  res.json({ booking: bookingOut(b, req, { fullImage: !!b.item_kind }), logs });
 }));
 
 // 审批通过：事务内复检冲突（pending 期间可能有管理员直插/资源变化）
@@ -1174,8 +1137,9 @@ r.post('/bookings/:id/cancel', ah((req, res) => {
   const manager = canManageProject(req, p);
   if (b.booker_id !== req.user.id && !manager) throw new HttpError(403, '只有预约者或项目负责人可以取消');
   const forced = b.booker_id !== req.user.id && manager;
-  // 预约者自己取消 confirmed 单：开始后不允许；负责人/管理员可随时强取消
-  if (!forced && b.status === 'confirmed' && nowSlot() >= b.start_time)
+  // 预约者自己取消 confirmed 单：开始后不允许；负责人/管理员可随时强取消。
+  // 借用登记是零时长记录（start=end=登记时刻），本人可随时取消
+  if (!forced && !b.item_kind && b.status === 'confirmed' && nowSlot() >= b.start_time)
     throw new HttpError(400, '预约已开始，如需取消请联系项目负责人');
   const rs = getResource(b.resource_id);
   const actorName = displayNameOf(req.user);

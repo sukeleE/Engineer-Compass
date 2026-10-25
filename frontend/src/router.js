@@ -18,7 +18,6 @@ import ExpenseGuide from './components/ExpenseGuide.vue';
 import PurchaseView from './components/purchase/PurchaseView.vue';
 import BookingView from './components/booking/BookingView.vue';
 import BookingProjectView from './components/booking/BookingProjectView.vue';
-import ResourcesView from './components/booking/ResourcesView.vue';
 import LabAdminView from './components/booking/LabAdminView.vue';
 import HonorView from './components/HonorView.vue';
 import MyView from './components/MyView.vue';
@@ -111,12 +110,11 @@ const router = createRouter({
     // 资源预约：大厅 + 项目页（周视图甘特/资源台账/固定组队/预约审批）；必须在 /:username 兜底之前；实名硬门禁
     { path: '/booking', name: 'booking', component: BookingView, meta: { requiresRealName: true } },
     { path: '/booking/:id', name: 'booking-project', component: BookingProjectView, meta: { requiresRealName: true } },
-    // 资源：借设备 / 借教室（实验室）的唯一入口，复用 booking 的 item/space 两种资源；
-    // 原 /lab 与 /booking 大厅的实验室项目都收口到这里，避免同一批设备有两个借入口。实名硬门禁
-    { path: '/resources', name: 'resources', component: ResourcesView, meta: { requiresRealName: true } },
-    { path: '/lab', redirect: '/resources' },
-    // 借用记录管理：需「实验室借用」权限（后端 requireLabAdmin 二次校验）。
-    // 不用 canManage —— 实验室项目的 created_by 可能是首个打开「资源」的学生，不可信
+    // 旧入口兼容：借用登记已并入资源预约模块（项目页「借用登记」tab），/resources 与 /lab 统一收口到 /booking
+    { path: '/resources', redirect: '/booking' },
+    { path: '/lab', redirect: '/booking' },
+    // 借用记录管理：需「借用记录」权限（后端 requireLabAdmin 二次校验）。
+    // 不用 canManage —— 登记分散在学生自建的任意项目，项目建档者不可信
     {
       path: '/lab-admin', name: 'lab-admin', component: LabAdminView,
       beforeEnter: async (to, _from, next) => {
@@ -127,7 +125,7 @@ const router = createRouter({
             patchUser(user);
             if (canAdmin('lab', user)) return next();
           } catch { /* 网络失败按原缓存判断 */ }
-          return next('/resources');
+          return next('/booking');
         }
         next();
       },
