@@ -1,17 +1,7 @@
 <template>
-  <div class="pv-wrap lab-admin-wrap">
-    <!-- 页头 -->
-    <div class="pv-hero card">
-      <div>
-        <h2>🗂️ 借用记录管理 <el-tag size="small" type="danger" effect="light">仅借用记录管理员</el-tag></h2>
-        <p class="sub2">全部项目、全部学生的设备借用、教室借用登记汇总在这里：按类型/状态/日期/关键字筛选，点缩略图看原图，一键导出 Excel 表格。</p>
-      </div>
-      <el-button type="primary" :loading="exporting" @click="doExport">
-        {{ exporting ? '导出中…' : '⬇️ 导出借用记录表格' }}
-      </el-button>
-    </div>
-
-    <!-- 全局统计（不受下方筛选影响） -->
+  <!-- 借用记录管理：嵌入资源预约大厅的权限 tab（需「借用记录」权限）。跨项目聚合 + 导出 -->
+  <div class="recs-wrap">
+    <!-- 统计（不受下方筛选影响） -->
     <div class="stat-cards rec-stats">
       <div class="stat-card primary">
         <span class="sc-label">累计登记</span>
@@ -35,9 +25,11 @@
       </div>
     </div>
 
-    <!-- 筛选 -->
     <div class="card">
       <div class="filter-bar">
+        <el-select v-model="f.project_id" placeholder="全部项目" clearable filterable style="width: 170px" @change="load">
+          <el-option v-for="p in projectOptions" :key="p.id" :value="p.id" :label="p.name" />
+        </el-select>
         <el-select v-model="f.kind" placeholder="全部类型" clearable style="width: 128px" @change="load">
           <el-option value="device" label="📦 设备借用" />
           <el-option value="room" label="🏫 教室借用" />
@@ -47,12 +39,12 @@
         </el-select>
         <el-date-picker v-model="range" type="daterange" range-separator="至" start-placeholder="开始日期"
           end-placeholder="结束日期" value-format="YYYY-MM-DD" style="width: 250px" @change="load" />
-        <el-input v-model="f.q" placeholder="物品 / 教室 / 姓名 / 学号" clearable style="width: 210px"
+        <el-input v-model="f.q" placeholder="物品 / 教室 / 姓名 / 学号 / 项目" clearable style="width: 220px"
           @keyup.enter="load" @clear="load" />
         <el-button @click="load">查询</el-button>
         <el-button @click="resetFilter">重置</el-button>
         <span class="spacer"></span>
-        <span class="dim">筛选结果 {{ matched }} 条</span>
+        <el-button type="primary" plain size="small" :loading="exporting" @click="doExport">⬇️ 导出 Excel</el-button>
       </div>
 
       <div v-loading="loading">
@@ -102,8 +94,9 @@
                   {{ STATUS_META[b.status]?.label || b.status }}
                 </el-tag>
               </div>
-              <div class="rc-sub">{{ kindLabel(b.kind) }} · {{ b.booker_name || '—' }} {{ b.booker_student_no || '未填学号' }}</div>
-              <div class="rc-sub">{{ b.project_name || '—' }} · 登记于 {{ b.start_time }}</div>
+              <div class="rc-sub">{{ kindLabel(b.kind) }} · {{ b.project_name || '—' }}</div>
+              <div class="rc-sub">{{ b.booker_name || '—' }} {{ b.booker_student_no || '未填学号' }}</div>
+              <div class="rc-sub">登记于 {{ b.start_time }}</div>
             </div>
           </div>
         </div>
@@ -132,14 +125,16 @@ const loading = ref(false);
 const exporting = ref(false);
 const records = ref([]);
 const matched = ref(0);
+const projectOptions = ref([]);
 const stats = reactive({ total: 0, today: 0, device: 0, room: 0, people: 0 });
-const f = reactive({ kind: '', status: '', q: '' });
+const f = reactive({ project_id: null, kind: '', status: '', q: '' });
 const range = ref(null);
 
 const kindLabel = (k) => (k === 'room' ? '🏫 教室' : '📦 设备');
 
 function params() {
   const p = {};
+  if (f.project_id) p.project_id = f.project_id;
   if (f.kind) p.kind = f.kind;
   if (f.status) p.status = f.status;
   if (f.q.trim()) p.q = f.q.trim();
@@ -162,6 +157,7 @@ async function load() {
 }
 
 function resetFilter() {
+  f.project_id = null;
   f.kind = '';
   f.status = '';
   f.q = '';
@@ -201,59 +197,41 @@ async function viewPhoto(b) {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  // 项目下拉：大厅可见项目即可（关闭项目记录仍会出现在列表里，只是不能按它筛选）
+  try {
+    const d = await api.bookingProjects('all');
+    projectOptions.value = d.projects;
+  } catch { /* 下拉留空不影响记录查看 */ }
+  load();
+});
 </script>
 
 <style lang="scss" scoped>
-.lab-admin-wrap { padding-bottom: 30px; }
-
-// 5 张统计卡：默认 4 列会把第 5 张甩到下一行
+.recs-wrap { padding-bottom: 10px; }
 .rec-stats { grid-template-columns: repeat(5, 1fr); }
-
 .rec-table-wrap { display: block; }
 .rec-cards { display: none; }
-
 .rec-thumb {
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  cursor: zoom-in;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 38px; height: 38px; border-radius: 8px; object-fit: cover;
+  border: 1px solid var(--border); cursor: zoom-in;
+  display: inline-flex; align-items: center; justify-content: center;
   &.ph { cursor: default; background: var(--surface-2); color: var(--text-3); font-size: 15px; }
 }
-
-.rec-card {
-  display: flex;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+.rec-card { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border);
   &:last-child { border-bottom: 0; }
 }
 .rec-card-thumb {
-  width: 54px;
-  height: 54px;
-  flex: none;
-  border-radius: 10px;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  cursor: zoom-in;
+  width: 54px; height: 54px; flex: none; border-radius: 10px; object-fit: cover;
+  border: 1px solid var(--border); cursor: zoom-in;
   &.ph {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--surface-2);
-    font-size: 20px;
-    cursor: default;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface-2); font-size: 20px; cursor: default;
   }
 }
 .rec-card-main { min-width: 0; flex: 1; }
 .rc-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
 .rc-sub { font-size: 12.5px; color: var(--text-2); margin-top: 3px; }
-
 .rec-note { margin: 8px 0 0; font-size: 11.5px; color: var(--text-3); }
 
 @media (max-width: 768px) {

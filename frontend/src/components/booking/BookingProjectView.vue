@@ -37,6 +37,7 @@
     <div v-show="tab === 'week'" class="card bpv-week">
       <WeekGantt :project="project" :data="timeline" :from="weekFrom" :loading="tlLoading"
         @navigate="onNavigate" @select-slot="openBooking" @select-booking="openDetail"
+        @select-resource="openResource"
         @toggle-history="onToggleHistory" />
     </div>
 
@@ -146,6 +147,9 @@
 
     <!-- 详情弹窗 -->
     <BookingDetailDialog v-if="detailId" :id="detailId" @close="detailId = null" @changed="onDataChanged" />
+
+    <!-- 资源详情 -->
+    <ResourceDetailDialog v-if="detailResource" :resource="detailResource" @close="detailResource = null" />
   </div>
 </template>
 
@@ -161,6 +165,7 @@ import ResourcePanel from './ResourcePanel.vue';
 import TeamPanel from './TeamPanel.vue';
 import BookingDialog from './BookingDialog.vue';
 import BookingDetailDialog from './BookingDetailDialog.vue';
+import ResourceDetailDialog from './ResourceDetailDialog.vue';
 import BorrowRegisterPanel from './BorrowRegisterPanel.vue';
 import { MODE_ZH, STATUS_META, KIND_MAP, REG_KIND_META, isRegBooking, fmtDate, mondayOf, parseLocal } from '../../utils/booking.js';
 
@@ -189,6 +194,7 @@ const sf = ref({ name: '', description: '', default_approve_mode: 'approval', st
 
 const bookingInitial = ref(null);
 const detailId = ref(null);
+const detailResource = ref(null);
 
 const resourcePanelRef = ref(null);
 const teamPanelRef = ref(null);
@@ -286,6 +292,7 @@ function openDetail(v) {
   // 甘特/手风琴 emit 预约对象，审批表与 ?bid= 传数字 id
   detailId.value = typeof v === 'object' && v ? v.id : v;
 }
+function openResource(r) { detailResource.value = r; }
 
 function openSettings() {
   sf.value = {

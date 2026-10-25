@@ -204,6 +204,19 @@ try {
   const after = (await req(`/booking/projects/${P.id}/resources?status=all`, { token: tA })).data.resources.length;
   ok('bulk 坏行整体回滚（计数不变）', after === before + 3, [before, after]);
 
+  // ---------- 2a2. 资源照片：物品/空间都可选拍照，编辑可改可删 ----------
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  g = await req(`/booking/projects/${P.id}/resources`, { method: 'POST', token: tA,
+    body: { kind: 'space', name: '带照片教室', location: '工训 302', capacity: 10, image: PNG } });
+  ok('空间资源带照片创建 201 且图片回显', g.status === 201 && g.data.resource.image === PNG, g.status);
+  const photoRoom = g.data.resource;
+  g = await req(`/booking/resources/${photoRoom.id}`, { method: 'PUT', token: tA, body: { image: '' } });
+  ok('空间资源 PUT 可移除照片', g.status === 200 && g.data.resource.image === '', g.status);
+  g = await req(`/booking/resources/${itemA.id}`, { method: 'PUT', token: tA, body: { image: PNG } });
+  ok('物品资源 PUT 可补照片并回显', g.status === 200 && g.data.resource.image === PNG, g.status);
+  g = await req(`/booking/resources/${itemA.id}`, { method: 'PUT', token: tA, body: { image: '' } });
+  ok('物品资源 PUT 可移除照片', g.status === 200 && g.data.resource.image === '', g.status);
+
   // ---------- 2b. 表格导入（xlsx/csv 解析预览 → bulk 落库；模板下载） ----------
   const tplUrl = (kind) => `/booking/projects/${P.id}/resources/import-template?kind=${kind}`;
   const parseUrl = `/booking/projects/${P.id}/resources/parse-import`;

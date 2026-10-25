@@ -14,6 +14,17 @@
         <el-input v-model="f.location" maxlength="60" :placeholder="meta.space ? '楼栋/房间号' : '存放位置'" />
       </el-form-item>
 
+      <!-- 实物 / 现场照片（可选）：录入时拍一张，资源详情里可查看 -->
+      <el-form-item label="资源照片（可选）">
+        <div class="rf-shot" @click="pickShot">
+          <img v-if="f.image" :src="f.image" alt="资源照片" />
+          <div v-else class="rf-shot-ph"><span>📷</span><b>点击拍照 / 上传图片</b></div>
+          <span v-if="f.image" class="rf-shot-retake">重拍</span>
+        </div>
+        <input ref="shotRef" type="file" accept="image/*" capture="environment" hidden @change="onShot" />
+        <el-button v-if="f.image" link type="danger" size="small" style="margin-left: 10px" @click="f.image = ''">移除照片</el-button>
+      </el-form-item>
+
       <!-- 空间：容量 + 设备参数 -->
       <template v-if="meta.space">
         <el-form-item label="可容纳人数" required>
@@ -60,6 +71,7 @@ import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import { KINDS, KIND_MAP } from '../../utils/booking.js';
+import { compressImage } from '../../utils/imageCompress.js';
 
 const props = defineProps({
   modelValue: Boolean,
@@ -70,10 +82,11 @@ const emit = defineEmits(['close', 'saved']);
 
 const empty = () => ({
   kind: 'space', name: '', location: '', capacity: 30, quantity: 1,
-  unit: '', spec: '', equipment: [], approve_mode: props.project.default_approve_mode || 'approval',
+  unit: '', spec: '', equipment: [], image: '', approve_mode: props.project.default_approve_mode || 'approval',
 });
 const f = ref(empty());
 const saving = ref(false);
+const shotRef = ref(null);
 const meta = computed(() => KIND_MAP[f.value.kind]);
 
 watch(() => props.modelValue, (v) => {
@@ -84,6 +97,7 @@ watch(() => props.modelValue, (v) => {
       capacity: props.resource.capacity ?? 30, quantity: props.resource.quantity ?? 1,
       unit: props.resource.unit || '', spec: props.resource.spec || '',
       equipment: props.resource.params?.equipment || [],
+      image: props.resource.image || '',
       approve_mode: props.resource.approve_mode,
     };
   } else {
@@ -91,13 +105,42 @@ watch(() => props.modelValue, (v) => {
   }
 }, { immediate: true });
 
+// ============ 拍照（与借用登记同一套压缩口径，后端单字段 ≤40 万字符） ============
+const pickShot = () => shotRef.value?.click();
+function toDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ''));
+    fr.onerror = () => reject(new Error('图片读取失败'));
+    fr.readAsDataURL(file);
+  });
+}
+async function onShot(e) {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    let out = await compressImage(file, { maxEdge: 900, quality: 0.8 });
+    let url = await toDataUrl(out);
+    if (url.length > 380000) {
+      out = await compressImage(file, { maxEdge: 640, quality: 0.7 });
+      url = await toDataUrl(out);
+    }
+    if (url.length > 380000) return ElMessage.warning('图片过大，请换一张更小的图片');
+    f.value.image = url;
+  } catch (err) {
+    ElMessage.error(err.message || '图片处理失败');
+  }
+}
+
 async function submit() {
   if (!f.value.name.trim()) return ElMessage.warning('请填写资源名称');
   const isSpace = meta.value.space;
   if (isSpace && !(f.value.capacity >= 1)) return ElMessage.warning('请填写可容纳人数');
   if (!isSpace && !(f.value.quantity >= 1)) return ElMessage.warning('请填写库存数量');
   const body = {
-    kind: f.value.kind, name: f.value.name.trim(), location: f.value.location, approve_mode: f.value.approve_mode,
+    kind: f.value.kind, name: f.value.name.trim(), location: f.value.location,
+    image: f.value.image || '', approve_mode: f.value.approve_mode,
     ...(isSpace
       ? { capacity: f.value.capacity, equipment: f.value.equipment }
       : { quantity: f.value.quantity, unit: f.value.unit, spec: f.value.spec }),
@@ -106,7 +149,7 @@ async function submit() {
   try {
     if (props.resource) {
       // 编辑时 kind/容量库存之外字段按类型提交；容量库存变更后端有占用复检
-      const editBody = { name: body.name, location: body.location, approve_mode: body.approve_mode };
+      const editBody = { name: body.name, location: body.location, image: body.image, approve_mode: body.approve_mode };
       if (isSpace) editBody.capacity = body.capacity, editBody.equipment = body.equipment;
       else editBody.quantity = body.quantity, editBody.unit = body.unit, editBody.spec = body.spec;
       await api.bookingResourceUpdate(props.resource.id, editBody);
@@ -126,4 +169,27 @@ async function submit() {
 
 <style lang="scss" scoped>
 .rf-hint { margin-left: 12px; font-size: 12px; color: var(--text-3); }
+.rf-shot {
+  position: relative;
+  width: 220px;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  img { width: 100%; height: 100%; object-fit: cover; }
+}
+.rf-shot-ph {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-3);
+  span { font-size: 26px; }
+  b { font-size: 12.5px; font-weight: 400; }
+}
+.rf-shot-retake {
+  position: absolute; right: 8px; bottom: 8px; padding: 3px 9px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11.5px;
+}
 </style>

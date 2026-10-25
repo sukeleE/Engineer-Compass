@@ -197,8 +197,10 @@ function normResourceBody(kind, body, fallbackMode) {
   const approve_mode = normMode(body.approve_mode, fallbackMode);
 
   let capacity = null, quantity = 1, unit = '';
-  let image = '', damaged_qty = 0;
+  let damaged_qty = 0;
   const params = {};
+  // 物品/空间都可拍一张实物/现场照（可选）；损坏数量仍是物品专属
+  const image = typeof body.image === 'string' ? body.image.slice(0, 400000) : '';
   if (isSpace) {
     capacity = Number(body.capacity);
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 9999)
@@ -214,7 +216,6 @@ function normResourceBody(kind, body, fallbackMode) {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 9999)
       throw new HttpError(400, '物品库存须为 1–9999 的整数');
     unit = trim(body.unit).slice(0, 8);
-    image = typeof body.image === 'string' ? body.image.slice(0, 400000) : '';
     damaged_qty = body.damaged_qty === undefined || body.damaged_qty === '' ? 0 : Number(body.damaged_qty);
     if (!Number.isInteger(damaged_qty) || damaged_qty < 0 || damaged_qty > quantity)
       throw new HttpError(400, `损坏数量须为 0–${quantity} 的整数`);
@@ -696,6 +697,8 @@ r.put('/resources/:rid', ah((req, res) => {
   if (b.spec !== undefined) fields.push('spec = ?'), vals.push(trim(b.spec).slice(0, 40));
   if (b.location !== undefined) fields.push('location = ?'), vals.push(trim(b.location).slice(0, 60));
   if (b.approve_mode !== undefined) fields.push('approve_mode = ?'), vals.push(normMode(b.approve_mode, rs.approve_mode));
+  // 物品/空间都可更新照片（空串=移除照片）
+  if (b.image !== undefined) fields.push('image = ?'), vals.push(typeof b.image === 'string' ? b.image.slice(0, 400000) : '');
 
   if (rs.is_space) {
     if (b.capacity !== undefined) {
@@ -717,7 +720,6 @@ r.put('/resources/:rid', ah((req, res) => {
       fields.push('quantity = ?'); vals.push(quantity);
     }
     if (b.unit !== undefined) fields.push('unit = ?'), vals.push(trim(b.unit).slice(0, 8));
-    if (b.image !== undefined) fields.push('image = ?'), vals.push(typeof b.image === 'string' ? b.image.slice(0, 400000) : '');
     if (b.damaged_qty !== undefined) {
       const damaged = Number(b.damaged_qty);
       if (!Number.isInteger(damaged) || damaged < 0 || damaged > 9999) throw new HttpError(400, '损坏数量须为 0–9999 的整数');

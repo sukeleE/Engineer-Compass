@@ -18,7 +18,6 @@ import ExpenseGuide from './components/ExpenseGuide.vue';
 import PurchaseView from './components/purchase/PurchaseView.vue';
 import BookingView from './components/booking/BookingView.vue';
 import BookingProjectView from './components/booking/BookingProjectView.vue';
-import LabAdminView from './components/booking/LabAdminView.vue';
 import HonorView from './components/HonorView.vue';
 import MyView from './components/MyView.vue';
 import AccountSecurityView from './components/account/AccountSecurityView.vue';
@@ -113,23 +112,9 @@ const router = createRouter({
     // 旧入口兼容：借用登记已并入资源预约模块（项目页「借用登记」tab），/resources 与 /lab 统一收口到 /booking
     { path: '/resources', redirect: '/booking' },
     { path: '/lab', redirect: '/booking' },
-    // 借用记录管理：需「借用记录」权限（后端 requireLabAdmin 二次校验）。
-    // 不用 canManage —— 登记分散在学生自建的任意项目，项目建档者不可信
-    {
-      path: '/lab-admin', name: 'lab-admin', component: LabAdminView,
-      beforeEnter: async (to, _from, next) => {
-        if (!auth.token) return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`);
-        if (!canAdmin('lab')) {
-          try {
-            const { user } = await api.me();
-            patchUser(user);
-            if (canAdmin('lab', user)) return next();
-          } catch { /* 网络失败按原缓存判断 */ }
-          return next('/booking');
-        }
-        next();
-      },
-    },
+    // 借用记录管理已并入资源预约大厅（仅 lab 权限可见的「借用记录」tab）；旧链接收口到 ?tab=records，
+    // 无权限用户进入时 BookingView 自动落回全部项目，接口本身仍有 requireLabAdmin 硬校验。
+    { path: '/lab-admin', redirect: '/booking?tab=records' },
     // 荣誉墙（公开免登录；内容由管理员在后台维护。复数路径只做重定向，全站单数口径）
     { path: '/honor', name: 'honor', component: HonorView },
     { path: '/honors', redirect: '/honor' },
