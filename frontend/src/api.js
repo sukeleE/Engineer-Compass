@@ -425,6 +425,7 @@ export const api = {
   purchaseEvents: () => req('/purchase/events'),
   purchaseEventCreate: (b) => req('/purchase/events', { method: 'POST', body: JSON.stringify(b) }),
   purchaseEventUpdate: (id, b) => req(`/purchase/events/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  purchaseEventDelete: (id) => req(`/purchase/events/${id}`, { method: 'DELETE' }),
   purchaseApprovers: (id) => req(`/purchase/events/${id}/approvers`),
   purchaseApproverAdd: (id, userId, role) => req(`/purchase/events/${id}/approvers`, { method: 'POST', body: JSON.stringify({ user_id: userId, role }) }),
   purchaseApproverRemove: (id, userId) => req(`/purchase/events/${id}/approvers/${userId}`, { method: 'DELETE' }),

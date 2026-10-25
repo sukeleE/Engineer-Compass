@@ -6,7 +6,8 @@
 // BOM 识别（真 .xlsx 表头启发式/UTF-8 BOM csv/GBK csv/假 PDF 400/无 key 图片 502/.docx 400）→
 // 统计口径（approved+invoiced 合计、按事件/个人/状态分组、mine=1、学生整体 403、事件级隔离）→
 // 导出（4 sheet 名/金额列 =SUM 公式/公式注入转义/mine 只含自己/filename*）→
-// 撤回级联清盘（items/files/logs 归零、目录消失）→ 事件有申请时库级 RESTRICT → 清理测试用户与冒烟档案。
+// 撤回级联清盘（items/files/logs 归零、目录消失）→ 删除（档案权限矩阵 403/404/409/200、超管强删 invoiced 申请并清盘）
+//   → 事件有申请时库级 RESTRICT 兜底 → 清理测试用户与冒烟档案。
 import { existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -484,21 +485,54 @@ try {
   ok('关闭后：路人列表不可见；有申请的学生仍可见',
     !listCClosed.events.some((e) => Number(e.id) === eid1) && listAClosed.events.some((e) => Number(e.id) === eid1));
   await api(`/purchase/events/${eid1}`, { method: 'PUT', token: tL, body: { status: 'open' } });
-  // API 不提供删除档案；库层有申请时 DELETE 必须被外键 RESTRICT 挡住
+  // 库层兜底：即使绕过 API，有申请时 DELETE 也必须被外键 RESTRICT 挡住
   let restrictBlocked = false;
   try { db.prepare('DELETE FROM purchase_event WHERE id = ?').run(eid1); }
   catch (e) { restrictBlocked = /constraint/i.test(String(e.message)); }
   ok('有申请的档案库级删除被 RESTRICT 挡住', restrictBlocked);
   ok('RESTRICT 后档案仍在', !!db.prepare('SELECT id FROM purchase_event WHERE id = ?').get(eid1));
 
-  // ---------- 15. 清理：盘 → 人(级联) → 冒烟档案（档案无 API 删除通道，库清） ----------
+  // ---------- 14.5 删除：档案删除权限矩阵 + 超管强删任意状态申请 ----------
+  // 14.5.1 档案删除：路人/非建档 leader 403；有申请 409（带数量）；建档者删空档案 200，重复删 404
+  got = await expect(`/purchase/events/${eid4}`, 403, { method: 'DELETE', token: tC });
+  ok('路人删除档案 403', got.ok);
+  got = await expect(`/purchase/events/${eid2}`, 403, { method: 'DELETE', token: tA });
+  ok('非建档者的负责人不能删档案 403', got.ok);
+  got = await expect(`/purchase/events/${eid1}`, 409, { method: 'DELETE', token: tL });
+  ok('建档者删有申请的档案 409 + 提示申请数量', got.ok && /2\s*条/.test(got.data.error || ''), got.data);
+  const dev = await api(`/purchase/events/${eid4}`, { method: 'DELETE', token: tB });
+  ok('建档者删除空档案 200', !!dev.message);
+  got = await expect(`/purchase/events/${eid4}`, 404, { method: 'DELETE', token: tB });
+  ok('重复删除档案 404', got.ok);
+  ok('档案删除后审批人配置随级联清空',
+    db.prepare('SELECT COUNT(*) AS n FROM purchase_event_approver WHERE event_id = ?').get(eid4).n === 0);
+
+  // 14.5.2 超管（DB 直改提权；session 每请求重查用户行，旧 token 即时生效）强删他人「已传发票」申请
+  const uidC = Number(rC.user.id);
+  db.prepare('UPDATE user SET is_admin=1, admin_perms=NULL WHERE id=?').run(uidC);
+  ok('ridA 删除前附件目录存在（购买截图+补传发票）', existsSync(join(PURCHASE_UP, String(ridA))));
+  const da = await api(`/purchase/requests/${ridA}`, { method: 'DELETE', token: tC });
+  ok('超管强删他人已传发票申请 200', /删除/.test(da.message || ''), da);
+  ok('强删后申请整目录清盘', !existsSync(join(PURCHASE_UP, String(ridA))));
+  const zeroA = db.prepare(
+    `SELECT (SELECT COUNT(*) FROM purchase_request WHERE id=?) AS rq,
+            (SELECT COUNT(*) FROM purchase_item WHERE request_id=?) AS it,
+            (SELECT COUNT(*) FROM purchase_file WHERE request_id=?) AS f,
+            (SELECT COUNT(*) FROM purchase_approval_log WHERE request_id=?) AS lg`
+  ).get(ridA, ridA, ridA, ridA);
+  ok('强删 DB 级联：申请/明细/附件/轨迹全 0', zeroA.rq === 0 && zeroA.it === 0 && zeroA.f === 0 && zeroA.lg === 0);
+  await api(`/purchase/events/${eid2}`, { method: 'DELETE', token: tC });
+  ok('超管删除空档案 200', !db.prepare('SELECT id FROM purchase_event WHERE id=?').get(eid2));
+  db.prepare('UPDATE user SET is_admin=0, admin_perms=NULL WHERE id=?').run(uidC);
+
+  // ---------- 15. 清理：盘 → 人(级联) → 剩余冒烟档案（带申请的 eid1 与空的 eid3 仍需库清） ----------
   for (const rid of createdRids) rmSync(join(PURCHASE_UP, String(rid)), { recursive: true, force: true });
   const emails = ['l', 't', 'a', 'b', 'c', 'u'].map(mkEmail);
   const users = db.prepare('SELECT id FROM user WHERE email IN (?,?,?,?,?,?)').all(...emails);
   for (const u of users) db.prepare('DELETE FROM user WHERE id = ?').run(u.id);
   const evDel = db.prepare("DELETE FROM purchase_event WHERE name LIKE '采购冒烟%'").run();
   db.close();
-  ok(`清理测试用户 ×${users.length} 与冒烟档案 ×${evDel.changes}`, users.length === 6 && evDel.changes >= 4);
+  ok(`清理测试用户 ×${users.length} 与冒烟档案 ×${evDel.changes}`, users.length === 6 && evDel.changes >= 2);
 } catch (e) {
   fail++;
   console.log(`❌ 异常中断: ${e.stack || e.message}`);

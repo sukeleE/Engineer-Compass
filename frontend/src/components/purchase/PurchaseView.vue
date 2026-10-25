@@ -202,7 +202,7 @@
           <span class="spacer"></span>
           <el-button type="primary" @click="openEventCreate">＋ 建立比赛/项目档案</el-button>
         </div>
-        <p class="sub2">任何登录用户均可建档，建档后自动成为该档案负责人，可添加其他负责人与老师；档案只能关闭/重开，不能删除（已有申请挂接）。</p>
+        <p class="sub2">任何登录用户均可建档，建档后自动成为该档案负责人，可添加其他负责人与老师；没有采购申请的档案可以删除，已有申请挂接时需先删除全部申请。</p>
 
         <div v-for="ev in managedEvents" :key="ev.id" class="ev-card">
           <div class="ev-head">
@@ -215,6 +215,7 @@
             <el-button v-if="ev.canSettings" link size="small" @click="openEventEdit(ev)">设置</el-button>
             <el-switch v-if="ev.canSettings" :model-value="ev.status === 'open'" active-text="开放" inactive-text="关闭"
               inline-prompt @change="(v) => toggleStatus(ev, v)" />
+            <el-button v-if="ev.canSettings" link size="small" type="danger" @click="removeEvent(ev)">删除</el-button>
           </div>
           <div v-if="ev.description" class="ev-desc">{{ ev.description }}</div>
 
@@ -533,6 +534,22 @@ async function toggleStatus(ev, open) {
     }
   }
   await loadEvents();
+}
+
+async function removeEvent(ev) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除档案「${ev.name}」？档案下的审批人配置会一并删除，且不可恢复；若仍有采购申请将无法删除。`,
+      '删除比赛/项目档案',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
+    );
+    await api.purchaseEventDelete(ev.id);
+    ElMessage.success('档案已删除');
+    await loadEvents();
+    if (tab.value === 'events') await nextTick(loadAllApprovers);
+  } catch (e) {
+    if (e !== 'cancel' && e?.message) ElMessage.error(e.message);
+  }
 }
 
 // ---- 建档 / 设置弹窗 ----
