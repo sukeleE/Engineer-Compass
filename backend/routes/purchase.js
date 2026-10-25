@@ -144,6 +144,7 @@ function detailOf(rqId, req) {
       canInvoice: owner && INVOICEABLE.has(rq.status),
       isOwner: owner,
       isApprover: canApproveEvent(req, ev),
+      isSuperAdmin: !!isSuperAdmin(req.user),
     },
   };
 }
@@ -292,6 +293,18 @@ r.put('/events/:id', ah((req, res) => {
   db.prepare(`UPDATE purchase_event SET ${fields.join(', ')} WHERE id = ?`).run(...vals);
   logAudit(req, 'purchase-event-update', ev.name, { event_id: ev.id, body: req.body });
   res.json({ event: eventOut(getEvent(ev.id), req), message: '已保存' });
+}));
+
+// DELETE /events/:id — 删除比赛/项目档案（建档者或超管）；其下仍有申请时拒绝（财务记录不能随档案静默消失）
+r.delete('/events/:id', ah((req, res) => {
+  const ev = getEvent(req.params.id);
+  if (!ev) throw new HttpError(404, '比赛/项目不存在');
+  if (!canManageSettings(req, ev)) throw new HttpError(403, '仅建档者或管理员可删除档案');
+  const n = db.prepare('SELECT COUNT(*) AS n FROM purchase_request WHERE event_id = ?').get(ev.id).n;
+  if (n) throw new HttpError(409, `该${ev.kind}下还有 ${n} 条采购申请，请先删除申请后再删除档案`);
+  db.prepare('DELETE FROM purchase_event WHERE id = ?').run(ev.id); // 审批人随 FK CASCADE
+  logAudit(req, 'purchase-event-delete', ev.name, { event_id: ev.id });
+  res.json({ message: '档案已删除' });
 }));
 
 // GET /users/search?q=&event_id= — 添加审批人用（同 friends/search 范式，可排除已是审批人的人）
@@ -484,17 +497,21 @@ r.put('/requests/:id', ah((req, res) => {
   res.json({ detail: detailOf(rq.id, req), message: rq.status === 'rejected' ? '已重新提交，等待审批' : '申请已更新' });
 }));
 
-// DELETE /requests/:id — 本人撤回（仅 pending/rejected）；先清盘再删（其余随库级联）
-r.delete('/requests/:id', (req, res) => {
+// DELETE /requests/:id — 本人撤回（仅 pending/rejected）；超级管理员可强删任意状态（含已通过/已传发票）。
+//   两种口径都先清盘再删（明细/文件/审批轨迹随库级联）
+r.delete('/requests/:id', ah((req, res) => {
   const rq = getRequest(req.params.id);
   if (!rq) throw new HttpError(404, '申请不存在');
-  if (rq.user_id !== req.user.id) throw new HttpError(403, '只能撤回自己的申请');
-  if (!EDITABLE.has(rq.status)) throw new HttpError(400, '已审批的申请不能撤回');
+  const owner = rq.user_id === req.user.id;
+  const admin = !!isSuperAdmin(req.user);
+  if (!owner && !admin) throw new HttpError(403, '只能撤回自己的申请');
+  if (!admin && !EDITABLE.has(rq.status)) throw new HttpError(400, '已审批的申请不能撤回（如需删除请联系管理员）');
   purgeRequestFiles(rq.id);
   db.prepare('DELETE FROM purchase_request WHERE id = ?').run(rq.id);
-  logAudit(req, 'purchase-request-delete', rq.applicant_name, { rid: rq.id });
-  res.json({ message: '申请已撤回' });
-});
+  logAudit(req, 'purchase-request-delete', rq.applicant_name,
+    { rid: rq.id, by: owner && !admin ? 'self' : 'admin', status: rq.status });
+  res.json({ message: owner && !admin ? '申请已撤回' : '申请已删除' });
+}));
 
 // 审批通用：仅本档案审批人/管理员；仅 pending；写主表 + 轨迹
 function adjudicate(req, res, result, comment) {

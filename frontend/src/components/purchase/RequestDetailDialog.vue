@@ -112,6 +112,8 @@
       <template v-if="d">
         <!-- 申请人：待审批撤回 / 驳回后修改重提 / 待审批编辑 -->
         <el-button v-if="d.perm.canDelete" type="danger" plain @click="withdraw">撤回申请</el-button>
+        <!-- 超级管理员：可强删任意状态申请（本人可撤回的场景只显示撤回，避免重复按钮） -->
+        <el-button v-if="d.perm.isSuperAdmin && !d.perm.canDelete" type="danger" plain @click="adminDelete">删除申请</el-button>
         <el-button v-if="d.perm.canEdit" type="primary" @click="emit('edit', d)">
           {{ d.status === 'rejected' ? '修改并重新提交' : '修改申请' }}
         </el-button>
@@ -240,6 +242,22 @@ async function withdraw() {
     });
     await api.purchaseRequestDelete(d.value.id);
     ElMessage.success('已撤回');
+    emit('changed');
+    emit('update:modelValue', false);
+  } catch (e) {
+    if (e !== 'cancel' && e?.message) ElMessage.error(e.message);
+  }
+}
+
+async function adminDelete() {
+  try {
+    await ElMessageBox.confirm(
+      `将删除申请 #${d.value.id}（${d.value.applicant_name}）及其全部明细、截图、发票与审批记录，删除后不可恢复，确定删除？`,
+      '管理员删除申请',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'error' },
+    );
+    await api.purchaseRequestDelete(d.value.id);
+    ElMessage.success('申请已删除');
     emit('changed');
     emit('update:modelValue', false);
   } catch (e) {
