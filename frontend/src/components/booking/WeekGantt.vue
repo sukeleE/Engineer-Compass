@@ -39,7 +39,8 @@
 
         <template v-for="row in rows" :key="row.resource.id">
           <div class="wg-name">
-            <span class="wg-ntext" :title="`${metaOf(row.resource).icon} ${row.resource.name}（${
+            <span class="wg-ntext" @click.stop="emit('select-resource', row.resource)"
+              :title="`${metaOf(row.resource).icon} ${row.resource.name}（${
               row.resource.is_space ? '容量' + row.resource.capacity : '库存' + row.resource.quantity
             }）`">{{ metaOf(row.resource).icon }} {{ row.resource.name }}</span>
             <i class="wg-nmeta">{{ row.resource.is_space ? `容量${row.resource.capacity}` : `库存${row.resource.quantity}` }}</i>
@@ -133,7 +134,7 @@ const props = defineProps({
   from: { type: Date, required: true }, // 周起点（本地 Date）
   loading: Boolean,
 });
-const emit = defineEmits(['navigate', 'select-slot', 'select-booking', 'toggle-history']);
+const emit = defineEmits(['navigate', 'select-slot', 'select-booking', 'select-resource', 'toggle-history']);
 
 const TOTAL = 7 * SLOTS_PER_DAY; // 210
 const WD_CN = ['日', '一', '二', '三', '四', '五', '六'];
@@ -447,7 +448,7 @@ $wg-name-w: 176px;
   display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 8px;
   &:hover .wg-nadd { opacity: 1; }
 }
-.wg-ntext { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.wg-ntext { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; cursor: pointer; }
 .wg-nmeta { flex: none; font-style: normal; color: var(--text-3); font-size: 11px; white-space: nowrap; }
 .wg-nadd { padding: 0 4px; flex: none; opacity: 0; transition: opacity .12s; }
 // 触屏没有 hover，＋保持常显

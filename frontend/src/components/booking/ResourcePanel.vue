@@ -14,8 +14,9 @@
         <h4><span class="rp-gicon">{{ g.icon }}</span>{{ g.label }}<span class="rp-gcount">{{ g.list.length }}</span></h4>
         <div v-if="g.list.length" class="rp-cards">
           <article v-for="r in g.list" :key="r.id" class="rs-card" :class="{ archived: r.status === 'archived' }">
+            <img v-if="r.image" :src="r.image" class="rs-photo" alt="资源照片" @click="openDetail(r)" />
             <div class="rs-main">
-              <b class="rs-name">{{ r.name }}</b>
+              <b class="rs-name" @click="openDetail(r)">{{ r.name }}</b>
               <el-tag size="small" :type="r.approve_mode === 'first_come' ? 'success' : 'warning'" effect="plain">
                 {{ MODE_ZH[r.approve_mode] }}
               </el-tag>
@@ -34,6 +35,7 @@
               </template>
             </div>
             <div v-if="project.canManage" class="rs-actions">
+              <el-button link type="primary" size="small" @click="openDetail(r)">详情</el-button>
               <el-button link type="primary" size="small" @click="edit(r)">编辑</el-button>
               <el-button v-if="r.status === 'active'" link type="warning" size="small" @click="archive(r)">归档</el-button>
               <el-button v-else link type="success" size="small" @click="restore(r)">恢复</el-button>
@@ -49,6 +51,7 @@
       @close="formOpen = false" @saved="onSaved" />
     <ResourceImportDialog v-if="importOpen" :model-value="importOpen" :project="project"
       @close="importOpen = false" @saved="onSaved" />
+    <ResourceDetailDialog v-if="detailRes" :resource="detailRes" @close="detailRes = null" />
   </div>
 </template>
 
@@ -59,6 +62,7 @@ import { api } from '../../api.js';
 import { KINDS, MODE_ZH } from '../../utils/booking.js';
 import ResourceFormDialog from './ResourceFormDialog.vue';
 import ResourceImportDialog from './ResourceImportDialog.vue';
+import ResourceDetailDialog from './ResourceDetailDialog.vue';
 
 const props = defineProps({ project: { type: Object, required: true } });
 const emit = defineEmits(['changed']);
@@ -69,6 +73,8 @@ const showStatus = ref('active');
 const formOpen = ref(false);
 const importOpen = ref(false);
 const editing = ref(null);
+const detailRes = ref(null);
+function openDetail(r) { detailRes.value = r; }
 
 const groups = computed(() => KINDS.map((k) => ({
   ...k,
@@ -141,6 +147,11 @@ defineExpose({ reload: load });
 }
 .rs-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rs-name { font-size: 14px; }
+.rs-name { cursor: pointer; &:hover { color: var(--primary); } }
+.rs-photo {
+  width: 100%; aspect-ratio: 16 / 8; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--border-2); cursor: zoom-in; background: var(--surface-2);
+}
 .rs-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--text-2); }
 .rs-tag { color: var(--text-3); }
 .rs-actions { margin-top: auto; padding-top: 4px; border-top: 1px dashed var(--border-2); }

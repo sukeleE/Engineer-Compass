@@ -5,7 +5,7 @@
     <div class="pv-hero card">
       <div>
         <h2>🏢 资源预约</h2>
-        <p class="sub2">按项目管理空间与物品两类资源：空间资源独占、按容量限人数，物品资源按库存数量共享；拖选时段即可预约，支持固定组队与临时多人，预约时长与人员在周视图上一目了然。</p>
+        <p class="sub2">按项目管理空间与物品两类资源：空间资源独占、按容量限人数，物品资源按库存数量共享；拖选时段即可预约，支持固定组队与临时多人；没有台账的物品/教室也可在项目内拍照快速登记。</p>
       </div>
       <el-button type="primary" @click="openCreate">＋ 创建预约项目</el-button>
     </div>
@@ -34,7 +34,11 @@
       <button class="tabchip" :class="{ on: tab === 'all' }" @click="switchTab('all')">📅 全部项目</button>
       <button class="tabchip" :class="{ on: tab === 'mine' }" @click="switchTab('mine')">📋 我的预约</button>
       <button class="tabchip" :class="{ on: tab === 'managed' }" @click="switchTab('managed')">🛠 我管理的</button>
+      <button v-if="canAdmin('lab')" class="tabchip" :class="{ on: tab === 'records' }" @click="switchTab('records')">🗂️ 借用记录</button>
     </div>
+
+    <!-- 借用记录（仅借用记录管理员；跨项目登记汇总） -->
+    <BorrowRecordsPanel v-if="tab === 'records' && recordsReady" />
 
     <!-- ============ 项目大厅 ============ -->
     <div v-show="tab === 'all' || tab === 'managed'" class="bk-grid">
@@ -128,16 +132,21 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import auth from '../../auth.js';
 import { api } from '../../api.js';
 import AuthView from '../AuthView.vue';
 import BookingDetailDialog from './BookingDetailDialog.vue';
+import BorrowRecordsPanel from './BorrowRecordsPanel.vue';
+import { canAdmin } from '../../utils/adminPerms.js';
 import { STATUS_META, REG_KIND_META, isRegBooking } from '../../utils/booking.js';
 
 const router = useRouter();
-const tab = ref('all');
+const route = useRoute();
+const initialTab = () => (route.query.tab === 'records' && canAdmin('lab') ? 'records' : 'all');
+const tab = ref(initialTab());
+const recordsReady = ref(tab.value === 'records');
 const projects = ref([]);
 const managed = ref([]);
 const mineList = ref([]);
@@ -167,6 +176,9 @@ async function loadMine() {
 }
 function switchTab(t) {
   tab.value = t;
+  if (t === 'records') recordsReady.value = true;
+  const query = t === 'all' ? {} : { tab: t };
+  router.replace({ query });
 }
 function enter(id) {
   router.push(`/booking/${id}`);

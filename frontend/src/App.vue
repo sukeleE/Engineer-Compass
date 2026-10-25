@@ -7,7 +7,6 @@ import RealNameDialog from './components/account/RealNameDialog.vue';
 import auth from './auth.js';
 import { api } from './api.js';
 import { realNameGate, closeGate } from './realNameGate.js';
-import { canAdmin } from './utils/adminPerms.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -28,8 +27,6 @@ const moreLinks = computed(() => {
     { to: '/me', ic: '👤', txt: '我的主页' },
   ];
   if (auth.user?.is_ghost) list.push({ to: '/ghost-share', ic: '👻', txt: '秘密分享' });
-  // 借用记录的全局查看与导出需「实验室借用」权限（后端 requireLabAdmin 二次校验）
-  if (canAdmin('lab')) list.push({ to: '/lab-admin', ic: '🗂️', txt: '借用记录管理' });
   return list;
 });
 // 路由切换后收起面板（否则从面板进入新页面会残留遮罩）
@@ -89,8 +86,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
         <router-link to="/share"><span class="ic">📤</span><span class="txt">资源分享</span></router-link>
         <router-link to="/expense"><span class="ic">🧾</span><span class="txt">报销整理</span></router-link>
         <router-link to="/purchase"><span class="ic">🛒</span><span class="txt">物料采购</span></router-link>
-        <router-link to="/booking"><span class="ic">🏢</span><span class="txt">预约排期</span></router-link>
-        <router-link v-if="canAdmin('lab')" to="/lab-admin"><span class="ic">🗂️</span><span class="txt">借用记录</span></router-link>
+        <router-link to="/booking"><span class="ic">🏢</span><span class="txt">资源预约</span></router-link>
         <!-- 🏅 而非 🏆：🏆 在本站已被"竞赛"语义占满（时间轴图例、日程 tab、备赛计划），再用会与"竞赛时间轴"撞义 -->
         <router-link to="/honor"><span class="ic">🏅</span><span class="txt">荣誉墙</span></router-link>
         <router-link v-if="auth.user?.is_ghost" to="/ghost-share"><span class="ic">👻</span><span class="txt">秘密分享</span></router-link>
@@ -111,7 +107,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
     <nav v-if="!bare && !isLogin" class="tabbar">
       <router-link to="/"><span class="ic">🗓️</span><span>竞赛</span></router-link>
       <router-link to="/schedule"><span class="ic">📅</span><span>日程</span></router-link>
-      <router-link to="/booking"><span class="ic">🏢</span><span>预约</span></router-link>
+      <router-link to="/booking"><span class="ic">🏢</span><span>资源</span></router-link>
       <button class="tb-more" :class="{ on: moreOpen }" @click="moreOpen = true"><span class="ic">☰</span><span>更多</span></button>
     </nav>
     <!-- 「更多」面板：底部主导航只放 5 个高频入口，其余功能收在这里 -->
