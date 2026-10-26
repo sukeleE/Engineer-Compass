@@ -162,7 +162,8 @@ export const api = {
   teamCheckinScheduleDelete: (id, sid) => req(`/team/${id}/checkin/schedules/${sid}`, { method: 'DELETE' }),
   teamCheckinMine: (id) => req(`/team/${id}/checkin/my`),
   teamCheckinSubmit: (id, b) => req(`/team/${id}/checkin/submit`, { method: 'POST', body: JSON.stringify(b) }),
-  teamCheckinBoard: (id, sid) => req(`/team/${id}/checkin/schedules/${sid}/board`),
+  teamCheckinBoard: (id, sid, roleId) =>
+    req(`/team/${id}/checkin/schedules/${sid}/board${roleId || roleId === 0 ? `?role_id=${roleId}` : ''}`),
   teamCheckinReview: (id, lid, b) => req(`/team/${id}/checkin/logs/${lid}/review`, { method: 'POST', body: JSON.stringify(b) }),
   teamCheckinLeaderboard: (id, range, sid) =>
     req(`/team/${id}/checkin/leaderboard?range=${range || 'month'}${sid ? `&schedule_id=${sid}` : ''}`),

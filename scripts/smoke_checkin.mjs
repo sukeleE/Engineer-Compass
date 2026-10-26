@@ -160,6 +160,19 @@ try {
   const aRow = board.members.find((m) => m.id === rA.user.id);
   const todayCell = aRow.cells.find((c) => c.key === today);
   ok('看板：A 今天已交（on 或 late）', todayCell && ['on', 'late'].includes(todayCell.state), todayCell);
+  ok('看板返回角色列表与成员角色字段', Array.isArray(board.roles) && aRow.is_owner === false
+    && Array.isArray(aRow.role_names) && board.role_filter === '', { roles: board.roles.length, rn: aRow.role_names });
+  const ownerBoard = await api(`/team/${TID}/checkin/schedules/${SID_DAILY}/board?role_id=owner`, { token: tO });
+  ok('看板 owner 筛选只剩组长', ownerBoard.members.length === 1 && ownerBoard.members[0].is_owner,
+    ownerBoard.members.map((x) => `${x.id}:${x.is_owner}`));
+  const testRole = await api(`/team/${TID}/role`, { method: 'POST', token: tO,
+    body: { name: '看板测试角色', level: 5, permissions: ['progress'] } });
+  await api(`/team/${TID}/member`, { method: 'POST', token: tO, body: { user_id: rA.user.id, role_ids: [testRole.id] } });
+  const roleBoard = await api(`/team/${TID}/checkin/schedules/${SID_DAILY}/board?role_id=${testRole.id}`, { token: tO });
+  ok('看板按角色 id 筛选只剩该角色成员', roleBoard.members.length === 1 && roleBoard.members[0].id === rA.user.id
+    && roleBoard.members[0].role_names.includes('看板测试角色'), roleBoard.members.map((x) => x.id));
+  ok('看板筛选返回 role_filter 与已交格数', String(roleBoard.role_filter) === String(testRole.id)
+    && roleBoard.submitted_total >= 1, { rf: roleBoard.role_filter, n: roleBoard.submitted_total });
 
   // ---------- 5. 评分 / 优秀 ----------
   g = await exp(`/team/${TID}/checkin/logs/${LID_DAILY}/review`, 403, { method: 'POST', token: tA, body: { score: 5 } });

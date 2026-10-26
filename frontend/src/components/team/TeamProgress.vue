@@ -46,29 +46,19 @@ async function reload() {
 // ==================== 周期打卡 / 定时汇报 ====================
 const schedules = ref([]);
 const myDues = ref([]);
-const leaderboard = ref([]);
 const featured = ref([]);
-const lbRange = ref('month');
 
 async function loadCheckin() {
   try {
-    const [sc, mine, lb, ft] = await Promise.all([
+    const [sc, mine, ft] = await Promise.all([
       api.teamCheckinSchedules(props.teamId),
       api.teamCheckinMine(props.teamId),
-      api.teamCheckinLeaderboard(props.teamId, lbRange.value, ''),
       api.teamCheckinFeatured(props.teamId, ''),
     ]);
     schedules.value = sc.schedules || [];
     myDues.value = mine.dues || [];
-    leaderboard.value = lb.board || [];
     featured.value = ft.reports || [];
   } catch (e) { /* 打卡为增量功能，加载失败不阻断任务看板与时间线 */ }
-}
-async function loadLeaderboard() {
-  try {
-    const lb = await api.teamCheckinLeaderboard(props.teamId, lbRange.value, '');
-    leaderboard.value = lb.board || [];
-  } catch (e) { ElMessage.error(e.message); }
 }
 
 function schedFreqText(s) {
@@ -241,11 +231,18 @@ async function reviewComment(l) {
 // ---- 提交看板 ----
 const boardDlg = ref(false);
 const board = ref(null);
-async function openBoard(s) {
+const boardSched = ref(null);
+const boardRole = ref('');
+async function loadBoard(role) {
+  boardRole.value = role;
   try {
-    board.value = await api.teamCheckinBoard(props.teamId, s.id);
-    boardDlg.value = true;
+    board.value = await api.teamCheckinBoard(props.teamId, boardSched.value.id, role);
   } catch (e) { ElMessage.error(e.message); }
+}
+async function openBoard(s) {
+  boardSched.value = s;
+  await loadBoard('');
+  boardDlg.value = true;
 }
 const boardCellType = { on: 'success', late: 'warning', miss: 'danger', wait: 'info' };
 const boardCellText = { on: '✓', late: '迟', miss: '缺', wait: '待' };
@@ -646,6 +643,15 @@ reload().catch((e) => ElMessage.error(e.message));
     <el-dialog v-model="boardDlg" :title="board ? `提交看板 · ${board.schedule.title}` : '提交看板'" width="780px"
       top="8vh" append-to-body>
       <div v-if="board" class="board-wrap">
+        <div class="board-filter">
+          <span class="bf-label">查看角色：</span>
+          <el-select :model-value="boardRole" size="small" style="width:170px" @change="loadBoard">
+            <el-option label="全部成员" value="" />
+            <el-option label="👑 组长" value="owner" />
+            <el-option v-for="r in board.roles" :key="r.id" :value="r.id" :label="r.name" />
+          </el-select>
+          <span class="bf-count">已交 {{ board.submitted_total }} 格 / 共 {{ board.members.length * board.periods.length }} 格</span>
+        </div>
         <table class="board-table">
           <thead>
             <tr>
@@ -655,7 +661,13 @@ reload().catch((e) => ElMessage.error(e.message));
           </thead>
           <tbody>
             <tr v-for="m in board.members" :key="m.id">
-              <td class="b-name">{{ m.name }}</td>
+              <td class="b-name">
+                <div class="b-name-line">{{ m.name }}<span v-if="m.is_owner"> 👑</span></div>
+                <div class="b-roles">
+                  <el-tag v-for="rn in m.role_names" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
+                  <span v-if="!m.role_names.length && !m.is_owner" class="b-norole">无角色</span>
+                </div>
+              </td>
               <td v-for="c in m.cells" :key="c.key" class="b-cell">
                 <el-tag size="small" :type="boardCellType[c.state]" effect="c.state === 'wait' ? 'plain' : 'dark'">
                   {{ boardCellText[c.state] }}
@@ -663,6 +675,7 @@ reload().catch((e) => ElMessage.error(e.message));
                 <span v-if="c.featured" title="优秀">🏅</span>
               </td>
             </tr>
+            <tr v-if="!board.members.length"><td :colspan="board.periods.length + 1" class="b-empty">该角色下暂无成员</td></tr>
           </tbody>
         </table>
         <div class="board-legend">
@@ -764,31 +777,6 @@ reload().catch((e) => ElMessage.error(e.message));
           <el-button v-if="perms.task" size="small" text type="danger" @click="removeSched(s)">删除</el-button>
         </div>
       </div>
-    </div>
-
-    <!-- ============ 排行榜 ============ -->
-    <div class="ci-sec">
-      <div class="tp-tools">
-        <h4>🏆 打卡排行榜</h4>
-        <el-radio-group v-model="lbRange" size="small" @change="loadLeaderboard">
-          <el-radio-button label="month">本月</el-radio-button>
-          <el-radio-button label="all">全部</el-radio-button>
-        </el-radio-group>
-      </div>
-      <div v-if="leaderboard.some((x) => x.cnt > 0)" class="lb-list">
-        <div v-for="(m, i) in leaderboard.filter((x) => x.cnt > 0)" :key="m.id" class="lb-row" :class="{ top: i < 3 }">
-          <span class="lb-rank">{{ ['🥇', '🥈', '🥉'][i] || (i + 1) }}</span>
-          <span class="lb-avatar" v-if="m.avatar"><img :src="m.avatar" alt="" /></span>
-          <span class="lb-avatar no-img" v-else>{{ (m.name || '?').slice(0, 1) }}</span>
-          <b class="lb-name u-link" @click="toProfile(m)">{{ m.name }}</b>
-          <span class="lb-stat">打卡 <b>{{ m.cnt }}</b> 次</span>
-          <span class="lb-stat">🔥 连续 <b>{{ m.streak }}</b> 天</span>
-          <span class="lb-stat">准时 <b>{{ m.punctuality }}</b>%</span>
-          <span class="lb-stat">⭐ {{ m.avg_score || '—' }}</span>
-          <span v-if="m.featured_cnt" class="lb-stat">🏅 ×{{ m.featured_cnt }}</span>
-        </div>
-      </div>
-      <div v-else class="tp-empty">本月还没有人打卡</div>
     </div>
 
     <!-- ============ 优秀汇报墙 ============ -->
@@ -1005,15 +993,7 @@ reload().catch((e) => ElMessage.error(e.message));
   .ci-review-show { font-size: 12.5px; color: var(--text-2); b { color: #f59e0b; letter-spacing: 1px; } }
 }
 
-// 排行榜
-.lb-list { display: flex; flex-direction: column; gap: 6px; }
-.lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border);
-  border-radius: 10px; font-size: 13.5px; flex-wrap: wrap;
-  &.top { background: color-mix(in srgb, #f59e0b 8%, white); border-color: #fde68a; }
-  .lb-rank { width: 26px; text-align: center; font-weight: 700; }
-  .lb-name { min-width: 90px; }
-  .lb-stat { color: var(--text-2); font-size: 12.5px; b { color: var(--text-1); } }
-}
+// 头像小圆圈（排行榜移至成员页后，优秀墙仍复用）
 .lb-avatar { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center; font-size: 12px;
   background: color-mix(in srgb, var(--primary) 12%, white); color: var(--primary);
@@ -1036,18 +1016,25 @@ reload().catch((e) => ElMessage.error(e.message));
 
 // 看板
 .board-wrap { overflow-x: auto; }
+.board-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+  .bf-label { font-size: 13px; color: var(--text-2); }
+  .bf-count { font-size: 12.5px; color: var(--text-2); }
+}
 .board-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 480px;
   th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: center; white-space: nowrap; font-size: 13px; }
   th { background: var(--surface-3, #f8fafc); position: sticky; top: 0; }
   .b-name { text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--card-bg); z-index: 1; }
+  .b-name-line { font-weight: 600; }
+  .b-roles { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; font-weight: 400; }
+  .b-norole { font-size: 11px; color: #cbd5e1; }
   .b-cell { display: table-cell; }
   .b-cell :deep(.el-tag) { margin-right: 2px; }
+  .b-empty { text-align: center; color: #94a3b8; padding: 20px 0; }
 }
 .board-legend { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
 @media (max-width: 768px) {
   .ci-head { .ci-freq { width: 100%; } }
-  .lb-row { gap: 8px; .lb-stat { font-size: 12px; } }
   .ft-grid { grid-template-columns: 1fr; }
 }
 </style>

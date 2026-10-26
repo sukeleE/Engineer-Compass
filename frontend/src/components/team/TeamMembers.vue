@@ -19,6 +19,23 @@ const inviteCode = ref('');
 const showRoleForm = ref(false);
 const roleForm = ref({ id: null, name: '', level: 0, permissions: [] });
 
+// —— 打卡排行榜：成员页简略展示前 3 名小方块，点击查看完整榜（数据源=进度对齐的周期打卡）——
+const lb = ref([]);
+const lbLoading = ref(false);
+const lbDlg = ref(false);
+const lbRange = ref('month');
+const lbActive = computed(() => lb.value.filter((x) => x.cnt > 0));
+const lbTop = computed(() => lbActive.value.slice(0, 3));
+async function loadLeaderboard(range) {
+  lbLoading.value = true;
+  try {
+    const r = await api.teamCheckinLeaderboard(props.teamId, range || lbRange.value, '');
+    lb.value = r.board || [];
+  } catch { /* 打卡为增量功能，加载失败静默，不影响成员管理 */ }
+  finally { lbLoading.value = false; }
+}
+function switchLbRange(r) { lbRange.value = r; loadLeaderboard(r); }
+
 // —— AI 智能分组：按成员信息+部门+竞赛给出建议，确认后逐人应用 ——
 const aiDlg = ref(false);
 const aiLoading = ref(false);
@@ -199,10 +216,30 @@ async function dissolve() {
 }
 
 loadInvite();
+loadLeaderboard('month');
 </script>
 
 <template>
   <div class="tm">
+    <!-- 打卡排行榜（简略：前 3 名小方块，点击方块看完整榜） -->
+    <div class="tm-sec" v-if="lbActive.length">
+      <div class="tm-sec-head">
+        <h4>🏆 打卡排行榜 <span class="tm-tip">本月，点击方块查看完整榜</span></h4>
+        <el-button size="small" text type="primary" @click="lbDlg = true">完整排行榜 →</el-button>
+      </div>
+      <div class="lb-chips" v-loading="lbLoading">
+        <div v-for="(m, i) in lbTop" :key="m.id" class="lb-chip" :class="'r' + i" @click="lbDlg = true">
+          <span class="lb-medal">{{ ['🥇', '🥈', '🥉'][i] }}</span>
+          <span class="lb-cavatar">
+            <img v-if="m.avatar" :src="m.avatar" alt="" />
+            <template v-else>{{ (m.name || '?').slice(0, 1) }}</template>
+          </span>
+          <b class="lb-cname" @click.stop="toProfile(m)">{{ m.name }}</b>
+          <span class="lb-cnum"><b>{{ m.cnt }}</b> 次打卡</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 成员 -->
     <div class="tm-sec">
       <div class="tm-sec-head">
@@ -254,6 +291,32 @@ loadInvite();
         <el-button @click="selfDlg = false">取消</el-button>
         <el-button type="primary" @click="saveSelfRole">保存角色</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 完整打卡排行榜弹窗（本月/全部，含连续天数/准时率/均分/优秀数） -->
+    <el-dialog v-model="lbDlg" title="🏆 打卡排行榜" width="640px" top="8vh" append-to-body>
+      <div class="lb-tools">
+        <el-radio-group :model-value="lbRange" size="small" @change="switchLbRange">
+          <el-radio-button label="month">本月</el-radio-button>
+          <el-radio-button label="all">全部</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div v-if="lbActive.length" class="lb-list" v-loading="lbLoading">
+        <div v-for="(m, i) in lbActive" :key="m.id" class="lb-row" :class="{ top: i < 3 }">
+          <span class="lb-rank">{{ ['🥇', '🥈', '🥉'][i] || (i + 1) }}</span>
+          <span class="lb-avatar">
+            <img v-if="m.avatar" :src="m.avatar" alt="" />
+            <template v-else>{{ (m.name || '?').slice(0, 1) }}</template>
+          </span>
+          <b class="lb-name" @click="toProfile(m)">{{ m.name }}</b>
+          <span class="lb-stat">打卡 <b>{{ m.cnt }}</b> 次</span>
+          <span class="lb-stat">🔥 连续 <b>{{ m.streak }}</b> 天</span>
+          <span class="lb-stat">准时 <b>{{ m.punctuality }}</b>%</span>
+          <span class="lb-stat">⭐ {{ m.avg_score || '—' }}</span>
+          <span v-if="m.featured_cnt" class="lb-stat">🏅 ×{{ m.featured_cnt }}</span>
+        </div>
+      </div>
+      <div v-else class="lb-empty">该范围内还没有人打卡</div>
     </el-dialog>
 
     <!-- 拉人进组弹窗：全站搜索，选中后直接加入（默认组员角色，对方收到通知） -->
@@ -376,6 +439,7 @@ loadInvite();
   .member-row .m-info { flex: 1 1 100%; }
   .rf-row { flex-wrap: wrap; }
   .rf-row .el-select { width: 100% !important; }
+  .lb-chip { min-width: 0; flex: 1 1 calc(50% - 10px); }
 }
 .role-row {
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px;
@@ -401,4 +465,36 @@ loadInvite();
   .ai-from { color: #94a3b8; font-size: 12.5px; text-decoration: line-through; }
   .ai-arrow { font-style: normal; color: var(--primary); }
 }
+.lb-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+.lb-chip {
+  display: flex; align-items: center; gap: 8px; min-width: 160px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card-bg);
+  padding: 8px 14px 8px 10px; cursor: pointer; transition: all .15s;
+  &:hover { border-color: #93c5fd; box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 10%, transparent); transform: translateY(-1px); }
+  &.r0 { background: color-mix(in srgb, #f59e0b 10%, white); border-color: #fde68a; }
+  .lb-medal { font-size: 16px; }
+  .lb-cavatar { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600;
+    background: color-mix(in srgb, var(--primary) 12%, white); color: var(--primary);
+    img { width: 100%; height: 100%; object-fit: cover; }
+  }
+  .lb-cname { font-size: 13.5px; cursor: pointer; &:hover { color: var(--primary); } }
+  .lb-cnum { margin-left: auto; font-size: 12px; color: var(--text-2); white-space: nowrap;
+    b { color: var(--text-1); font-size: 14px; } }
+}
+.lb-tools { margin-bottom: 10px; }
+.lb-list { display: flex; flex-direction: column; gap: 6px; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 10px; font-size: 13.5px; flex-wrap: wrap;
+  &.top { background: color-mix(in srgb, #f59e0b 8%, white); border-color: #fde68a; }
+  .lb-rank { width: 26px; text-align: center; font-weight: 700; }
+  .lb-name { min-width: 90px; cursor: pointer; &:hover { color: var(--primary); } }
+  .lb-stat { color: var(--text-2); font-size: 12.5px; b { color: var(--text-1); } }
+}
+.lb-avatar { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 12px;
+  background: color-mix(in srgb, var(--primary) 12%, white); color: var(--primary);
+  img { width: 100%; height: 100%; object-fit: cover; }
+}
+.lb-empty { color: #94a3b8; font-size: 13px; padding: 20px 0; text-align: center; }
 </style>

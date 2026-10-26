@@ -211,7 +211,25 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
   const sched = scheduleRow(ctx.team.id, req.params.sid);
   if (!sched) return res.status(404).json({ error: '打卡任务不存在' });
   const periods = boardPeriods(sched, new Date());
-  const members = db.prepare(MEMBER_SQL).all(ctx.team.id);
+  const roles = db.prepare('SELECT id, name, level FROM team_role WHERE team_id = ? ORDER BY level DESC, id').all(ctx.team.id);
+  // 成员 → 角色（含组长标记），与 team.js roleMapOf 同口径
+  const roleRows = db.prepare(
+    `SELECT tmr.user_id, tr.id AS role_id, tr.name AS role_name
+     FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
+     WHERE tmr.team_id = ? ORDER BY tr.level DESC, tr.id`
+  ).all(ctx.team.id);
+  const roleMap = {};
+  for (const rr of roleRows) (roleMap[rr.user_id] ||= []).push(rr);
+  let members = db.prepare(MEMBER_SQL).all(ctx.team.id).map((m) => ({
+    ...m,
+    is_owner: m.id === ctx.team.owner_id,
+    role_ids: (roleMap[m.id] || []).map((x) => x.role_id),
+    role_names: (roleMap[m.id] || []).map((x) => x.role_name),
+  }));
+  // 可选：按角色筛选（role_id=数字 或 owner 仅看组长）
+  const roleFilter = String(req.query.role_id || '');
+  if (roleFilter === 'owner') members = members.filter((m) => m.is_owner);
+  else if (/^\d+$/.test(roleFilter)) members = members.filter((m) => m.role_ids.includes(Number(roleFilter)));
   const logs = periods.length
     ? db.prepare(
       `SELECT id, user_id, period_key, is_late, score, featured, create_time
@@ -234,7 +252,9 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
   res.json({
     schedule: { ...sched, weekdays: parseWeekdays(sched.weekdays) },
     periods: periods.map((p) => ({ ...p, label: periodLabel(sched, p) })),
-    members: grid,
+    members: grid, roles, role_filter: roleFilter,
+    // 筛选角色的提交汇总（用于头部小统计）；未筛选时与 grid 同口径
+    submitted_total: grid.reduce((n, m) => n + m.cells.filter((c) => c.state === 'on' || c.state === 'late').length, 0),
   });
 });
 
