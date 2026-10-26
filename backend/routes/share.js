@@ -92,8 +92,8 @@ function ghostVisible(req, p) {
 }
 
 // 写权限：作者本人或管理员（PUT/DELETE 行、附件、Gitee 同步共用一套，避免各处漂移）
-// 受限管理员需「内容管理」权限；幽灵帖巡检/豁免仍仅限超级管理员
-const canEdit = (p, req) => Number(p?.user_id) === uid(req) || hasAdminPerm(req.user, 'content');
+// 受限管理员需「帖子管理」子权限；幽灵帖巡检/豁免仍仅限超级管理员
+const canEdit = (p, req) => Number(p?.user_id) === uid(req) || hasAdminPerm(req.user, 'content:post');
 
 // 开源/私密 + 幽灵统一可见性：私密帖仅作者本人/管理员；私密与幽灵双隔离并行。
 // 对不可见者统一 404（不区分"不存在"与"没权限"，防探测）。
@@ -103,7 +103,9 @@ function postVisible(req, p) {
   // 详情查询把作者列别名成 author_id（SELECT * 的行才是 user_id），两处都认
   const ownerId = p.user_id ?? p.author_id;
   const isOwner = Number(ownerId) === uid(req);
-  if (Number(p.is_public) === 0 && !isOwner && !hasAdminPerm(req.user, 'content')) return false;
+  // 帖子/评论管理任一子权限都可查看私密帖（评论审核需要看到所属帖子）
+  const canModerate = hasAdminPerm(req.user, 'content:post') || hasAdminPerm(req.user, 'content:comment');
+  if (Number(p.is_public) === 0 && !isOwner && !canModerate) return false;
   return true;
 }
 
@@ -735,7 +737,7 @@ r.delete('/comments/:id', authRequired, (req, res) => {
     `SELECT c.*, p.user_id AS post_owner FROM share_comment c JOIN share_post p ON p.id = c.post_id WHERE c.id = ?`
   ).get(Number(req.params.id));
   if (!c) return res.status(404).json({ error: '评论不存在' });
-  if (c.user_id !== me && c.post_owner !== me && !hasAdminPerm(req.user, 'content')) {
+  if (c.user_id !== me && c.post_owner !== me && !hasAdminPerm(req.user, 'content:comment')) {
     return res.status(403).json({ error: '只能删除自己的评论' });
   }
   db.prepare('DELETE FROM share_comment WHERE id = ?').run(c.id);

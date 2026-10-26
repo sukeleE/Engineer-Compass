@@ -7,7 +7,8 @@ import { statfsSync, statSync } from 'node:fs';
 import db, { DB_PATH } from '../db/database.js';
 import {
   authRequired, adminRequired, adminPermRequired, superAdminRequired,
-  isSuperAdmin, parseAdminPerms, ADMIN_PERMS, logAudit,
+  isSuperAdmin, parseAdminPerms, ADMIN_PERMS, ADMIN_PERM_GROUPS,
+  isValidAdminPerm, adminPermLabel, logAudit,
 } from './middleware.js';
 import { deleteResource } from './resource.js';
 import { purgePostFiles } from '../lib/shareFiles.js';
@@ -33,7 +34,7 @@ const PASSWORD_NOTICE = {
 };
 
 // GET /api/admin/users?page&size&q — 用户列表（q 模糊搜昵称/邮箱/用户名）
-r.get('/users', ap('user'), (req, res) => {
+r.get('/users', ap('user:view'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -49,7 +50,7 @@ r.get('/users', ap('user'), (req, res) => {
 });
 
 // PUT /api/admin/users/:id/status — 封禁(1)/禁言(2)/解封(0)；不可操作自己，管理员不可被封
-r.put('/users/:id/status', ap('user'), (req, res) => {
+r.put('/users/:id/status', ap('user:moderate'), (req, res) => {
   const id = Number(req.params.id);
   const status = Number(req.body?.status);
   if (![0, 1, 2].includes(status)) return res.status(400).json({ error: 'status 仅支持 0 正常 / 1 封禁 / 2 禁言' });
@@ -65,7 +66,7 @@ r.put('/users/:id/status', ap('user'), (req, res) => {
 });
 
 // GET /api/admin/logs?page&size&userId&action&q — 操作日志（q 模糊搜 target/username）
-r.get('/logs', ap('log'), (req, res) => {
+r.get('/logs', ap('log:action'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -90,7 +91,7 @@ r.get('/logs', ap('log'), (req, res) => {
 // ---- 公告管理 ----
 // POST /api/admin/notices/password-remind — 给所有仍用初始密码的用户补发个人公告
 // （已有同 type 未读公告的不重复发），返回新发送数
-r.post('/notices/password-remind', ap('user'), (req, res) => {
+r.post('/notices/password-remind', ap('user:notify'), (req, res) => {
   const targets = db.prepare('SELECT id FROM user WHERE password_set = 0').all();
   const exists = db.prepare(
     "SELECT 1 FROM personal_notice WHERE user_id = ? AND type = 'password_init' AND is_read = 0"
@@ -113,7 +114,7 @@ const REALNAME_NOTICE = {
   content: '资源预约、经费报销、物料采购需填写真实姓名后才能使用，请在账号安全页完成实名认证。',
   link: '/account-security',
 };
-r.post('/notices/realname-remind', ap('user'), (req, res) => {
+r.post('/notices/realname-remind', ap('user:notify'), (req, res) => {
   const targets = db.prepare("SELECT id FROM user WHERE COALESCE(real_name, '') = ''").all();
   const exists = db.prepare(
     "SELECT 1 FROM personal_notice WHERE user_id = ? AND type = 'realname_required' AND is_read = 0"
@@ -198,7 +199,7 @@ r.get('/server-status', ap('server'), (req, res) => {
 
 // ---- 内容管理：帖子（评论/点赞/收藏/通知随 share_post 外键 ON DELETE CASCADE 级联清理）----
 // GET /api/admin/posts?page&size&q&userId — 帖子列表（标题/作者模糊搜，附评论点赞计数）
-r.get('/posts', ap('content'), (req, res) => {
+r.get('/posts', ap('content:post'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -219,7 +220,7 @@ r.get('/posts', ap('content'), (req, res) => {
 });
 
 // DELETE /api/admin/posts/:id — 删帖（评论/点赞/收藏/通知全部级联清理）
-r.delete('/posts/:id', ap('content'), (req, res) => {
+r.delete('/posts/:id', ap('content:post'), (req, res) => {
   const id = Number(req.params.id);
   const p = db.prepare('SELECT id, title FROM share_post WHERE id = ?').get(id);
   if (!p) return res.status(404).json({ error: '帖子不存在' });
@@ -230,7 +231,7 @@ r.delete('/posts/:id', ap('content'), (req, res) => {
 });
 
 // GET /api/admin/comments?page&size&postId&q — 评论列表（可按帖子/内容搜）
-r.get('/comments', ap('content'), (req, res) => {
+r.get('/comments', ap('content:comment'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const conds = [], params = [];
@@ -251,7 +252,7 @@ r.get('/comments', ap('content'), (req, res) => {
 });
 
 // DELETE /api/admin/comments/:id — 删评论（同时清 notification 表关联项）
-r.delete('/comments/:id', ap('content'), (req, res) => {
+r.delete('/comments/:id', ap('content:comment'), (req, res) => {
   const id = Number(req.params.id);
   const c = db.prepare('SELECT id, content, post_id FROM share_comment WHERE id = ?').get(id);
   if (!c) return res.status(404).json({ error: '评论不存在' });
@@ -262,7 +263,7 @@ r.delete('/comments/:id', ap('content'), (req, res) => {
 });
 
 // GET /api/admin/users/:id/detail — 用户详情：基本信息 + 内容统计 + 最近 20 条操作日志
-r.get('/users/:id/detail', ap('user'), (req, res) => {
+r.get('/users/:id/detail', ap('user:view'), (req, res) => {
   const id = Number(req.params.id);
   const u = db.prepare('SELECT * FROM user WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
@@ -293,7 +294,7 @@ r.put('/users/:id/role', superAdminRequired, (req, res) => {
   if (id === req.user.id) return res.status(400).json({ error: '不能修改自己的管理员身份' });
   const is_admin = req.body?.is_admin ? 1 : 0;
   const reqPerms = Array.isArray(req.body?.perms)
-    ? [...new Set(req.body.perms.map(String))].filter((k) => k in ADMIN_PERMS)
+    ? [...new Set(req.body.perms.map(String))].filter((k) => isValidAdminPerm(k))
     : [];
   if (is_admin === 1 && req.body?.perms != null && !Array.isArray(req.body.perms)) {
     return res.status(400).json({ error: 'perms 必须是权限 key 数组' });
@@ -321,15 +322,19 @@ r.put('/users/:id/role', superAdminRequired, (req, res) => {
     ? `已取消 ${name} 的管理员身份`
     : reqPerms.length === 0
       ? `已将 ${name} 设为超级管理员（全部权限）`
-      : `已将 ${name} 设为管理员（${reqPerms.map((k) => ADMIN_PERMS[k]).join('、')}）`;
+      : `已将 ${name} 设为管理员（${reqPerms.map((k) => adminPermLabel(k)).join('、')}）`;
   res.json({ message, perms: is_admin ? reqPerms : [] });
 });
 
 // GET /api/admin/perms — 权限 key→中文名（前端权限分配弹窗渲染用）
-r.get('/perms', superAdminRequired, (_req, res) => res.json(ADMIN_PERMS));
+// 权限结构：flat 为不拆分的单权限模块，groups 为父子分组（前端权限弹窗渲染用）
+r.get('/perms', superAdminRequired, (_req, res) => res.json({
+  flat: ADMIN_PERMS,
+  groups: ADMIN_PERM_GROUPS,
+}));
 
 // GET /api/admin/resources?page&size&q — 资源管理：全部用户上传的资源（q 模糊搜文件名/昵称/用户名）
-r.get('/resources', ap('resource'), (req, res) => {
+r.get('/resources', ap('resource:view'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -346,10 +351,10 @@ r.get('/resources', ap('resource'), (req, res) => {
 });
 
 // DELETE /api/admin/resources/:id — 删除任意用户资源（复用 resource.js 的 deleteResource，审计记 admin 变体）
-r.delete('/resources/:id', ap('resource'), (req, res) => deleteResource(req, res, Number(req.params.id)));
+r.delete('/resources/:id', ap('resource:delete'), (req, res) => deleteResource(req, res, Number(req.params.id)));
 
 // GET /api/admin/visits?page&size&userId&q — 访问记录（含游客：user_id 为 NULL 即未登录；q 模糊 ip/用户名/路径）
-r.get('/visits', ap('log'), (req, res) => {
+r.get('/visits', ap('log:visit'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(200, Math.max(1, Number(req.query.size) || 20));
   const userId = req.query.userId ? Number(req.query.userId) : null;
@@ -369,7 +374,7 @@ r.get('/visits', ap('log'), (req, res) => {
 
 // GET /api/admin/feedback?page&size&q — 用户反馈（feedback 表留档；提交时另发邮件给 FEEDBACK_TO）
 // q 模糊反馈正文 / 联系邮箱 / 用户名 / 昵称 / 真名；LEFT JOIN 防用户行缺失（正常 FK 级联不会发生）
-r.get('/feedback', ap('feedback'), (req, res) => {
+r.get('/feedback', ap('feedback:view'), (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
   const q = String(req.query.q || '').trim();
@@ -394,7 +399,7 @@ r.get('/feedback', ap('feedback'), (req, res) => {
 });
 
 // DELETE /api/admin/feedback/:id — 删除反馈（清理垃圾/已处理反馈；审计留痕）
-r.delete('/feedback/:id', ap('feedback'), (req, res) => {
+r.delete('/feedback/:id', ap('feedback:delete'), (req, res) => {
   const id = Number(req.params.id);
   const f = db.prepare('SELECT id, user_id, substr(content, 1, 40) AS preview FROM feedback WHERE id = ?').get(id);
   if (!f) return res.status(404).json({ error: '反馈不存在' });

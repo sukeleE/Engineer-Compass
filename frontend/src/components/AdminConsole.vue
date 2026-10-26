@@ -11,16 +11,22 @@ import { displayName } from '../utils/displayName.js';
 import { compressImage, shrinkHint } from '../utils/imageCompress.js';
 import { openImage } from '../utils/imageViewer.js';
 import { LEVEL_OPTS, RANK_OPTS } from '../utils/honorMeta.js';
-import { canAdmin, isSuperAdmin, PERM_OPTIONS, PERM_LABELS, permSummary } from '../utils/adminPerms.js';
+import { canAdmin, canAdminAny, isSuperAdmin, PERM_GROUPS, PERM_FLAT, PERM_LABELS, permSummary } from '../utils/adminPerms.js';
 
 const tab = ref('users');
 
-// Tab → 所需模块权限（与后端 admin.js 各路由守卫一一对应）
+// Tab → 所需子权限（任一即可见，与后端 admin.js 各路由守卫一一对应）
 const TAB_PERMS = {
-  users: 'user', content: 'content', logs: 'log', visits: 'log', feedback: 'feedback',
-  anns: 'announce', resources: 'resource', honors: 'honor', status: 'server',
+  users: ['user:view', 'user:moderate', 'user:notify'],
+  content: ['content:post', 'content:comment'],
+  logs: ['log:action'], visits: ['log:visit'],
+  feedback: ['feedback:view', 'feedback:delete'],
+  anns: ['announce'],
+  resources: ['resource:view', 'resource:delete'],
+  honors: ['honor'], status: ['server'],
 };
-const visibleTabs = computed(() => Object.keys(TAB_PERMS).filter((t) => canAdmin(TAB_PERMS[t])));
+const tabCan = (t) => canAdminAny(TAB_PERMS[t] || []);
+const visibleTabs = computed(() => Object.keys(TAB_PERMS).filter((t) => tabCan(t)));
 const route = useRoute();
 
 // ---- 操作日志：action 中文映射（与后端 audit_log 埋点一一对应） ----
@@ -48,6 +54,7 @@ const STATUS_LABELS = { 0: ['正常', 'success'], 1: ['封禁', 'danger'], 2: ['
 // ==================== Tab1 用户管理 ====================
 const users = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
 async function loadUsers() {
+  if (!canAdmin('user:view')) return; // notify-only 管理员看不到列表，仅保留工具栏提醒按钮
   users.loading = true;
   try {
     const r = await api.adminUsers({ q: users.q, page: users.page, size: users.size });
@@ -137,6 +144,22 @@ async function savePerms(keepAdmin) {
   }
 }
 
+// ---- 权限弹窗：分组全选=父 key（整组全权），单独勾选=子 key；父 key 选中时子项只读 ----
+const hasDlgPerm = (k) => permDlg.perms.includes(k);
+const groupChecked = (g) => hasDlgPerm(g.key);
+const groupIndeterminate = (g) => !hasDlgPerm(g.key) && g.children.some((c) => hasDlgPerm(c.key));
+const childChecked = (g, c) => hasDlgPerm(g.key) || hasDlgPerm(c.key);
+function toggleGroup(g, v) {
+  const all = [g.key, ...g.children.map((c) => c.key)];
+  permDlg.perms = permDlg.perms.filter((k) => !all.includes(k));
+  if (v) permDlg.perms.push(g.key);
+}
+function toggleChild(g, c, v) {
+  if (hasDlgPerm(g.key)) return; // 整组授权时子项仅展示，不可单独取消
+  permDlg.perms = permDlg.perms.filter((k) => k !== c.key);
+  if (v) permDlg.perms.push(c.key);
+}
+
 // 一键提醒所有仍用初始密码的用户（后端对已有未读提醒的去重，返回新发送数）
 const remindLoading = ref(false);
 async function remindPassword() {
@@ -178,6 +201,7 @@ async function remindRealName() {
 const contentTab = ref('posts');
 const posts = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
 async function loadPosts() {
+  if (!canAdmin('content:post')) return;
   posts.loading = true;
   try {
     const r = await api.adminPosts({ q: posts.q, page: posts.page, size: posts.size });
@@ -198,6 +222,7 @@ async function delPost(p) {
 
 const comments = reactive({ loading: false, q: '', postId: null, list: [], total: 0, page: 1, size: 20 });
 async function loadComments() {
+  if (!canAdmin('content:comment')) return;
   comments.loading = true;
   try {
     const r = await api.adminComments({ q: comments.q, postId: comments.postId, page: comments.page, size: comments.size });
@@ -260,6 +285,7 @@ async function loadVisits() {
 // ==================== Tab 用户反馈 ====================
 const feedback = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
 async function loadFeedback() {
+  if (!canAdmin('feedback:view')) return;
   feedback.loading = true;
   try {
     const r = await api.adminFeedback({ q: feedback.q, page: feedback.page, size: feedback.size });
@@ -341,6 +367,7 @@ async function delAnn(a) {
 // ==================== Tab5 资源管理（全部用户上传） ====================
 const resources = reactive({ loading: false, q: '', list: [], total: 0, page: 1, size: 20 });
 async function loadResources() {
+  if (!canAdmin('resource:view')) return;
   resources.loading = true;
   try {
     const r = await api.adminResources({ q: resources.q, page: resources.page, size: resources.size });
@@ -548,7 +575,12 @@ const fmtT = (_r, _c, v) => fmtDateTime(v);
 // Tab 数据懒加载：仅拉取当前账号有权限的模块，切换时才首次加载
 const TAB_LOADERS = {
   users: loadUsers,
-  content: () => { loadPosts(); loadComments(); },
+  content: () => {
+    // 仅有评论权限时默认切到评论子页，避免帖子子页空白
+    if (!canAdmin('content:post') && canAdmin('content:comment')) contentTab.value = 'comments';
+    if (canAdmin('content:post')) loadPosts();
+    if (canAdmin('content:comment')) loadComments();
+  },
   logs: loadLogs,
   visits: loadVisits,
   feedback: loadFeedback,
@@ -584,20 +616,22 @@ onMounted(() => {
       title="当前账号没有任何后台模块权限，请联系超级管理员授权" />
     <el-tabs v-model="tab">
       <!-- ========== Tab1 用户管理 ========== -->
-      <el-tab-pane v-if="canAdmin('user')" label="👤 用户管理" name="users">
+      <el-tab-pane v-if="tabCan('users')" label="👤 用户管理" name="users">
         <div class="toolbar">
-          <el-input v-model="users.q" placeholder="搜索昵称 / 真名 / 邮箱 / 用户名" clearable style="width: 280px"
+          <el-input v-if="canAdmin('user:view')" v-model="users.q" placeholder="搜索昵称 / 真名 / 邮箱 / 用户名" clearable style="width: 280px"
             @keyup.enter="users.page = 1; loadUsers()" @clear="users.page = 1; loadUsers()">
             <template #append><el-button @click="users.page = 1; loadUsers()">搜索</el-button></template>
           </el-input>
-          <el-button type="warning" plain :loading="remindLoading" @click="remindPassword">
+          <el-button v-if="canAdmin('user:notify')" type="warning" plain :loading="remindLoading" @click="remindPassword">
             🔔 提醒未改密用户
           </el-button>
-          <el-button type="danger" plain :loading="realnameLoading" @click="remindRealName">
+          <el-button v-if="canAdmin('user:notify')" type="danger" plain :loading="realnameLoading" @click="remindRealName">
             🪪 提醒未实名用户
           </el-button>
-          <span class="count">共 {{ users.total }} 位用户</span>
+          <span v-if="canAdmin('user:view')" class="count">共 {{ users.total }} 位用户</span>
         </div>
+        <el-alert v-if="!canAdmin('user:view')" type="info" :closable="false" show-icon style="margin-bottom:10px"
+          title="当前账号未授予「查看用户」权限，不能查看用户列表" />
         <el-table :data="users.list" v-loading="users.loading" stripe>
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column label="用户" min-width="140">
@@ -633,7 +667,7 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="操作" width="320">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+              <el-button v-if="canAdmin('user:view')" link type="primary" size="small" @click="openDetail(row)">详情</el-button>
               <template v-if="row.is_admin">
                 <span v-if="row.id === auth.user?.id" class="cell-sub">当前账号</span>
                 <template v-else-if="isSuperAdmin()">
@@ -644,9 +678,9 @@ onMounted(() => {
               </template>
               <template v-else>
                 <el-button v-if="isSuperAdmin()" link type="primary" size="small" @click="openPermDlg(row)">权限设置</el-button>
-                <el-button v-if="row.status !== 1" link type="danger" size="small" @click="setStatus(row, 1)">封禁</el-button>
-                <el-button v-if="row.status !== 2" link type="warning" size="small" @click="setStatus(row, 2)">禁言</el-button>
-                <el-button v-if="row.status !== 0" link type="success" size="small" @click="setStatus(row, 0)">解封</el-button>
+                <el-button v-if="canAdmin('user:moderate') && row.status !== 1" link type="danger" size="small" @click="setStatus(row, 1)">封禁</el-button>
+                <el-button v-if="canAdmin('user:moderate') && row.status !== 2" link type="warning" size="small" @click="setStatus(row, 2)">禁言</el-button>
+                <el-button v-if="canAdmin('user:moderate') && row.status !== 0" link type="success" size="small" @click="setStatus(row, 0)">解封</el-button>
               </template>
             </template>
           </el-table-column>
@@ -656,11 +690,11 @@ onMounted(() => {
       </el-tab-pane>
 
       <!-- ========== Tab2 内容管理（帖子 / 评论） ========== -->
-      <el-tab-pane v-if="canAdmin('content')" label="📄 内容管理" name="content">
+      <el-tab-pane v-if="tabCan('content')" label="📄 内容管理" name="content">
         <div class="toolbar">
           <el-radio-group v-model="contentTab">
-            <el-radio-button value="posts">📝 帖子</el-radio-button>
-            <el-radio-button value="comments">💬 评论</el-radio-button>
+            <el-radio-button v-if="canAdmin('content:post')" value="posts">📝 帖子</el-radio-button>
+            <el-radio-button v-if="canAdmin('content:comment')" value="comments">💬 评论</el-radio-button>
           </el-radio-group>
           <el-input v-if="contentTab === 'posts'" v-model="posts.q" placeholder="搜索标题 / 作者" clearable style="width: 240px"
             @keyup.enter="posts.page = 1; loadPosts()" @clear="posts.page = 1; loadPosts()" />
@@ -695,8 +729,8 @@ onMounted(() => {
             <el-table-column prop="create_time" label="发布时间" width="160" :formatter="fmtT" />
             <el-table-column label="操作" width="130" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="viewPostComments(row)">看评论</el-button>
-                <el-button link type="danger" size="small" @click="delPost(row)">删除</el-button>
+                <el-button v-if="canAdmin('content:comment')" link type="primary" size="small" @click="viewPostComments(row)">看评论</el-button>
+                <el-button v-if="canAdmin('content:post')" link type="danger" size="small" @click="delPost(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -721,7 +755,7 @@ onMounted(() => {
             <el-table-column prop="create_time" label="时间" width="160" :formatter="fmtT" />
             <el-table-column label="操作" width="90" fixed="right">
               <template #default="{ row }">
-                <el-button link type="danger" size="small" @click="delComment(row)">删除</el-button>
+                <el-button v-if="canAdmin('content:comment')" link type="danger" size="small" @click="delComment(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -731,7 +765,7 @@ onMounted(() => {
       </el-tab-pane>
 
       <!-- ========== Tab3 操作日志 ========== -->
-      <el-tab-pane v-if="canAdmin('log')" label="🧾 操作日志" name="logs">
+      <el-tab-pane v-if="canAdmin('log:action')" label="🧾 操作日志" name="logs">
         <div class="toolbar">
           <el-input v-model="logs.q" placeholder="搜索目标 / 用户名" clearable style="width: 220px"
             @keyup.enter="logs.page = 1; loadLogs()" @clear="logs.page = 1; loadLogs()" />
@@ -763,7 +797,7 @@ onMounted(() => {
       </el-tab-pane>
 
       <!-- ========== Tab 访问记录（含游客） ========== -->
-      <el-tab-pane v-if="canAdmin('log')" label="🌐 访问记录" name="visits">
+      <el-tab-pane v-if="canAdmin('log:visit')" label="🌐 访问记录" name="visits">
         <div class="toolbar">
           <el-input v-model="visits.q" placeholder="搜索 IP / 用户名 / 路径" clearable style="width: 240px"
             @keyup.enter="visits.page = 1; loadVisits()" @clear="visits.page = 1; loadVisits()" />
@@ -790,13 +824,15 @@ onMounted(() => {
       </el-tab-pane>
 
       <!-- ========== Tab 用户反馈 ========== -->
-      <el-tab-pane v-if="canAdmin('feedback')" label="📮 用户反馈" name="feedback">
+      <el-tab-pane v-if="tabCan('feedback')" label="📮 用户反馈" name="feedback">
         <div class="toolbar">
-          <el-input v-model="feedback.q" placeholder="搜索正文 / 邮箱 / 用户名" clearable style="width: 260px"
+          <el-input v-if="canAdmin('feedback:view')" v-model="feedback.q" placeholder="搜索正文 / 邮箱 / 用户名" clearable style="width: 260px"
             @keyup.enter="feedback.page = 1; loadFeedback()" @clear="feedback.page = 1; loadFeedback()" />
-          <el-button @click="feedback.page = 1; loadFeedback()">查询</el-button>
-          <span class="count">共 {{ feedback.total }} 条反馈</span>
+          <el-button v-if="canAdmin('feedback:view')" @click="feedback.page = 1; loadFeedback()">查询</el-button>
+          <span v-if="canAdmin('feedback:view')" class="count">共 {{ feedback.total }} 条反馈</span>
         </div>
+        <el-alert v-if="!canAdmin('feedback:view')" type="info" :closable="false" show-icon style="margin-bottom:10px"
+          title="当前账号仅有删除反馈权限，不能查看反馈列表" />
         <el-table :data="feedback.list" v-loading="feedback.loading" stripe>
           <el-table-column prop="create_time" label="时间" width="165" :formatter="fmtT" />
           <el-table-column label="用户" width="170">
@@ -818,8 +854,8 @@ onMounted(() => {
           <el-table-column prop="content" label="反馈内容" min-width="280" show-overflow-tooltip />
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="viewFeedback(row)">查看全文</el-button>
-              <el-button link type="danger" size="small" @click="delFeedback(row)">删除</el-button>
+              <el-button v-if="canAdmin('feedback:view')" link type="primary" size="small" @click="viewFeedback(row)">查看全文</el-button>
+              <el-button v-if="canAdmin('feedback:delete')" link type="danger" size="small" @click="delFeedback(row)">删除</el-button>
             </template>
           </el-table-column>
           <template #empty>暂无用户反馈</template>
@@ -859,14 +895,16 @@ onMounted(() => {
       </el-tab-pane>
 
       <!-- ========== Tab4 资源管理 ========== -->
-      <el-tab-pane v-if="canAdmin('resource')" label="📁 资源管理" name="resources">
+      <el-tab-pane v-if="tabCan('resources')" label="📁 资源管理" name="resources">
         <div class="toolbar">
-          <el-input v-model="resources.q" placeholder="搜索文件名 / 昵称 / 用户名" clearable style="width: 260px"
+          <el-input v-if="canAdmin('resource:view')" v-model="resources.q" placeholder="搜索文件名 / 昵称 / 用户名" clearable style="width: 260px"
             @keyup.enter="resources.page = 1; loadResources()" @clear="resources.page = 1; loadResources()">
             <template #append><el-button @click="resources.page = 1; loadResources()">搜索</el-button></template>
           </el-input>
-          <span class="count">共 {{ resources.total }} 个文件</span>
+          <span v-if="canAdmin('resource:view')" class="count">共 {{ resources.total }} 个文件</span>
         </div>
+        <el-alert v-if="!canAdmin('resource:view')" type="info" :closable="false" show-icon style="margin-bottom:10px"
+          title="当前账号仅有删除资源权限，不能查看资源列表" />
         <el-table :data="resources.list" v-loading="resources.loading" stripe>
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
@@ -883,7 +921,7 @@ onMounted(() => {
           <el-table-column prop="create_time" label="上传时间" width="165" :formatter="fmtT" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button link type="danger" size="small" @click="delResource(row)">删除</el-button>
+              <el-button v-if="canAdmin('resource:delete')" link type="danger" size="small" @click="delResource(row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -1020,7 +1058,7 @@ onMounted(() => {
               <el-table-column prop="create_time" label="上传时间" width="155" :formatter="fmtT" />
               <el-table-column label="操作" width="70">
                 <template #default="{ row }">
-                  <el-button link type="primary" size="small" tag="a"
+                  <el-button v-if="canAdmin('resource:view')" link type="primary" size="small" tag="a"
                     :href="api.resourceDownload(row.id)" target="_blank">下载</el-button>
                 </template>
               </el-table-column>
@@ -1159,18 +1197,35 @@ onMounted(() => {
         </p>
         <el-radio-group v-model="permDlg.mode" class="perm-mode">
           <el-radio value="super">超级管理员</el-radio>
-          <el-radio value="custom">受限管理员（按模块授权）</el-radio>
+          <el-radio value="custom">受限管理员（按权限授权）</el-radio>
         </el-radio-group>
         <el-alert v-if="permDlg.mode === 'super'" type="warning" :closable="false" show-icon
           title="超级管理员拥有后台全部模块，并自动拥有预约/采购审批、幽灵内容巡检、任命其他管理员等最高权限，仅授予完全信任的账号。"
           style="margin: 10px 0" />
         <div v-else class="perm-checks">
-          <el-checkbox v-for="o in PERM_OPTIONS" :key="o.key" v-model="permDlg.perms" :value="o.key" border class="perm-check">
-            <span class="perm-check-label">{{ o.label }}</span>
-            <span class="perm-check-desc">{{ o.desc }}</span>
+          <div v-for="g in PERM_GROUPS" :key="g.key" class="perm-group">
+            <div class="perm-group-head">
+              <el-checkbox :model-value="groupChecked(g)" :indeterminate="groupIndeterminate(g)"
+                @change="(v) => toggleGroup(g, v)">
+                <b>{{ g.label }}</b>
+              </el-checkbox>
+              <span class="tip">勾选组名 = 该组全部权限</span>
+            </div>
+            <div class="perm-group-items">
+              <el-checkbox v-for="c in g.children" :key="c.key" class="perm-sub"
+                :model-value="childChecked(g, c)" :disabled="groupChecked(g)"
+                @change="(v) => toggleChild(g, c, v)">
+                <span :class="{ 'perm-danger': c.danger }">{{ c.label }}</span>
+                <span class="perm-check-desc">{{ c.desc }}</span>
+              </el-checkbox>
+            </div>
+          </div>
+          <el-checkbox v-for="f in PERM_FLAT" :key="f.key" v-model="permDlg.perms" :value="f.key" border class="perm-check">
+            <span class="perm-check-label">{{ f.label }}</span>
+            <span class="perm-check-desc">{{ f.desc }}</span>
           </el-checkbox>
           <el-alert v-if="!permDlg.perms.length" type="info" :closable="false"
-            title="未勾选任何模块时无法保存；受限管理员只能进入已授权的后台模块。" style="margin-top:10px" />
+            title="未勾选任何权限时无法保存；受限管理员只能使用已授权的功能。" style="margin-top:10px" />
         </div>
       </div>
       <template #footer>
@@ -1273,4 +1328,14 @@ onMounted(() => {
 }
 .perm-check-label { font-weight: 600; }
 .perm-check-desc { font-size: 12px; color: var(--text-2, #94a3b8); font-weight: 400; }
+.perm-group {
+  border: 1px solid var(--border, #e2e8f0); border-radius: 10px; padding: 10px 12px 2px;
+}
+.perm-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.perm-group-items { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 10px 24px; }
+.perm-sub {
+  height: auto; min-height: 34px; margin-right: 0; padding: 4px 10px; white-space: normal;
+  :deep(.el-checkbox__label) { display: inline-flex; flex-direction: column; line-height: 1.5; }
+}
+.perm-danger { color: #dc2626; font-weight: 600; }
 </style>

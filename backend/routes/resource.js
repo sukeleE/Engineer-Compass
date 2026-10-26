@@ -170,7 +170,7 @@ r.get('/', (req, res) => {
 r.get('/:id/download', (req, res) => {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(Number(req.params.id));
   if (!f) return res.status(404).json({ error: '资源不存在' });
-  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource')) return res.status(403).json({ error: '无权下载该资源' });
+  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource:view')) return res.status(403).json({ error: '无权下载该资源' });
   if (basename(f.store_path) !== f.store_path) return res.status(404).json({ error: '资源不存在' }); // 防路径穿越
   const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
   if (!existsSync(abs)) return res.status(404).json({ error: '文件已丢失，请联系管理员' });
@@ -181,8 +181,8 @@ r.get('/:id/download', (req, res) => {
 export function deleteResource(req, res, id) {
   const f = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(id);
   if (!f) return res.status(404).json({ error: '资源不存在' });
-  const asAdmin = f.user_id !== req.user.id && hasAdminPerm(req.user, 'resource');
-  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource')) return res.status(403).json({ error: '仅资源所有者或管理员可删除' });
+  const asAdmin = f.user_id !== req.user.id && hasAdminPerm(req.user, 'resource:delete');
+  if (f.user_id !== req.user.id && !hasAdminPerm(req.user, 'resource:delete')) return res.status(403).json({ error: '仅资源所有者或管理员可删除' });
   const abs = join(RESOURCE_DIR, String(f.user_id), f.store_path);
   try { if (existsSync(abs)) unlinkSync(abs); } catch { return res.status(500).json({ error: '文件删除失败' }); }
   db.prepare('DELETE FROM user_resource WHERE id = ?').run(id);

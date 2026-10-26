@@ -13,6 +13,7 @@
     "smoke:booking": "node scripts/smoke_booking.mjs",
     "smoke:checkin": "node scripts/smoke_checkin.mjs",
     "smoke:github": "node scripts/smoke_github.mjs",
+    "smoke:admin-perms": "node scripts/smoke_admin_perms.mjs",
     "probe:claimlost": "node scripts/probe_claimlost.mjs",
     "probe:vision": "node scripts/probe_vision.mjs",
     "probe:share": "node scripts/probe_share.mjs",

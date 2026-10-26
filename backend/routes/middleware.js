@@ -58,24 +58,84 @@ export const ADMIN_PERMS = {
   lab: '借用记录',         // 跨项目借用登记记录全局查看/导出（借设备/借教室管理端）
 };
 
+// 细粒度子权限（仅拆分 5 个高频模块；父 key = 整组全权，老受限管理员零迁移、不缩权）
+// 口径：每组只分「只读查看」与「高危操作」；任命管理员永远仅超管，不走此表
+export const ADMIN_PERM_GROUPS = [
+  {
+    key: 'user',
+    children: [
+      { key: 'user:view', label: '查看用户', desc: '用户列表、详情与内容统计' },
+      { key: 'user:moderate', label: '封禁/禁言', desc: '封禁、禁言、解封用户账号', danger: true },
+      { key: 'user:notify', label: '发送提醒', desc: '一键群发改密 / 实名提醒公告' },
+    ],
+  },
+  {
+    key: 'content',
+    children: [
+      { key: 'content:post', label: '帖子管理', desc: '查看 / 删除资源分享区帖子（含前台越权编辑）', danger: true },
+      { key: 'content:comment', label: '评论管理', desc: '查看 / 删除任意评论', danger: true },
+    ],
+  },
+  {
+    key: 'resource',
+    children: [
+      { key: 'resource:view', label: '查看/下载资源', desc: '全站资源列表、详情与越权下载' },
+      { key: 'resource:delete', label: '删除资源', desc: '删除任意用户上传的资源', danger: true },
+    ],
+  },
+  {
+    key: 'feedback',
+    children: [
+      { key: 'feedback:view', label: '查看反馈', desc: '反馈列表与全文查看' },
+      { key: 'feedback:delete', label: '删除反馈', desc: '删除用户反馈记录', danger: true },
+    ],
+  },
+  {
+    key: 'log',
+    children: [
+      { key: 'log:action', label: '操作日志', desc: '全站操作审计日志' },
+      { key: 'log:visit', label: '访问记录', desc: '含 IP 的全站访问记录（更敏感）' },
+    ],
+  },
+];
+
+const ADMIN_PERM_CHILD_MAP = new Map(
+  ADMIN_PERM_GROUPS.flatMap((g) => g.children.map((c) => [c.key, c]))
+);
+const ADMIN_PERM_KEYSET = new Set([
+  ...Object.keys(ADMIN_PERMS),
+  ...ADMIN_PERM_CHILD_MAP.keys(),
+]);
+
+// 合法权限 key（父 key 与子 key）；任命保存时用它过滤，避免子 key 被静默丢弃
+export const isValidAdminPerm = (k) => ADMIN_PERM_KEYSET.has(k);
+
+// 权限 key → 中文名（守卫错误文案 / 任命消息用，兼容父子 key）
+export const adminPermLabel = (k) => ADMIN_PERMS[k] || ADMIN_PERM_CHILD_MAP.get(k)?.label || k;
+
 // 解析 user.admin_perms（TEXT JSON）；非法值/未知 key 一律忽略，空数组=超管口径
 export function parseAdminPerms(v) {
   if (v == null) return [];
   try {
     const a = typeof v === 'string' ? JSON.parse(v || '[]') : v;
     if (!Array.isArray(a)) return [];
-    return [...new Set(a.map(String))].filter((k) => k in ADMIN_PERMS);
+    return [...new Set(a.map(String))].filter((k) => ADMIN_PERM_KEYSET.has(k));
   } catch { return []; }
 }
 
 // 超级管理员：is_admin=1 且未限定模块（现有 is_admin 老用户自动成为超管，完全向后兼容）
 export const isSuperAdmin = (u) => !!u?.is_admin && parseAdminPerms(u.admin_perms).length === 0;
 
-// 模块权限判断：非管理员 false；超管全权；受限管理员需显式授权
+// 模块权限判断：非管理员 false；超管全权；受限管理员显式授权。
+// 父子继承（双向）：持有父 key 放行其任意子 key；持有任意子 key 也放行父 key 入口检查。
+// 安全约束：高危操作必须直接校验子 key（如 resource:delete），裸父 key 检查只用于模块入口。
 export const hasAdminPerm = (u, key) => {
   if (!u?.is_admin) return false;
   const perms = parseAdminPerms(u.admin_perms);
-  return perms.length === 0 || perms.includes(key);
+  if (perms.length === 0 || perms.includes(key)) return true;
+  if (key.includes(':') && perms.includes(key.split(':')[0])) return true; // 持有父 key → 子 key 放行
+  if (!key.includes(':') && perms.some((k) => k.startsWith(`${key}:`))) return true; // 任一子 key → 父入口放行
+  return false;
 };
 
 // 仅管理员可访问（需先经过 authRequired）：任意管理员（含受限）即可通过，细粒度用 adminPermRequired
@@ -99,7 +159,7 @@ export function adminPermRequired(...keys) {
     if (!req.user) return res.status(401).json({ error: '未登录' });
     if (!req.user.is_admin) return res.status(403).json({ error: '需要管理员权限' });
     if (need.length && !need.some((k) => hasAdminPerm(req.user, k))) {
-      return res.status(403).json({ error: `需要「${ADMIN_PERMS[need[0]] || need[0]}」管理权限` });
+      return res.status(403).json({ error: `需要「${adminPermLabel(need[0])}」管理权限` });
     }
     next();
   };
