@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { fmtShort } from '../../utils/time.js';
+import { selfName } from '../../utils/displayName.js';
 
 const props = defineProps({ teamId: Number, type: String, target: Object });
 const open = ref(false);
@@ -48,7 +49,7 @@ const canDel = (c) => c.user_id === auth.user.id;
     <div v-if="open" class="ct-panel">
       <div v-if="!target.comments?.length" class="ct-empty">还没有评论，来抢沙发～</div>
       <div v-for="c in target.comments" :key="c.id" class="ct-item">
-        <b>{{ c.nickname }}</b>
+        <b>{{ selfName(c, auth.user?.id) }}</b>
         <span class="ct-time">{{ fmt(c.create_time) }}</span>
         <p>{{ c.content }}</p>
         <el-button v-if="canDel(c)" size="small" text type="danger" class="ct-del" @click="remove(c)">删</el-button>

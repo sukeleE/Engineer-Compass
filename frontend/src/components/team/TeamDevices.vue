@@ -3,6 +3,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
+import { selfName } from '../../utils/displayName.js';
 
 const props = defineProps({ teamId: Number, me: Object, perms: Object, devices: Array });
 
@@ -139,7 +140,7 @@ onMounted(() => reload().catch((e) => ElMessage.error(e.message)));
           <b>{{ b.device_name }}</b>
           <span class="bk-time">{{ b.start_time }} ~ {{ b.end_time }}</span>
           <el-tag size="small" :type="STATUS[b.status].tag">{{ STATUS[b.status].label }}</el-tag>
-          <span class="bk-who">{{ b.user_name }} · {{ b.purpose }}</span>
+          <span class="bk-who">{{ selfName(b, me.user_id, 'user_name') }} · {{ b.purpose }}</span>
           <template v-if="b.status === 'pending'">
             <el-button size="small" type="success" plain @click="approve(b, 'approved')">批准</el-button>
             <el-button size="small" type="danger" plain @click="approve(b, 'rejected')">驳回</el-button>

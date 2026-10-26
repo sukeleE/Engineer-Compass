@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
+import { selfName } from '../../utils/displayName.js';
 import PlanTiles from './PlanTiles.vue';
 
 const router = useRouter();
@@ -64,7 +65,7 @@ onMounted(() => load());
           <img v-if="m.avatar" :src="m.avatar" alt="" />
           <template v-else>{{ (m.nickname || '?').slice(0, 1) }}</template>
         </span>
-        <b class="mp-cname">{{ m.nickname }}</b>
+        <b class="mp-cname">{{ selfName(m, auth.user?.id) }}</b>
         <span v-if="m.is_owner" class="mp-crown" title="组长">👑</span>
         <span v-if="pendingOf(m)" class="mp-badge">{{ pendingOf(m) }}</span>
         <span v-else class="mp-done" title="计划已全部完成">✓</span>
@@ -72,7 +73,7 @@ onMounted(() => load());
     </div>
 
     <!-- 成员详细个人计划弹窗 -->
-    <el-dialog v-model="memberDlg" :title="selected ? `${selected.nickname} 的个人计划` : '个人计划'"
+    <el-dialog v-model="memberDlg" :title="selected ? `${selfName(selected, auth.user?.id)} 的个人计划` : '个人计划'"
       width="720px" top="6vh" append-to-body>
       <div v-if="selected" class="mp-detail">
         <div class="md-head">

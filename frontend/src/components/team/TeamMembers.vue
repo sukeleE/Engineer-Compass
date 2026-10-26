@@ -4,7 +4,7 @@ import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
-import { displayName } from '../../utils/displayName.js';
+import { displayName, selfName } from '../../utils/displayName.js';
 import auth from '../../auth.js';
 
 const router = useRouter();
@@ -276,12 +276,12 @@ loadLeaderboard('month');
         </span>
       </div>
       <div v-for="m in members" :key="m.id" class="member-row" :class="{ me: m.is_me }">
-        <span class="m-avatar" :title="m.nickname" @click="toProfile(m)">
+        <span class="m-avatar" :title="selfName(m, me.user_id)" @click="toProfile(m)">
           <img v-if="m.avatar" :src="m.avatar" alt="" />
           <template v-else>{{ m.nickname?.[0] || '?' }}</template>
         </span>
         <div class="m-info">
-          <b class="u-link" @click="toProfile(m)">{{ m.nickname }}<el-tag v-if="m.is_owner" size="small" type="warning" style="margin-left:6px">👑 组长</el-tag>
+          <b class="u-link" @click="toProfile(m)">{{ selfName(m, me.user_id) }}<el-tag v-if="m.is_owner" size="small" type="warning" style="margin-left:6px">👑 组长</el-tag>
             <el-tag v-if="m.is_me" size="small" type="info" effect="plain" style="margin-left:4px">我</el-tag>
           </b>
           <span class="m-user">@{{ m.username }}</span>
@@ -405,7 +405,7 @@ loadLeaderboard('month');
     <el-dialog v-model="aiDlg" title="🧠 AI 智能分组建议" width="560px" top="6vh">
       <p class="ai-note">AI 按成员信息与部门建议分组（组长除外）</p>
       <div v-for="a in aiSuggest" :key="a.user_id" class="ai-row">
-        <span class="ai-name">{{ a.nickname }}</span>
+        <span class="ai-name">{{ selfName(a, me.user_id) }}</span>
         <span class="ai-from">{{ a.current_role === '无' ? '（无角色）' : a.current_role }}</span>
         <el-icon><i class="ai-arrow">→</i></el-icon>
         <el-tag type="success" effect="light">{{ a.suggest_role }}</el-tag>
