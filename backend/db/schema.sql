@@ -883,8 +883,8 @@ CREATE TABLE IF NOT EXISTS checkin_schedule (
 );
 CREATE INDEX IF NOT EXISTS idx_checkin_sched_team ON checkin_schedule(team_id);
 
--- progress_log 扩展：周期打卡提交挂接 + 自评 + 组长评分 + 优秀标记（自由汇报这些列为空）
--- 列定义同时写入 database.js 的 migCol（老库增量加列）；这里只对新库生效
--- schedule_id/period_key/self_progress/self_rating/score/review/reviewer_id/featured/is_late
-CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_log_checkin
-  ON progress_log(schedule_id, user_id, period_key) WHERE schedule_id IS NOT NULL;
+-- progress_log 扩展列（schedule_id/period_key/self_progress/self_rating/score/review/
+-- reviewer_id/featured/is_late）写在上方建表语句；老库由 database.js 的 migCol 增量补列。
+-- 部分唯一索引（同期一人一条）统一在 database.js 加完列之后创建——不能放在这里：
+-- 老库执行 schema.sql 时 progress_log 还是旧结构（无 schedule_id），提前建索引会
+-- 启动即崩（no such column: schedule_id）。
