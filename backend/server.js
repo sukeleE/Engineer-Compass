@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { existsSync } from 'node:fs';
+import db from './db/database.js';
 import competitions from './routes/competitions.js';
 import ai from './routes/ai.js';
 import taskAssist from './routes/taskAssist.js';
@@ -13,6 +14,7 @@ import auth from './routes/auth.js';
 import notes from './routes/notes.js';
 import team from './routes/team.js';
 import teamCollab from './routes/teamCollab.js';
+import checkin from './routes/checkin.js';
 import feedback from './routes/feedback.js';
 import users from './routes/users.js';
 import planChat from './routes/planChat.js';
@@ -35,6 +37,7 @@ import { accessLog } from './routes/middleware.js';
 import { sweepStaging } from './lib/shareFiles.js';
 import { sweepOrphanHonorFiles } from './lib/honorFiles.js';
 import { sweepOrphanPurchaseFiles } from './lib/purchaseFiles.js';
+import { runCheckinReminders } from './lib/checkin.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -55,6 +58,7 @@ app.use('/api/auth', auth);
 app.use('/api/notes', notes);
 app.use('/api/team', team);
 app.use('/api/team', teamCollab);
+app.use('/api/team', checkin);
 app.use('/api/feedback', feedback);
 app.use('/api/users', users);
 app.use('/api/plan-chat', planChat);
@@ -144,6 +148,18 @@ function runPeriodicCleanup() {
 }
 const cleanupTimer = setInterval(runPeriodicCleanup, CLEANUP_INTERVAL_HOURS * 3600 * 1000);
 cleanupTimer.unref(); // 不拖住进程退出
+
+// 打卡提醒：每 10 分钟扫描应交未交的周期打卡（截止前 1 小时「即将截止」、过期 15 分钟「未提交」）。
+// 惰性去重：同任务同期同阶段每人仅一条未读通知；按 personal_notice(type,link,is_read) 自然去重。
+function runCheckinOnce() {
+  try {
+    const n = runCheckinReminders(db);
+    if (n) console.log(`🔔 打卡提醒：发出 ${n} 条（${new Date().toLocaleString('zh-CN')}）`);
+  } catch (e) { console.error('打卡提醒扫描失败（不影响服务）:', e.message); }
+}
+const checkinTimer = setInterval(runCheckinOnce, 10 * 60 * 1000);
+checkinTimer.unref();
+setTimeout(runCheckinOnce, 20 * 1000); // 启动 20 秒后补跑一次（重启即恢复提醒）
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

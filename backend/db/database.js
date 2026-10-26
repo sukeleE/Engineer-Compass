@@ -25,6 +25,17 @@ const migCol = (table, col, ddl) => {
   if (!c.some((x) => x.name === col)) db.exec(ddl);
 };
 migCol('progress_log', 'attachments', "ALTER TABLE progress_log ADD COLUMN attachments TEXT DEFAULT '[]'");
+// 周期打卡：progress_log 挂接任务/周期 + 自评 + 组长评分（新库 schema.sql 已含）
+migCol('progress_log', 'schedule_id', 'ALTER TABLE progress_log ADD COLUMN schedule_id INTEGER');
+migCol('progress_log', 'period_key', "ALTER TABLE progress_log ADD COLUMN period_key TEXT");
+migCol('progress_log', 'self_progress', 'ALTER TABLE progress_log ADD COLUMN self_progress INTEGER');
+migCol('progress_log', 'self_rating', 'ALTER TABLE progress_log ADD COLUMN self_rating INTEGER');
+migCol('progress_log', 'score', 'ALTER TABLE progress_log ADD COLUMN score INTEGER');
+migCol('progress_log', 'review', "ALTER TABLE progress_log ADD COLUMN review TEXT DEFAULT ''");
+migCol('progress_log', 'reviewer_id', 'ALTER TABLE progress_log ADD COLUMN reviewer_id INTEGER');
+migCol('progress_log', 'featured', 'ALTER TABLE progress_log ADD COLUMN featured INTEGER NOT NULL DEFAULT 0');
+migCol('progress_log', 'is_late', 'ALTER TABLE progress_log ADD COLUMN is_late INTEGER NOT NULL DEFAULT 0');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_log_checkin ON progress_log(schedule_id, user_id, period_key) WHERE schedule_id IS NOT NULL');
 migCol('team_message', 'attachments', "ALTER TABLE team_message ADD COLUMN attachments TEXT DEFAULT '[]'");
 migCol('user_study', 'user_id', 'ALTER TABLE user_study ADD COLUMN user_id INTEGER');
 migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不支持 ADD COLUMN UNIQUE，唯一性用索引保证

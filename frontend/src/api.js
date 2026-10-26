@@ -155,6 +155,18 @@ export const api = {
   teamLogs: (id) => req(`/team/${id}/logs`),
   teamLogUpdate: (id, lid, card) => req(`/team/${id}/log/${lid}`, { method: 'PUT', body: JSON.stringify(card) }),
   teamLogDelete: (id, lid) => req(`/team/${id}/log/${lid}`, { method: 'DELETE' }),
+  // 周期打卡 / 定时汇报
+  teamCheckinSchedules: (id) => req(`/team/${id}/checkin/schedules`),
+  teamCheckinScheduleCreate: (id, b) => req(`/team/${id}/checkin/schedules`, { method: 'POST', body: JSON.stringify(b) }),
+  teamCheckinScheduleUpdate: (id, sid, b) => req(`/team/${id}/checkin/schedules/${sid}`, { method: 'PUT', body: JSON.stringify(b) }),
+  teamCheckinScheduleDelete: (id, sid) => req(`/team/${id}/checkin/schedules/${sid}`, { method: 'DELETE' }),
+  teamCheckinMine: (id) => req(`/team/${id}/checkin/my`),
+  teamCheckinSubmit: (id, b) => req(`/team/${id}/checkin/submit`, { method: 'POST', body: JSON.stringify(b) }),
+  teamCheckinBoard: (id, sid) => req(`/team/${id}/checkin/schedules/${sid}/board`),
+  teamCheckinReview: (id, lid, b) => req(`/team/${id}/checkin/logs/${lid}/review`, { method: 'POST', body: JSON.stringify(b) }),
+  teamCheckinLeaderboard: (id, range, sid) =>
+    req(`/team/${id}/checkin/leaderboard?range=${range || 'month'}${sid ? `&schedule_id=${sid}` : ''}`),
+  teamCheckinFeatured: (id, sid) => req(`/team/${id}/checkin/featured${sid ? `?schedule_id=${sid}` : ''}`),
   // 讨论
   teamMessages: (id) => req(`/team/${id}/messages`),
   teamMessage: (id, card) => req(`/team/${id}/message`, { method: 'POST', body: JSON.stringify(card) }),

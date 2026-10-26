@@ -11,6 +11,7 @@
     "smoke:account": "node scripts/smoke_account.mjs",
     "smoke:repo": "node scripts/smoke_repo.mjs",
     "smoke:booking": "node scripts/smoke_booking.mjs",
+    "smoke:checkin": "node scripts/smoke_checkin.mjs",
     "smoke:github": "node scripts/smoke_github.mjs",
     "probe:claimlost": "node scripts/probe_claimlost.mjs",
     "probe:vision": "node scripts/probe_vision.mjs",

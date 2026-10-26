@@ -191,6 +191,15 @@ CREATE TABLE IF NOT EXISTS progress_log (
   user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
   content     TEXT NOT NULL,
   attachments TEXT DEFAULT '[]',             -- JSON 附件数组（图片/音频/视频/文件）
+  schedule_id INTEGER REFERENCES checkin_schedule(id) ON DELETE SET NULL, -- 周期打卡任务（自由汇报为空）
+  period_key  TEXT,                          -- 周期键：daily=YYYY-MM-DD / weekly=YYYY-Www
+  self_progress INTEGER,                     -- 组员自评进度 0-100
+  self_rating   INTEGER,                     -- 组员自评完成效果 1-5
+  score       INTEGER,                       -- 组长评分 1-5
+  review      TEXT DEFAULT '',              -- 组长评语
+  reviewer_id INTEGER REFERENCES user(id),
+  featured    INTEGER NOT NULL DEFAULT 0,    -- 优秀汇报标记
+  is_late     INTEGER NOT NULL DEFAULT 0,    -- 迟交标记
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -851,3 +860,31 @@ CREATE TABLE IF NOT EXISTS booking_log (
   create_time TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_bk_log_booking ON booking_log(booking_id);
+
+-- 表60 checkin_schedule 周期打卡 / 定时汇报任务（进度对齐页，组长/任务管理权限者可建）
+CREATE TABLE IF NOT EXISTS checkin_schedule (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id            INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  title              TEXT NOT NULL,                  -- 打卡任务名（如：每日训练打卡）
+  kind               TEXT NOT NULL DEFAULT 'recurring', -- recurring 周期打卡 / once 定时汇报
+  freq               TEXT NOT NULL DEFAULT 'daily',  -- daily / weekly（once 忽略）
+  weekdays           TEXT NOT NULL DEFAULT '[]',     -- JSON [1..7]，周一=1（weekly 用）
+  due_time           TEXT NOT NULL DEFAULT '21:00',  -- 每期截止时刻 HH:MM
+  start_date         TEXT,                           -- 生效起 YYYY-MM-DD
+  end_date           TEXT,                           -- 生效止（空=长期）
+  once_at            TEXT,                           -- kind=once 的截止日期时间
+  allow_late         INTEGER NOT NULL DEFAULT 1,     -- 过期是否允许补交（补交标迟交）
+  need_self_progress INTEGER NOT NULL DEFAULT 0,     -- 提交时必填自评进度 0-100
+  need_self_rating   INTEGER NOT NULL DEFAULT 0,     -- 提交时必填自评效果 1-5
+  auto_feature       INTEGER NOT NULL DEFAULT 0,     -- 0=仅手动优秀 / 4 / 5=达到该评分自动入选
+  active             INTEGER NOT NULL DEFAULT 1,
+  creator_id         INTEGER REFERENCES user(id),
+  create_time        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_checkin_sched_team ON checkin_schedule(team_id);
+
+-- progress_log 扩展：周期打卡提交挂接 + 自评 + 组长评分 + 优秀标记（自由汇报这些列为空）
+-- 列定义同时写入 database.js 的 migCol（老库增量加列）；这里只对新库生效
+-- schedule_id/period_key/self_progress/self_rating/score/review/reviewer_id/featured/is_late
+CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_log_checkin
+  ON progress_log(schedule_id, user_id, period_key) WHERE schedule_id IS NOT NULL;

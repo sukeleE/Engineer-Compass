@@ -14,7 +14,8 @@ const MAX_FILE = 20 * 1024 * 1024; // 单文件上限 20MB（base64 后约 27MB�
 const MAX_ATTACH = 25 * 1024 * 1024; // 单次附件总 base64 上限（留 json 30mb limit 余量）
 
 // 校验并归一化附件数组：[{name,size,mime,data}] 或引用型 [{name,size,mime,url}] → 只留合法项；超限抛错
-function sanitizeAttachments(attachments) {
+// 导出供 checkin 路由复用（周期打卡提交与自由汇报同口径）
+export function sanitizeAttachments(attachments) {
   if (attachments === undefined || attachments === null) return [];
   if (!Array.isArray(attachments)) throw new Error('attachments 需为数组');
   let total = 0;
@@ -168,11 +169,20 @@ r.get('/:id/logs', (req, res) => {
   const rows = db.prepare(
     `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id,
             COALESCE(u.nickname, u.username) AS nickname, u.avatar,
+            l.schedule_id, l.period_key, l.self_progress, l.self_rating,
+            l.score, l.review, l.featured, l.is_late,
+            cs.title AS schedule_title, cs.freq AS schedule_freq,
+            ru.nickname AS reviewer_name,
             m.doc_url AS feishu_url
      FROM progress_log l JOIN user u ON u.id = l.user_id
+     LEFT JOIN user ru ON ru.id = l.reviewer_id
+     LEFT JOIN checkin_schedule cs ON cs.id = l.schedule_id
      LEFT JOIN feishu_doc_map m ON m.biz_type = 'progress_log' AND m.biz_id = l.id
      WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT 100`
-  ).all(ctx.team.id).map((l) => ({ ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments) }));
+  ).all(ctx.team.id).map((l) => ({
+    ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments),
+    featured: !!l.featured, is_late: !!l.is_late,
+  }));
   res.json(attachComments(ctx.team.id, 'log', rows));
 });
 
