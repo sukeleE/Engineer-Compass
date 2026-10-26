@@ -111,18 +111,54 @@ const embedJson = (obj) => JSON.stringify(obj)
 function callbackHtml({ kind, message, post = null, targetOrigin = '*', autoClose = false }) {
   const icon = kind === 'success' ? '✅' : '❌';
   const title = kind === 'success' ? 'GitHub 授权成功' : 'GitHub 授权失败';
+  // 无 opener（手机浏览器全屏授权）时的落地页：登录→首页、绑定→账号安全、失败→登录页
+  const type = post?.type || '';
+  const fallback = type === 'github-bound' ? '/account-security'
+    : type === 'github-oauth-error' ? '/login' : '/';
+  const btnText = type === 'github-bound' ? '← 返回账号安全'
+    : type === 'github-oauth-error' ? '← 返回登录页' : '🚀 立即进入网站';
   const script = post ? `<script>
 (function () {
   var payload = ${embedJson(post)};
+  var fallback = ${embedJson(fallback)};
+  var hasOpener = false;
+  try { hasOpener = !!window.opener; } catch (e) {}
   try { if (window.opener) window.opener.postMessage(payload, ${embedJson(targetOrigin)}); } catch (e) {}
-  ${autoClose ? 'setTimeout(function () { window.close(); }, 1200);' : ''}
+  // 桌面弹窗：1.2s 后自关（关不掉也无妨，下方倒计时会兜底跳走）
+  ${autoClose ? "setTimeout(function () { try { window.close(); } catch (e) {} }, 1200);" : ''}
+  // 手机浏览器全屏授权：没有 opener，postMessage 无人接收、window.close 也关不掉系统标签。
+  // 登录态直接写同源 localStorage（与前端 auth.js 的 ec_token/ec_user 同键），随后回站即为登录态。
+  if (!hasOpener && payload.type === 'github-login' && payload.token) {
+    try {
+      localStorage.setItem('ec_token', payload.token);
+      localStorage.setItem('ec_user', JSON.stringify(payload.user || {}));
+    } catch (e) {}
+  }
+  // 倒计时兜底：桌面弹窗被 close 后定时器随之销毁；无 opener / close 被拒的环境到时自动返回。
+  var delay = hasOpener ? ${autoClose ? '8' : '0'} : (payload.type === 'github-oauth-error' ? 5 : 3);
+  var cw = document.getElementById('cdwrap');
+  if (!delay) { if (cw) cw.style.display = 'none'; return; }
+  var left = delay;
+  var cd = document.getElementById('cd');
+  if (cd) cd.textContent = left;
+  var t = setInterval(function () {
+    left -= 1;
+    if (cd) cd.textContent = left > 0 ? left : 0;
+    if (left <= 0) { clearInterval(t); location.replace(fallback); }
+  }, 1000);
 })();
 </scr` + 'ipt>' : '';
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>GitHub 授权回调</title>
-<style>body{font-family:system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#0d1117;color:#e6edf3;margin:0}
-div{text-align:center;background:#161b22;padding:40px 48px;border-radius:16px;max-width:520px;border:1px solid #30363d}
-h2{margin:0 0 12px}p{margin:0;color:#9ca3af;line-height:1.6;word-break:break-all}</style></head>
-<body><div><h2>${icon} ${title}</h2><p>${escapeHtml(message)}</p></div>${script}</body></html>`;
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub 授权回调</title>
+<style>body{font-family:system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#0d1117;color:#e6edf3;margin:0;padding:24px}
+.box{text-align:center;background:#161b22;padding:40px 48px;border-radius:16px;max-width:520px;border:1px solid #30363d}
+h2{margin:0 0 12px}p{margin:0;color:#9ca3af;line-height:1.6;word-break:break-all}
+.btn{display:inline-block;margin-top:22px;padding:11px 26px;border-radius:10px;background:#238636;color:#fff!important;text-decoration:none;font-size:15px;font-weight:600}
+.btn:active{background:#2ea043}
+.cd{color:#9ca3af;font-size:13px;font-weight:400;margin-left:2px}</style></head>
+<body><div class="box"><h2>${icon} ${title}</h2><p>${escapeHtml(message)}</p>
+<a class="btn" href="${fallback}">${btnText}<span class="cd" id="cdwrap">（<span id="cd">3</span> 秒后自动返回）</span></a>
+</div>${script}</body></html>`;
 }
 
 // ---------------- 路由 ----------------

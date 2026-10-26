@@ -132,6 +132,7 @@ try {
   ok('审计 github-bind（user=甲，target=gh-bound）', ab && ab.user_id === A.id && ab.target === 'gh-bound', ab);
   const st = await req('/github/oauth/status', { token: rA.token });
   ok('status：bound=true + login', st.data.bound === true && st.data.login === 'gh-bound');
+  ok('绑定回调页：返回按钮指向账号安全页', /href="\/account-security"/.test(cb.html));
 
   // ---------- 3. B 再绑同一 GitHub → 友好拒绝（无 SQL 原文） ----------
   cb = await callback('bound', stateOf(await bindUrl(rB.token)));
@@ -140,6 +141,7 @@ try {
     cb.status === 400 && p?.type === 'github-oauth-error' &&
     /已绑定其他本站账号/.test(p.message) && !/SQLITE|CONSTRAINT|sql/i.test(cb.html), p);
   ok('1001 仍只绑一人（B 无 bind 行）', bindCount(1001) === 1 && !db.prepare('SELECT 1 FROM github_bind WHERE user_id=?').get(B.id));
+  ok('错误回调页：返回按钮指向登录页', /href="\/login"/.test(cb.html) && /秒后自动返回/.test(cb.html));
 
   // ---------- 4. 已绑定身份一键登录 = A ----------
   cb = await callback('bound', stateOf(await loginUrl()));
@@ -150,6 +152,10 @@ try {
   ok('会话 token 可用：/auth/me = 甲', me.status === 200 && me.data.user.id === A.id);
   const al = lastAudit('github-login');
   ok('审计 github-login via=bound', al && al.user_id === A.id && JSON.parse(al.detail).via === 'bound', al);
+  ok('登录回调页：无 opener 兜底写 ec_token + 按钮回首页',
+    cb.html.includes("localStorage.setItem('ec_token'") && /href="\/"/.test(cb.html)
+    && /location\.replace\(fallback\)/.test(cb.html),
+    cb.html.slice(0, 200));
 
   // ---------- 5. mail 身份按验证邮箱自动绑到丙 ----------
   const cSessBefore = sessionsOf(C.id);

@@ -557,6 +557,12 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **前端**：PurchaseView「我管理的档案」ev-head 在设置/开关旁加红色「删除」link（v-if ev.canSettings），`removeEvent` 二次确认（提示审批人配置同删、不可恢复、有申请会被拦），失败直接弹后端 409 消息；副文案改为「没有采购申请的档案可以删除，已有申请需先删除全部申请」。RequestDetailDialog footer 保留本人「撤回申请」(`perm.canDelete`)，**超管在本人不可撤回的场景**（他人申请/自己已通过的申请）另显「删除申请」危险按钮（`isSuperAdmin && !canDelete`，避免与撤回重复），确认文案列明明细/截图/发票/审批记录全删且不可恢复；成功 emit changed + 关窗，经 refreshAfterChange 自动刷列表。api.js 加 `purchaseEventDelete`。
 - **测试**：smoke_purchase 102→**116/116**（§14.5 新增：路人删档案 403、非建档 leader 403、建档者删有申请档案 409 且消息含「2 条」、删空档案 200+重复 404、审批人配置级联清零、DB 直改 `is_admin=1,admin_perms=NULL` 提权（session 每请求重查用户行，旧 token 即时生效）后超管强删他人 invoiced 申请 200+整目录清盘+申请/明细/文件/轨迹四类行归零、超管删空档案 200；清理断言剩余冒烟档案 ≥2）。**临时栈跑法（WSL）**：sh 脚本 export PORT=3109/DB_PATH/PURCHASE_UPLOAD_DIR 到 mktemp 目录起 `node backend/server.js`，冒烟侧给 `PROBE_API=http://127.0.0.1:3109/api PROBE_DB=<同库> SMK_PURCHASE_DIR=<同上传目录>`（openProbeDb 同源闸门）；**必须先 unset 全部 *_proxy 并 NO_PROXY=127.0.0.1**，否则 WSL NAT 模式下 localhost 代理让 health 轮询永远失败。vite build 过（30.85s）。
 
+## 2026-10-26 📱 GitHub OAuth 回调页手机端卡死修复（直接 main，待推送部署）
+
+- **故障**：手机端 GitHub 登录后停在 `/api/github/oauth/callback` 回调页不返回。根因：callbackHtml 只做 `window.opener.postMessage` + `window.close()`——桌面弹窗有效；手机浏览器全屏授权时 **opener 常为 null**（postMessage 无人接），且 **window.close() 只能关 window.open 弹出的窗，关不掉系统接管的标签页**，于是死页。
+- **修法（只改 backend/routes/github.js 的 callbackHtml）**：脚本先探测 hasOpener。①无 opener 且 payload.type=github-login → 直接写同源 **localStorage `ec_token`/`ec_user`（与前端 auth.js 同键，回调页同源可写）**，回站整页加载即登录态；②页面加绿色大按钮（login→`/`「🚀 立即进入网站」、bound→`/account-security`、error→`/login`），倒计时 **无 opener 3s（错误 5s）location.replace 回站**；③有 opener 保留旧行为（postMessage+1.2s close），另设 8s 兜底倒计时（close 被拒的手机新标签场景；桌面弹窗被关后定时器随窗销毁，无副作用），桌面错误弹窗 delay=0 仅按钮不自动跳。按钮是硬编码常量相对路径，无注入面；message 仍 escapeHtml。飞书回调页本就有「← 返回互传工作台」链接，不在本次范围。
+- **测试**：smoke_github 35→**38/38**（绑定回调含 href=/account-security、错误回调 href=/login 且有倒计时文案、登录回调含 localStorage ec_token 写入+href=/+location.replace）。纯后端渲染改动，无需前端构建；上线只需 pm2 restart（不必发前端）。
+
 ## 2026-10-26 🔗 项目小组邀请链接：点击直接加入（直接 main，已推送 c11fea5 并部署上线）
 
 - **需求**：「点击分享链接，可直接加入项目小组」——原来只能手抄 8 位邀请码再去「邀请码加入」粘贴。
