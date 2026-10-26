@@ -174,6 +174,22 @@ try {
   ok('看板筛选返回 role_filter 与已交格数', String(roleBoard.role_filter) === String(testRole.id)
     && roleBoard.submitted_total >= 1, { rf: roleBoard.role_filter, n: roleBoard.submitted_total });
 
+  // ---------- 4.5 邀请链接：peek 预览 / 未入组第三人凭码加入 / 重复加入 409 / 坏码 404 ----------
+  const CODE = tg.invite_code || tg.team?.invite_code;
+  const peek = await api(`/team/peek?code=${CODE}`, { token: tC });
+  ok('peek：未入组者看到组名/人数且标记未入组', peek.id === TID && peek.is_member === false
+    && peek.member_count === 2 && !!peek.owner_name, peek);
+  const join1 = await api('/team/join', { method: 'POST', token: tC, body: { invite_code: CODE } });
+  ok('第三人凭邀请码加入 201 且返回组 id', join1.id === TID && /加入/.test(join1.message), join1);
+  const peek2 = await api(`/team/peek?code=${CODE}`, { token: tC });
+  ok('peek：加入后 is_member=true 且人数+1', peek2.is_member === true && peek2.member_count === 3, peek2);
+  const dup = await exp('/team/join', 409, { method: 'POST', token: tC, body: { invite_code: CODE } });
+  ok('重复加入 409 且响应带组 id', dup.data.id === TID, dup.data);
+  const badPeek = await exp('/team/peek?code=NOPE9999', 404, { token: tC });
+  ok('坏邀请码 peek 404', badPeek.ok);
+  const badJoin = await exp('/team/join', 404, { method: 'POST', token: tC, body: { invite_code: 'NOPE9999' } });
+  ok('坏邀请码加入 404', badJoin.ok);
+
   // ---------- 5. 评分 / 优秀 ----------
   g = await exp(`/team/${TID}/checkin/logs/${LID_DAILY}/review`, 403, { method: 'POST', token: tA, body: { score: 5 } });
   ok('组员不能评分 403', g.ok);

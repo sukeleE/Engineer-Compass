@@ -114,6 +114,8 @@ export const api = {
   // 项目小组
   teamCreate: (card) => req('/team', { method: 'POST', body: JSON.stringify(card) }),
   teamJoin: (inviteCode) => req('/team/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
+  // 邀请链接落地预览（组名/人数/是否已在组）；code 会被后端归一为大写
+  teamPeek: (inviteCode) => req(`/team/peek?code=${encodeURIComponent(inviteCode)}`),
   teamDetail: (id) => req(`/team/${id}`),
   teamUpdate: (id, card) => req(`/team/${id}`, { method: 'PUT', body: JSON.stringify(card) }),
   teamInvite: (id) => req(`/team/${id}/invite`),

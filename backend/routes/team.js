@@ -146,7 +146,7 @@ r.post('/join', (req, res) => {
   const team = db.prepare('SELECT * FROM team WHERE invite_code = ?').get(code);
   if (!team) return res.status(404).json({ error: '邀请码无效' });
   const exists = db.prepare('SELECT id FROM team_member WHERE team_id = ? AND user_id = ?').get(team.id, req.user.id);
-  if (exists) return res.status(409).json({ error: '你已在该小组中' });
+  if (exists) return res.status(409).json({ id: team.id, name: team.name, error: '你已在该小组中' });
   const defaultRole = db.prepare("SELECT id FROM team_role WHERE team_id = ? AND name = '组员' ORDER BY level LIMIT 1").get(team.id);
   db.prepare('INSERT INTO team_member (team_id, user_id, role_id) VALUES (?,?,NULL)')
     .run(team.id, req.user.id);
@@ -154,6 +154,22 @@ r.post('/join', (req, res) => {
     .run(team.id, req.user.id, defaultRole.id);
   logAudit(req, 'team-join', team.name);
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
+});
+
+// GET /api/team/peek?code= — 邀请链接落地前预览（组名/简介/人数/组长/是否已在组）
+// 登录即可查（邀请码本身即入组钥匙），不返回成员名单等敏感信息；必须注册在 GET /:id 之前
+r.get('/peek', (req, res) => {
+  const code = String(req.query.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: '邀请码必填' });
+  const team = db.prepare('SELECT * FROM team WHERE invite_code = ?').get(code);
+  if (!team) return res.status(404).json({ error: '邀请码无效' });
+  const memberCount = db.prepare('SELECT COUNT(*) AS n FROM team_member WHERE team_id = ?').get(team.id).n;
+  const owner = db.prepare('SELECT COALESCE(nickname, username) AS name FROM user WHERE id = ?').get(team.owner_id);
+  const isMember = !!db.prepare('SELECT 1 FROM team_member WHERE team_id = ? AND user_id = ?').get(team.id, req.user.id);
+  res.json({
+    id: team.id, name: team.name, desc: team.desc || '',
+    member_count: memberCount, owner_name: owner?.name || '', is_member: isMember,
+  });
 });
 
 // GET /api/team/users/search?q=&team_id= — 组长拉人用全站搜人（登录即可；排除自己/封禁，

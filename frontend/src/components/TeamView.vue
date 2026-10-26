@@ -2,7 +2,7 @@
 // 项目小组：我的小组列表 + 创建/加入 + 组内工作台（TeamDetail）
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import auth, { clearAuth } from '../auth.js';
 import TeamDetail from './TeamDetail.vue';
@@ -81,10 +81,11 @@ async function create(chatResult) {
 }
 
 async function join() {
-  if (!joinCode.value.trim()) return ElMessage.warning('请输入邀请码');
+  const code = normCode(joinCode.value);
+  if (!code) return ElMessage.warning('请输入 8 位邀请码，或直接粘贴邀请链接');
   loading.value = true;
   try {
-    const res = await api.teamJoin(joinCode.value);
+    const res = await api.teamJoin(code);
     ElMessage.success(res.message);
     joinCode.value = '';
     showJoin.value = false;
@@ -97,13 +98,67 @@ async function join() {
   }
 }
 
+// 邀请码识别：8 位码 / 粘贴整条邀请链接（?join=XXXX，兼容报销链接的 ?code=XXXX）/ 带前后杂字符 —— 均归一为大写码
+function normCode(input) {
+  const s = String(input || '').trim();
+  const m = s.match(/[?&](?:join|code)=([A-Za-z0-9]+)/);
+  const raw = (m ? m[1] : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return /^[A-Z0-9]{4,12}$/.test(raw) ? raw : '';
+}
+
+// ?join=CODE 邀请链接：未登录时全局守卫先带去 /login 并保留 redirect，登录后带 query 回到这里自动入组
+async function handleInviteLink() {
+  const code = normCode(route.query.join);
+  const cleanQuery = () => (selTeamId.value ? { team: selTeamId.value } : {});
+  if (!code) { router.replace({ query: cleanQuery() }).catch(() => {}); return; }
+  let info;
+  try {
+    info = await api.teamPeek(code);
+  } catch (e) {
+    ElMessage.error(e.message || '邀请链接无效');
+    router.replace({ query: cleanQuery() }).catch(() => {});
+    return;
+  }
+  if (info.is_member) {
+    ElMessage.info(`你已在「${info.name}」中`);
+    await load();
+    if (teams.value.some((x) => x.id === info.id)) selTeamId.value = info.id;
+    router.replace({ query: { team: info.id } }).catch(() => {});
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `组长 ${info.owner_name || '—'} 邀请你加入「${info.name}」，现有 ${info.member_count} 名成员。加入后可参与组内进度对齐、讨论与资料共享。`,
+      '小组邀请', { confirmButtonText: '加入小组', cancelButtonText: '暂不', type: 'info' }
+    );
+  } catch { router.replace({ query: cleanQuery() }).catch(() => {}); return; }
+  loading.value = true;
+  try {
+    const res = await api.teamJoin(code);
+    ElMessage.success(res.message);
+    await load();
+    if (teams.value.some((x) => x.id === res.id)) selTeamId.value = res.id;
+    router.replace({ query: { team: res.id } }).catch(() => {});
+  } catch (e) {
+    ElMessage.error(e.message);
+    router.replace({ query: cleanQuery() }).catch(() => {});
+  } finally {
+    loading.value = false;
+  }
+}
+
 function logout() {
   clearAuth();
   ElMessage.success('已退出登录');
   router.push('/');
 }
 
-onMounted(() => { if (auth.token) { load(); loadComps(); } });
+onMounted(async () => {
+  if (!auth.token) return;
+  await load();
+  loadComps();
+  if (route.query.join) handleInviteLink();
+});
 </script>
 
 <template>
@@ -157,7 +212,7 @@ onMounted(() => { if (auth.token) { load(); loadComps(); } });
       <el-dialog :model-value="showJoin" title="邀请码加入" width="420px" @update:model-value="(v) => (showJoin = v)">
         <el-form label-position="top">
           <el-form-item label="邀请码">
-            <el-input v-model="joinCode" placeholder="8 位邀请码，如 A8J2J992" style="text-transform: uppercase" @keyup.enter="join" />
+            <el-input v-model="joinCode" placeholder="8 位邀请码，或直接粘贴邀请链接" @keyup.enter="join" />
           </el-form-item>
           <el-button type="primary" :loading="loading" @click="join">加入小组</el-button>
         </el-form>

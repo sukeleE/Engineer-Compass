@@ -10,7 +10,7 @@
 **Engineer-Compass 工科竞赛导航系统**（目录 `D:\desktop\竞赛指导`，2026-08-23 启动）。B/S 网页端应用，帮工科生查全年 A 类竞赛 + AI 备赛规划。
 
 - 技术栈：**Vue3 + Vite6 + Element Plus + GSAP + ECharts + SCSS** / **Node.js 24 + Express 4 + node:sqlite（内置，无编译依赖）** / **DeepSeek API**
-- 部署：腾讯云 124.221.174.2 `/opt/compass`（PM2 + Nginx），用户手动部署，无 SSH 通道
+- 部署：腾讯云 CVM **124.221.174.2**（Ubuntu，主机名 VM-0-10-ubuntu）`/opt/compass`（PM2 + Nginx 1.18）；SSH **仅密钥**：用户 `ubuntu`（免密 sudo），本机 Windows `C:\Users\78505\.ssh\id_rsa` 公钥已入 authorized_keys（**WSL 直挂 /mnt/c 私钥 0777 会被 ssh 拒，须先 cp 到 ~/.ssh 再 chmod 600**；root/ubuntu 默认密码登录均关）；前端 `/var/www/compass`，站点配置 `/etc/nginx/sites-available/compass`（非 conf.d），30m 上传上限。**2026-10-26 起 HTTPS：域名 gkjsdh.xyz（A 记录→该 IP），证书 /etc/nginx/ssl/gkjsdh.xyz_{bundle.crt,key}（TrustAsia DV，到期 2026-11-23），443 default_server，80 域名 301、IP 直连保留 HTTP**
 
 **四大模块：**
 1. 横向时间轴（按月排布竞赛，彩色标签、筛选、详情弹窗 5 Tab）
@@ -556,3 +556,17 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **需求**：物料采购页允许删除比赛/项目档案与采购申请。财务口径（凭证不能随档案静默消失）：① `DELETE /purchase/events/:id` 仅**建档者或超管**（`canManageSettings`；非建档 leader 不可），其下仍有申请 → **409 且消息带申请条数**；空档案直删，审批人桥表随 FK CASCADE；库层 purchase_request→event **RESTRICT** 兜底保留。② `DELETE /purchase/requests/:id` 由「本人 pending/rejected 撤回」扩为**超管可强删任意状态**（含 approved/invoiced）；非本人非超管 403、本人已审批 400；两种口径都先 `purgeRequestFiles` 再删库（明细/文件/轨迹随 CASCADE）；审计 `purchase-request-delete` meta 加 `by:'self'|'admin'` 与 `status`，返回消息分别为「申请已撤回/申请已删除」；`detailOf` perm 加 `isSuperAdmin`——**前端管理员按钮只认 `perm.isSuperAdmin`，不能用 auth.user.is_admin**（分权后后者包含受限管理员，采购模块历史上只认超管）。
 - **前端**：PurchaseView「我管理的档案」ev-head 在设置/开关旁加红色「删除」link（v-if ev.canSettings），`removeEvent` 二次确认（提示审批人配置同删、不可恢复、有申请会被拦），失败直接弹后端 409 消息；副文案改为「没有采购申请的档案可以删除，已有申请需先删除全部申请」。RequestDetailDialog footer 保留本人「撤回申请」(`perm.canDelete`)，**超管在本人不可撤回的场景**（他人申请/自己已通过的申请）另显「删除申请」危险按钮（`isSuperAdmin && !canDelete`，避免与撤回重复），确认文案列明明细/截图/发票/审批记录全删且不可恢复；成功 emit changed + 关窗，经 refreshAfterChange 自动刷列表。api.js 加 `purchaseEventDelete`。
 - **测试**：smoke_purchase 102→**116/116**（§14.5 新增：路人删档案 403、非建档 leader 403、建档者删有申请档案 409 且消息含「2 条」、删空档案 200+重复 404、审批人配置级联清零、DB 直改 `is_admin=1,admin_perms=NULL` 提权（session 每请求重查用户行，旧 token 即时生效）后超管强删他人 invoiced 申请 200+整目录清盘+申请/明细/文件/轨迹四类行归零、超管删空档案 200；清理断言剩余冒烟档案 ≥2）。**临时栈跑法（WSL）**：sh 脚本 export PORT=3109/DB_PATH/PURCHASE_UPLOAD_DIR 到 mktemp 目录起 `node backend/server.js`，冒烟侧给 `PROBE_API=http://127.0.0.1:3109/api PROBE_DB=<同库> SMK_PURCHASE_DIR=<同上传目录>`（openProbeDb 同源闸门）；**必须先 unset 全部 *_proxy 并 NO_PROXY=127.0.0.1**，否则 WSL NAT 模式下 localhost 代理让 health 轮询永远失败。vite build 过（30.85s）。
+
+## 2026-10-26 🔗 项目小组邀请链接：点击直接加入（直接 main，未推送）
+
+- **需求**：「点击分享链接，可直接加入项目小组」——原来只能手抄 8 位邀请码再去「邀请码加入」粘贴。
+- **后端 routes/team.js**：新增 `GET /api/team/peek?code=`（登录即可，**注册在 GET /:id 之前**，仿 /users/search），返回 `{id,name,desc,member_count,owner_name,is_member}`，只暴露组名/人数不泄露成员名单（邀请码即钥匙，与报销同口径）；`POST /join` 的「已在组」409 响应补 `id/name`，供前端直接跳工作台。
+- **前端**：链接格式 **`/team?join=CODE`**（未登录时复用全局 beforeEach：带 redirect 去登录，回来自动继续，无需新路由/新守卫）。TeamView.vue 新增 `normCode()`（8 位裸码 / 整条 `?join=` 链接 / 兼容 `?code=` / 前后杂字符 → 大写码），onMounted 改 async：await load() 后若有 `route.query.join` → teamPeek → **ElMessageBox 确认弹「组长 X 邀请你加入『组名』，现有 N 名成员」** → join → 成功 load+选中+`replace({team:id})` 清掉 join 参数；已在组→info 直跳；坏码→error 清参；取消/失败保留当前组选择（cleanQuery）。邀请码弹窗输入框也支持粘贴整条链接。TeamMembers.vue 邀请区加「🔗 复制邀请链接 / 复制邀请码」（clipboard API + HTTP 下 textarea+execCommand 兜底，IP 直连场景）；TeamDetail.vue 头部邀请码 tag 改可点复制链接（.invite-tag hover）。
+- **测试**：smoke_checkin 42→**48/48**（§4.5 利用已注册但未入组的第三人 rC：peek 未入组人数 2、凭码 201、peek 转 true 人数 3、重复 409 带 id、坏码 peek/join 双 404；C 在 §4 看板断言之后才入组，不破坏 members===2 与后续提醒断言）。vite build 过（35.56s）。
+
+## 2026-10-26 🔒 生产 HTTPS 上线（gkjsdh.xyz SSL 证书部署，直接运维无代码改动）
+
+- **结果**：`https://gkjsdh.xyz` 全绿——证书链 TrustAsia DV（notAfter **2026-11-23**，约 28 天后续签）、首页 200、`/api/health` 200（ai/vision/mail/github=true，gitee=false 是无 token 常态）、`http://域名` 301→https、history 深链 `/team/123` 200（F5 不再 404，上一轮 health 警告解决）。
+- **操作流水（腾讯云文档 product/400/35244 = Nginx Linux 安装）**：SSL 控制台下 Nginx 包 → `gkjsdh.xyz_bundle.crt`+`.key` 经 scp 传 `/tmp` 再 sudo mv `/etc/nginx/ssl/`（crt 644 / key 600 root）；改 **sites-available/compass**（旧文件备份 `.bak.20261026`）为三块：80 域名 301、80 default_server `server_name _` 保留 IP 直连 HTTP（健康检查兼容）、443 ssl default_server 内含完整 SPA try_files + `/api` 反代（补 `X-Forwarded-For/X-Forwarded-Proto`）+ assets 长缓存 + 30m；`nginx -t` 后 `systemctl reload nginx`。
+- **两个坑**：① WSL 用 `/mnt/c/.../id_rsa` 直连报 `UNPROTECTED PRIVATE KEY FILE 0777`（drvfs 改不动权限），必须 `cp` 进 WSL home 再 `chmod 600`；② nginx 本机 443 200 但公网全超时——**腾讯云控制台防火墙没放行 443**（CVM 安全组/轻量防火墙加 TCP 443 0.0.0.0/0），放行后立即通；服务器 ufw 本身 inactive。
+- **服务端回调已改（同日）**：`/opt/compass/backend/.env`（root pm2 进程 compass，改后须 `sudo pm2 restart compass --update-env && sudo pm2 save`）：`GITHUB_REDIRECT_URI` http→**https**（原显式 http），新增 `FEISHU_REDIRECT_URI=https://gkjsdh.xyz/api/feishu/oauth/callback`（原本未配、走 req.protocol 动态生成，**Express 未开 trust proxy，反代后 protocol 恒 http**，故必须显式 env）；改前自动备份 .env.bak.时间戳，/oauth/login 实测 redirect_uri 已 https。**待用户在开放平台控制台同步**：GitHub OAuth App（client_id Ov23lipg4SnVvH1Uh6ru）回调 URL、飞书开发者后台应用 cli_aa051ae2f4f95cd5 安全设置重定向 URL（可多条并存，加 https 即可）。证书 2026-11-23 到期前重申替换两文件 reload。

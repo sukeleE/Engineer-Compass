@@ -118,6 +118,31 @@ async function loadInvite() {
   if (!inviteCode.value) inviteCode.value = (await api.teamInvite(props.teamId)).invite_code;
 }
 
+// 复制：优先剪贴板 API（HTTPS），HTTP/IP 直连走 textarea 兜底
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+async function copyInviteLink() {
+  await loadInvite();
+  await copyText(`${location.origin}/team?join=${inviteCode.value}`);
+  ElMessage.success('邀请链接已复制，发给同学，打开即可加入');
+}
+async function copyInviteCode() {
+  await loadInvite();
+  await copyText(inviteCode.value);
+  ElMessage.success('邀请码已复制');
+}
+
 function editRole(role) {
   roleForm.value = { id: role.id, name: role.name, level: role.level, permissions: rolePerms(role) };
   showRoleForm.value = true;
@@ -396,7 +421,11 @@ loadLeaderboard('month');
       <h4>🔑 邀请与设置</h4>
       <div class="invite-row">
         <span class="invite-code">{{ inviteCode || '加载中…' }}</span>
-        <span class="tm-tip">邀请码发给同学，在「项目小组 → 邀请码加入」粘贴即可</span>
+        <el-button size="small" type="primary" plain @click="copyInviteLink">🔗 复制邀请链接</el-button>
+        <el-button size="small" @click="copyInviteCode">复制邀请码</el-button>
+      </div>
+      <div class="invite-tip">
+        <span class="tm-tip">把邀请链接发给同学，未登录会先去登录，打开后确认即可一键加入；也可在「项目小组 → 邀请码加入」输码</span>
       </div>
       <div v-if="me.is_owner" class="owner-actions">
         <el-button size="small" type="danger" plain @click="dissolve">解散小组</el-button>
@@ -451,6 +480,7 @@ loadLeaderboard('month');
 .invite-row { display: flex; align-items: center; gap: 10px;
   .invite-code { font-family: monospace; font-size: 15px; letter-spacing: 2px; color: var(--primary-dark); background: var(--primary-tint); border: 1px dashed color-mix(in srgb, var(--primary) 30%, white); border-radius: 8px; padding: 5px 12px; }
 }
+.invite-tip { margin-top: 6px; }
 .owner-actions { margin-top: 12px; }
 .self-note { color: #94a3b8; font-size: 12.5px; margin: 0 0 12px; }
 .tm-head-btns { display: inline-flex; gap: 8px; }

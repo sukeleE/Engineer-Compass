@@ -37,6 +37,25 @@ const mqNarrow = window.matchMedia('(max-width: 768px)');
 const isNarrow = ref(mqNarrow.matches);
 mqNarrow.addEventListener('change', (e) => { isNarrow.value = e.matches; });
 function lab(full, short) { return isNarrow.value ? short : full; }
+
+// 头部邀请码标签：点击复制邀请链接（HTTPS 用剪贴板 API，HTTP/IP 直连 textarea 兜底）
+async function copyInviteLink() {
+  const code = detail.value?.team?.invite_code;
+  if (!code) return;
+  const link = `${location.origin}/team?join=${code}`;
+  try {
+    await navigator.clipboard.writeText(link);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  ElMessage.success('邀请链接已复制，发给同学，打开即可加入');
+}
 </script>
 
 <template>
@@ -52,7 +71,8 @@ function lab(full, short) { return isNarrow.value ? short : full; }
               <el-tag v-for="r in detail.me.roles || []" :key="r.id" size="small">{{ r.name }}</el-tag>
               <el-tag v-if="!(detail.me.roles || []).length" size="small">无角色</el-tag>
             </template>
-            <el-tag size="small" type="info" effect="plain">🔑 {{ detail.team.invite_code }}</el-tag>
+            <el-tag size="small" type="info" effect="plain" class="invite-tag" title="点击复制邀请链接"
+              @click="copyInviteLink">🔗 邀请链接 {{ detail.team.invite_code }}</el-tag>
             <el-tag size="small" type="success" effect="plain">{{ detail.members.length }} 人</el-tag>
           </div>
         </div>
@@ -88,5 +108,6 @@ function lab(full, short) { return isNarrow.value ? short : full; }
   h3 { margin: 0; font-size: 18px; }
   .td-desc { color: var(--text-2); font-size: 13px; margin: 4px 0 8px; }
   .td-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .invite-tag { cursor: pointer; &:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 25%, white); } }
 }
 </style>
