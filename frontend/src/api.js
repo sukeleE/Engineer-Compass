@@ -281,6 +281,8 @@ export const api = {
   // 小组资料：从「我的资源」引用（不复制文件，生成分享 token 后建引用行）
   teamFileRef: (teamId, rid) => req(`/team/${teamId}/file/ref`, { method: 'POST', body: JSON.stringify({ resource_id: rid }) }),
   teamFileFeishuRef: (teamId, card) => req(`/team/${teamId}/file/feishu-ref`, { method: 'POST', body: JSON.stringify(card) }),
+  teamFileFeishuImport: (teamId, card) => req(`/team/${teamId}/file/feishu-import`, { method: 'POST', body: JSON.stringify(card) }, 120000),
+  teamFileText: (fid) => req(`/team/file/${fid}/text`),
   // 计划导入：上传 .docx/.pdf/.xlsx/.md → AI 转成固定格式计划（不落库，前端确认后走 scheduleManual/studyManual）
   planImport: (file, mode) => {
     const fd = new FormData();

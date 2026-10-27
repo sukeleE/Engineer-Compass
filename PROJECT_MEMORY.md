@@ -620,3 +620,11 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **问题根因**：小组资料页虽然复用了带「飞书云盘」Tab 的 `ResourcePicker`，但确认后统一按站内「我的资源」处理；飞书项只有 `id=0` 和飞书 URL，前端却调用 `teamFileRef(teamId,0)`，而后端 `team_file` 也没有外链字段，导致无法引用/导入飞书文档或云盘文件。
 - **实现**：`team_file` 增加 `external_url`（schema + 启动迁移）；新增 `POST /api/team/:id/file/feishu-ref`，仅小组成员且有 `file_upload` 权限可保存白名单校验后的 HTTPS 飞书/Lark 链接，下载接口对该类记录 302 跳转。`ResourcePicker` 的飞书选择额外回传 `source/token/feishu_type`；`TeamFiles.vue` 对飞书 `docx` 读取 Markdown 后作为 `.md` 复制入组，普通云盘文件通过后端代理下载，≤20MB 复制到组内，超限、表格/幻灯片/Base/思维笔记等类型或复制失败时回退为飞书链接。
 - **验证**：修复了 `TeamFiles.vue` 补丁时误插入重复代码导致的模板字符串损坏；`node --check backend/routes/teamCollab.js backend/db/database.js`、`git diff --check`、临时 DB 集成测试（迁移、非法 URL 400、非成员 403、建链、列表、302）和 WSL Vite 生产构建均通过。
+
+## 2026-10-27 🖼️ 小组飞书文档导入升级：服务端归档与内嵌图片预览
+
+- **线上旧脚本问题**：部署后浏览器若不刷新，Vue SPA 会继续运行旧 JS；访问日志实锤旧页面仍 `POST /api/team/:id/file/ref`（resource_id=0），不会调用新飞书接口。新包本身已含新代码；用户需 Ctrl+F5 或重新打开页面。旧 `/file/ref` 对 `resource_id<=0` 改为返回“强制刷新后重试”的明确提示。
+- **一站式导入**：新增 `POST /api/team/:id/file/feishu-import`，前端只传 ResourcePicker 的 `{source,token,feishu_type,name,url}`，服务端使用绑定用户 token 复制：docx/wiki(docx) 拉取全部 blocks 并生成自包含 HTML；普通 Drive file 服务端下载后入库；表格、幻灯片、Base、思维笔记、超限或复制失败统一保存安全校验后的飞书链接。所有成功/兜底都写 `team_file`，并记录审计日志。
+- **图片方案**：飞书 docx 图片块 token 通过 `/open-apis/drive/v1/medias/:token/download` 下载；17 张图的真实文档测试均 200。转换时把 `blocksToMarkdown` 的图片占位替换为 `data:image/...;base64,...`，再经 `mdToHtml` 包成 HTML。图片总量限 18MB、最终 HTML 限 20MB，超限则回退飞书链接；文件附件占位仍提示到飞书查看。
+- **预览与安全**：新增成员鉴权的 `GET /api/team/file/:fid/text`，仅允许站内 text/html、text/markdown、text/plain；小组资料列表对 HTML/MD 显示“预览”，Element Plus 弹窗内用 `<iframe sandbox="allow-popups allow-forms allow-downloads">` + `srcdoc` 展示，不加 `allow-same-origin`，文档脚本不能访问本站账号/localStorage。生成 HTML 前再次限制链接协议，只允许内嵌 data:image。
+- **验证**：WSL Vite production build 通过；`node --check`、`git diff --check` 通过；临时 DB + mock OpenAPI 冒烟覆盖 docx HTML 内嵌图、普通文件复制、sheet 链接兜底、非成员 403、text 预览，结果 `TEAM_FEISHU_IMPORT_SMOKE_OK`。

@@ -19,6 +19,10 @@ const props = defineProps({ teamId: Number, me: Object, perms: Object, members: 
 const files = ref([]);
 const uploading = ref(false);
 const inputEl = ref(null);
+const docPreviewDlg = ref(false);
+const docPreviewLoading = ref(false);
+const docPreviewTitle = ref('');
+const docPreviewHtml = ref('');
 
 const MAX = 20 * 1024 * 1024;
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
@@ -44,65 +48,37 @@ const preview = (f) => openImage(dlUrl(f), f.file_name);
 // 从「我的资源」引用：不复制文件，生成分享链接后建引用行（撤销分享后组内即失效）
 const resPickDlg = ref(false);
 const refPicking = ref(false);
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+function canPreviewDoc(f) {
+  return !f.external_url && !f.resource_ref && /^text\/(html|markdown|plain)\b/.test(f.file_type || '');
 }
-function ensureExt(name, ext) {
-  const base = String(name || '未命名').trim();
-  return new RegExp(`\\.${ext}$`, 'i').test(base) ? base : `${base}.${ext}`;
+function escapePreviewText(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-async function uploadFeishuBlob(blob, name, mime) {
-  if (blob.size > MAX) throw new Error('文件超过小组资料 20MB 上限');
-  await api.teamFileUpload(props.teamId, {
-    file_name: name,
-    file_type: mime || blob.type || '',
-    data: await blobToBase64(blob),
-  });
-}
-async function addFeishuLink(r) {
-  await api.teamFileFeishuRef(props.teamId, {
-    file_name: r.name,
-    url: r.url,
-    file_type: r.mime || '',
-    file_size: r.size || 0,
-  });
-}
-async function importFeishuPick(r) {
-  if (r.feishu_type === 'docx' && r.token) {
-    const d = await api.feishuDocContent(r.token, 'markdown');
-    const blob = new Blob([d.content || ''], { type: 'text/markdown;charset=utf-8' });
-    await uploadFeishuBlob(blob, ensureExt(r.name, 'md'), blob.type);
-    return { mode: 'copy', label: '已导入为 Markdown 文档' };
-  }
-  if (r.feishu_type === 'file' && r.token) {
-    const d = await api.feishuFileDownloadBlob(r.token);
-    if (d.blob.size > MAX) {
-      await addFeishuLink(r);
-      return { mode: 'link-large', label: '原文件超过 20MB，已改为引用飞书链接' };
+async function openDocPreview(f) {
+  docPreviewLoading.value = true;
+  docPreviewTitle.value = f.file_name;
+  docPreviewHtml.value = '';
+  docPreviewDlg.value = true;
+  try {
+    const r = await api.teamFileText(f.id);
+    if ((r.file_type || '').startsWith('text/html')) {
+      docPreviewHtml.value = r.content;
+    } else {
+      docPreviewHtml.value = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px;line-height:1.7;white-space:pre-wrap;word-break:break-word}</style></head><body>${escapePreviewText(r.content)}</body></html>`;
     }
-    await uploadFeishuBlob(d.blob, r.name, d.blob.type);
-    return { mode: 'copy', label: '已复制到小组资料' };
+  } catch (e) {
+    docPreviewDlg.value = false;
+    ElMessage.error(e.message);
+  } finally {
+    docPreviewLoading.value = false;
   }
-  await addFeishuLink(r);
-  return { mode: 'link', label: '该类型暂不支持复制，已引用飞书链接' };
 }
 async function onResourcePick(r) {
   refPicking.value = true;
   try {
     if (r.source === 'feishu' || r.url?.includes('feishu.cn') || r.url?.includes('larksuite.com')) {
-      let result;
-      try {
-        result = await importFeishuPick(r);
-      } catch (copyErr) {
-        await addFeishuLink(r);
-        result = { mode: 'link-fallback', label: `无法复制原文件（${copyErr.message}），已改为引用飞书链接` };
-      }
-      ElMessage.success(`「${r.name}」${result.label}`);
+      const result = await api.teamFileFeishuImport(props.teamId, r);
+      ElMessage.success(`「${r.name}」${result.message}`);
     } else {
       await api.teamFileRef(props.teamId, r.id);
       ElMessage.success(`已引用「${r.name}」`);
@@ -111,7 +87,6 @@ async function onResourcePick(r) {
   } catch (e) { ElMessage.error(e.message); }
   finally { refPicking.value = false; }
 }
-
 async function load() {
   files.value = await api.teamFiles(props.teamId);
 }
@@ -161,7 +136,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     <div class="tf-tools">
       <div class="tf-info">
         <b>📁 小组资料（{{ files.length }}）</b>
-        <span class="tf-tip">支持本地文档/图片/压缩包（≤20MB），飞书文档/普通文件会复制到组内；表格等类型保存为飞书链接</span>
+        <span class="tf-tip">支持本地文档/图片/压缩包（≤20MB），飞书文档会归档为含图网页并可在组内直接预览；普通文件复制到组内，表格等类型保存为飞书链接</span>
       </div>
       <div>
         <input ref="inputEl" type="file" hidden @change="pickFile" />
@@ -191,11 +166,19 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
           <el-tag v-else-if="f.external_url" size="small" type="primary" effect="plain" style="margin-left:4px">🪶 飞书链接</el-tag>
         </span>
       </div>
+      <a v-if="canPreviewDoc(f)" class="f-dl" href="#" @click.prevent="openDocPreview(f)">👁 预览</a>
       <span v-if="f.resource_ref && !dlUrl(f)" class="f-dead">已失效</span>
       <a v-else class="f-dl" :href="dlUrl(f)" target="_blank" rel="noopener">{{ f.external_url ? "打开飞书 ↗" : "下载 ⬇" }}</a>
       <el-button v-if="f.user_id === me.user_id || perms.file_delete" size="small" text type="danger" @click="remove(f)">删除</el-button>
     </div>
-  </div>
+        <el-dialog v-model="docPreviewDlg" :title="docPreviewTitle" width="900px" top="5vh" append-to-body destroy-on-close
+      class="doc-preview-dlg" :close-on-click-modal="false">
+      <div v-loading="docPreviewLoading" class="doc-preview-body">
+        <iframe v-if="docPreviewHtml" class="doc-preview-frame" :srcdoc="docPreviewHtml"
+          sandbox="allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </el-dialog>
+</div>
 </template>
 
 <style lang="scss" scoped>
@@ -203,6 +186,8 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
   .tf-info { b { font-size: 14px; } .tf-tip { margin-left: 10px; color: #94a3b8; font-size: 12px; } }
 }
 .tf-noperm, .tf-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; }
+.doc-preview-body { min-height: 240px; }
+.doc-preview-frame { width: 100%; height: 72vh; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
 .file-row {
   display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 10px;
   padding: 9px 12px; margin-bottom: 8px; transition: all .2s;
@@ -222,5 +207,6 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
   }
   .f-dl { color: var(--primary); font-size: 13px; text-decoration: none; &:hover { text-decoration: underline; } }
   .f-dead { color: #f43f5e; font-size: 12.5px; }
+  .f-dl + .f-dl { margin-left: 10px; }
 }
 </style>

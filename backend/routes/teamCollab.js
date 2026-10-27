@@ -5,6 +5,9 @@ import { authRequired, teamCtx, requirePerm, hasPerm, logAudit, mutedGuard } fro
 import { normalizePlan } from './schedule.js';
 import { ensureShareToken, RESOURCE_DIR } from './resource.js';
 import { existsSync } from 'node:fs';
+import { configured as feishuConfigured, feishu as feishuApi, feishuError, tenantToken, userToken, wikiNode } from '../lib/feishuClient.js';
+import { blocksToMarkdown } from '../lib/feishuConvert.js';
+import { mdToHtml } from '../lib/mdHtml.js';
 import { join, basename } from 'node:path';
 
 const r = Router();
@@ -375,6 +378,7 @@ r.post('/:id/file/ref', (req, res) => {
   const deny = requirePerm(ctx, res, 'file_upload');
   if (deny) return deny;
   const rid = Number(req.body?.resource_id);
+  if (!Number.isInteger(rid) || rid <= 0) return res.status(400).json({ error: '飞书导入逻辑已更新，请按 Ctrl+F5 强制刷新页面后重试' });
   const src = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(rid);
   if (!src) return res.status(404).json({ error: '资源不存在' });
   if (src.user_id !== req.user.id) return res.status(403).json({ error: '只能引用自己「我的资源」里的文件' });
@@ -385,6 +389,137 @@ r.post('/:id/file/ref', (req, res) => {
 });
 
 
+const FEISHU_DOC_IMAGE_MAX = 18 * 1024 * 1024; // 文档内嵌图片总量上限：给 HTML/base64/DB 留余量，整体仍受 team_file 20MB 约束
+const FEISHU_TYPE_PATH = {
+  docx: 'docx', doc: 'docs', sheet: 'sheets', sheets: 'sheets', slides: 'slides',
+  file: 'file', wiki: 'wiki', wikis: 'wiki', base: 'base', bitable: 'base',
+  mindnote: 'mindnotes', mindnotes: 'mindnotes', folder: 'drive/folder',
+};
+
+async function pickFeishuToken(userId) {
+  try {
+    const u = await userToken(userId);
+    if (u) return u;
+  } catch { /* 用户 token 失效时尝试应用身份 */ }
+  return tenantToken();
+}
+
+function normalizeFeishuPickUrl(card) {
+  const raw = String(card?.url || '').trim();
+  const direct = safeFeishuUrl(raw);
+  if (direct) return direct;
+  const token = String(card?.token || '').trim();
+  const type = String(card?.feishu_type || card?.type || '').toLowerCase();
+  const seg = FEISHU_TYPE_PATH[type];
+  if (!token || !seg) return null;
+  const base = (process.env.FEISHU_URL_BASE || 'https://feishu.cn').replace(/\/+$/, '');
+  return safeFeishuUrl(`${base}/${seg}/${encodeURIComponent(token)}`);
+}
+
+async function feishuRawDownload(urlPath, token, label) {
+  const up = await feishuApi(urlPath, { token, raw: true });
+  const ct = String(up.headers.get('content-type') || '');
+  if (ct.includes('application/json')) {
+    const j = await up.json().catch(() => ({}));
+    throw new Error(j.msg || j.error || `${label}失败（code=${j.code ?? ''}）`);
+  }
+  if (!up.ok) throw new Error(`${label}失败（HTTP ${up.status}）`);
+  const buf = Buffer.from(await up.arrayBuffer());
+  return { buf, contentType: ct.split(';')[0].trim() || 'application/octet-stream' };
+}
+
+async function fetchDocxBlocks(docId, token) {
+  const items = [];
+  let pageToken = '';
+  do {
+    const q = `/open-apis/docx/v1/documents/${encodeURIComponent(docId)}/blocks?page_size=500${pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ''}`;
+    const { ok, data } = await feishuApi(q, { token });
+    if (!ok) throw feishuError(data, '文档 Block 读取失败');
+    items.push(...(data.data?.items || []));
+    pageToken = data.data?.has_more ? data.data?.page_token || '' : '';
+  } while (pageToken);
+  return items;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function safeGeneratedDocHtml(body) {
+  // Markdown 正文已由 mdToHtml 转义；这里再约束链接和图片协议，文档在前端沙箱 iframe 中展示。
+  return body
+    .replace(/<a\s+([^>]*?)href="([^"]*)"([^>]*)>/gi, (m, pre, url, post) => {
+      const safe = /^(https?:|mailto:|#|\/)/i.test(url);
+      return `<a ${pre}href="${safe ? url : '#'}"${post}>`;
+    })
+    .replace(/<img\s+([^>]*?)src="([^"]*)"([^>]*)>/gi, (m, pre, url, post) => {
+      if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(url)) return m;
+      return '<span class="missing-image">外部图片未内嵌</span>';
+    });
+}
+
+async function buildFeishuDocArchive(docId, fallbackName, token) {
+  const [items, meta] = await Promise.all([
+    fetchDocxBlocks(docId, token),
+    feishuApi(`/open-apis/docx/v1/documents/${encodeURIComponent(docId)}`, { token }).catch(() => ({ ok: false })),
+  ]);
+  const title = meta.ok ? (meta.data?.data?.document?.title || fallbackName || '飞书文档') : (fallbackName || '飞书文档');
+
+  const imageTokens = [...new Set(items
+    .filter((b) => b.image && (b.image.token || b.image.file_token))
+    .map((b) => b.image.token || b.image.file_token))];
+  const imageData = new Map();
+  let imageBytes = 0;
+  for (const mediaToken of imageTokens) {
+    const d = await feishuRawDownload(`/open-apis/drive/v1/medias/${encodeURIComponent(mediaToken)}/download`, token, '飞书图片下载');
+    if (!d.contentType.startsWith('image/')) throw new Error('飞书图片返回了非图片内容');
+    imageBytes += d.buf.length;
+    if (imageBytes > FEISHU_DOC_IMAGE_MAX) throw new Error('文档图片总量超过 18MB，已改为保存飞书链接');
+    imageData.set(mediaToken, `data:${d.contentType};base64,${d.buf.toString('base64')}`);
+  }
+
+  let md = blocksToMarkdown(items);
+  let embedded = 0;
+  md = md.replace(/^>\s*📎\s*\[(.*?)\]\s*file_token:\s*(\S+)\s*$/gm, (m, label, mediaToken) => {
+    const data = imageData.get(mediaToken);
+    if (!data) return m;
+    embedded += 1;
+    const alt = (label || '飞书图片').replace(/[\r\n\[\]]/g, '').trim() || '飞书图片';
+    return `![${alt}](${data})`;
+  });
+
+  const body = safeGeneratedDocHtml(mdToHtml(md));
+  const safeTitle = escapeHtml(title || '飞书文档');
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safeTitle}</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.75;color:#1f2937;max-width:900px;margin:0 auto;padding:32px 28px;background:#fff}
+h1,h2,h3,h4{line-height:1.35;color:#111827;margin:1.2em 0 .55em}p{margin:.55em 0}img{max-width:100%;height:auto;border-radius:8px;margin:8px 0}
+table{border-collapse:collapse;width:100%;display:block;overflow-x:auto;margin:12px 0}th,td{border:1px solid #d1d5db;padding:7px 10px}th{background:#f3f4f6}
+pre{background:#0f172a;color:#e2e8f0;padding:14px;border-radius:10px;overflow:auto}code{font-family:Consolas,monospace}
+blockquote{margin:8px 0;padding:8px 14px;border-left:4px solid #93c5fd;background:#eff6ff;color:#1e3a8a}.archive-note{font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:22px}
+</style></head><body><div class="archive-note">由飞书文档导入 · 图片已内嵌，组内预览不依赖飞书权限</div>${body}</body></html>`;
+  return {
+    file_name: title || fallbackName || '飞书文档',
+    file_type: 'text/html;charset=utf-8',
+    data: Buffer.from(html, 'utf8').toString('base64'),
+    file_size: Buffer.byteLength(html, 'utf8'),
+    images: embedded,
+  };
+}
+
+function insertFeishuLinkRow(ctx, req, card, url, extra = {}) {
+  const name = String(extra.file_name || card.file_name || card.name || '飞书资源').trim().slice(0, 150) || '飞书资源';
+  const fileType = String(extra.file_type || card.file_type || card.mime || '').trim().slice(0, 100);
+  const size = Math.max(0, Math.min(Number(extra.file_size || card.file_size || card.size) || 0, 1024 * 1024 * 1024));
+  const rr = db.prepare(
+    'INSERT INTO team_file (team_id, user_id, file_name, file_size, file_type, resource_ref, external_url, data) VALUES (?,?,?,?,?,NULL,?,NULL)'
+  ).run(ctx.team.id, req.user.id, name, size, fileType, url);
+  logAudit(req, 'team-file-feishu-ref', ctx.team.name, { team_file_id: rr.lastInsertRowid, name, url, reason: extra.reason || '' });
+  return { id: rr.lastInsertRowid, file_name: name, file_size: size, external_url: url };
+}
 function safeFeishuUrl(u) {
   try {
     const url = new URL(String(u || '').trim());
@@ -414,6 +549,81 @@ r.post('/:id/file/feishu-ref', (req, res) => {
   res.status(201).json({ id: rr.lastInsertRowid, file_name: name, external_url: url, message: '已引用飞书资源' });
 });
 
+// POST /api/team/:id/file/feishu-import — 小组资料一站式导入飞书资源（前端只发选择卡，复制与兜底都在服务端完成）
+r.post('/:id/file/feishu-import', async (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  const deny = requirePerm(ctx, res, 'file_upload');
+  if (deny) return deny;
+
+  const card = req.body || {};
+  const type = String(card.feishu_type || card.type || '').toLowerCase();
+  const token = String(card.token || '').trim();
+  const fallbackUrl = normalizeFeishuPickUrl(card);
+  const linkResponse = (reason) => {
+    if (!fallbackUrl) return res.status(400).json({ error: '无法复制飞书资源，且飞书链接不受支持' });
+    const row = insertFeishuLinkRow(ctx, req, card, fallbackUrl, { reason });
+    return res.status(201).json({ ...row, mode: 'link', message: reason || '已引用飞书链接' });
+  };
+
+  let tok = '';
+  try {
+    if (!feishuConfigured() || !token) return linkResponse('该类型暂不支持复制，已引用飞书链接');
+    tok = await pickFeishuToken(req.user.id);
+    if (!tok) return linkResponse('飞书授权不可用，已引用飞书链接');
+
+    if (type === 'docx' || type === 'wiki' || type === 'wikis') {
+      let docId = token;
+      if (type === 'wiki' || type === 'wikis') {
+        const node = await wikiNode(token, tok);
+        if (node?.obj_type !== 'docx') return linkResponse('该知识库节点不是新版文档，已引用飞书链接');
+        docId = node.obj_token;
+      }
+      const archive = await buildFeishuDocArchive(docId, card.name || card.file_name, tok);
+      if (archive.file_size > MAX_FILE) return linkResponse('文档网页归档超过 20MB，已引用飞书链接');
+      const rr = db.prepare(
+        'INSERT INTO team_file (team_id, user_id, file_name, file_size, file_type, resource_ref, external_url, data) VALUES (?,?,?,?,?,NULL,?,?)'
+      ).run(ctx.team.id, req.user.id, ensureFileExt(archive.file_name, 'html'), archive.file_size, archive.file_type, '', archive.data);
+      logAudit(req, 'team-file-feishu-import', ctx.team.name, { mode: 'doc_html', team_file_id: rr.lastInsertRowid, images: archive.images });
+      return res.status(201).json({
+        id: rr.lastInsertRowid, mode: 'doc_html', file_name: ensureFileExt(archive.file_name, 'html'),
+        file_size: archive.file_size, images: archive.images,
+        message: `已导入为可直接预览的网页文档（内嵌 ${archive.images} 张图片）`,
+      });
+    }
+
+    if (type === 'file') {
+      const d = await feishuRawDownload(`/open-apis/drive/v1/files/${encodeURIComponent(token)}/download`, tok, '飞书文件下载');
+      if (d.buf.length > MAX_FILE) return linkResponse('原文件超过 20MB，已引用飞书链接');
+      const name = String(card.name || card.file_name || '飞书文件').trim() || '飞书文件';
+      const rr = db.prepare(
+        'INSERT INTO team_file (team_id, user_id, file_name, file_size, file_type, resource_ref, external_url, data) VALUES (?,?,?,?,?,NULL,?,?)'
+      ).run(ctx.team.id, req.user.id, name, d.buf.length, d.contentType, '', d.buf.toString('base64'));
+      logAudit(req, 'team-file-feishu-import', ctx.team.name, { mode: 'file_copy', team_file_id: rr.lastInsertRowid, size: d.buf.length });
+      return res.status(201).json({ id: rr.lastInsertRowid, mode: 'file_copy', file_name: name, file_size: d.buf.length, message: '已复制到小组资料' });
+    }
+
+    return linkResponse('该飞书类型暂不支持复制，已引用飞书链接');
+  } catch (e) {
+    console.error(`[team] feishu import failed user=${req.user.id} type=${type}: ${e.message}`);
+    return linkResponse(`无法复制原文件（${e.message}），已引用飞书链接`);
+  }
+});
+
+function ensureFileExt(name, ext) {
+  const base = String(name || '未命名').trim();
+  return new RegExp(`\\.${ext}$`, 'i').test(base) ? base : `${base}.${ext}`;
+}
+
+// GET /api/team/file/:fid/text — 小组网页/Markdown 资料预览（成员权限；仅读站内文本型资料）
+r.get('/file/:fid/text', (req, res) => {
+  const f = db.prepare('SELECT * FROM team_file WHERE id = ?').get(Number(req.params.fid));
+  if (!f) return res.status(404).json({ error: '文件不存在' });
+  const ctx = teamCtx(f.team_id, req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  if (f.external_url || f.resource_ref) return res.status(400).json({ error: '该资料不是站内文本归档' });
+  if (!/^text\/(html|markdown|plain)\b/.test(f.file_type || '')) return res.status(415).json({ error: '该文件类型不支持在线预览' });
+  res.json({ id: f.id, file_name: f.file_name, file_type: f.file_type, content: Buffer.from(f.data || '', 'base64').toString('utf8') });
+});
 // GET /api/team/file/:fid/download — 下载（返回原始字节流；引用型走资源磁盘文件）
 r.get('/file/:fid/download', (req, res) => {
   const f = db.prepare('SELECT * FROM team_file WHERE id = ?').get(Number(req.params.fid));
