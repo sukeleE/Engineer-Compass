@@ -200,6 +200,13 @@ export function ruleParseMixedSheets(rawSheets, forcedKind = '') {
     } else {
       // 无标准表头的弱兜底：AI 不可用时尽量给预览，不静默丢行
       for (const row of sheet.rows) {
+        const isFirstRow = row.r === sheet.rows[0].r;
+        const headerLike = /名称|类型|类别|分类|数量|库存|容量|位置|地点|房间|地址|审批|规格|型号|设备或房间|在哪里|多少/.test(row.cells.join(' '));
+        if (isFirstRow && headerLike) {
+          skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason: '表头/字段说明行' });
+          continue;
+        }
+
         const candidates = row.cells.filter((x) => x && x.length >= 2 && !/^(名称|类型|备注|说明)$/.test(x) && !/合计|总计/.test(x));
         const name = candidates.find((x) => !/^\d+(\.\d+)?(人|台|件|把|套|个)?$/.test(x)) || '';
         if (isSkipRow(name)) { skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason: '标题/合计/非资源行' }); continue; }
@@ -217,7 +224,108 @@ export function ruleParseMixedSheets(rawSheets, forcedKind = '') {
 
   if (!items.length) warnings.push('规则解析未识别到有效资源行');
   if (truncated) warnings.push(`最多导入 ${BOOKING_IMPORT_MAX} 条，已截断后续 ${truncated} 行`);
-  return { items, skipped, warnings: [`已使用规则解析 ${sheets.length} 个工作表`, ...warnings], source: 'rules' };
+  return { items, skipped, truncated: truncated > 0, warnings: [`已使用规则解析 ${sheets.length} 个工作表`, ...warnings], source: 'rules' };
+}
+
+
+function detectStandardBookingSheets(rawSheets) {
+  const sheets = compactSheets(rawSheets);
+  const profiles = new Array(sheets.length).fill(null);
+  let nonEmpty = 0;
+
+  for (let si = 0; si < sheets.length; si++) {
+    const sheet = sheets[si];
+    if (!sheet.rows.length) continue;
+    nonEmpty++;
+
+    const first = sheet.rows[0];
+    const h = detectHeader(first);
+    if (!h || h.row !== first.r) return null;
+    const has = (key) => h.cols[key] !== undefined;
+
+    let kind = '';
+    if (has('kind')) {
+      // 标准混合表：每一行的类型都必须能明确归一化；模糊类型交给 AI 理解。
+      for (const row of sheet.rows.slice(1)) {
+        const name = cellText(row.cells[h.cols.name]);
+        if (!name || isSkipRow(name)) continue;
+        if (!normalizeKind(row.cells[h.cols.kind], '')) return null;
+      }
+      kind = 'mixed';
+    } else {
+      const sheetKind = kindBySheetName(sheet.name);
+      const hasQuantity = has('quantity');
+      const hasCapacity = has('capacity');
+      if (hasQuantity && hasCapacity) {
+        if (!sheetKind) return null; // 同表同时有库存和容量但无类型列，属于歧义/非标表
+        kind = sheetKind;
+      } else if (hasQuantity) {
+        kind = 'item';
+      } else if (hasCapacity) {
+        kind = 'space';
+      } else if (sheetKind) {
+        kind = sheetKind;
+      } else {
+        return null;
+      }
+      if (kind === 'item' && !hasQuantity) return null;
+      if (kind === 'space' && !hasCapacity) return null;
+    }
+
+    const hasNamedData = sheet.rows.slice(1).some((row) => {
+      const name = cellText(row.cells[h.cols.name]);
+      return name && !isSkipRow(name);
+    });
+    if (!hasNamedData) return null;
+    profiles[si] = { kind };
+  }
+
+  if (!nonEmpty) return null;
+  const used = profiles.filter(Boolean).map((x) => x.kind);
+  const hasMixed = used.includes('mixed');
+  const hasItem = used.includes('item');
+  const hasSpace = used.includes('space');
+  const strategy = hasMixed || (hasItem && hasSpace)
+    ? 'standard_mixed'
+    : hasItem ? 'standard_item' : 'standard_space';
+  return { profiles, strategy };
+}
+
+export async function autoParseMixedBooking(buf, ext) {
+  const rawSheets = readBookingSheets(buf, ext);
+  const standard = detectStandardBookingSheets(rawSheets);
+
+  if (standard) {
+    const parsed = ruleParseMixedSheets(rawSheets, '');
+    const label = {
+      standard_item: '标准物品资源',
+      standard_space: '标准空间资源',
+      standard_mixed: '标准混合资源',
+    }[standard.strategy];
+    const items = parsed.items.map((it) => {
+      const profile = standard.profiles[it._sheet_index];
+      return {
+        ...it,
+        kind: profile && profile.kind !== 'mixed' ? profile.kind : it.kind,
+        confidence: 'high',
+        warnings: [],
+      };
+    });
+    return {
+      ...parsed,
+      items,
+      source: standard.strategy,
+      strategy: standard.strategy,
+      ai_used: false,
+      warnings: [
+        `已识别为${label}表格，未调用 AI`,
+        ...parsed.warnings.filter((x) => !x.startsWith('已使用规则解析')),
+      ],
+    };
+  }
+
+  const parsed = await aiParseMixedBooking(buf, ext);
+  return { ...parsed, ai_used: parsed.source === 'ai' };
 }
 
 // ---------------- AI 解析 ----------------
@@ -326,10 +434,10 @@ export async function aiParseMixedBooking(buf, ext) {
       ...aiWarnings,
     ];
     if (truncatedRows) warnings.push(`单次最多处理 ${BOOKING_IMPORT_MAX} 行，已截断后续 ${truncatedRows} 行`);
-    return { items: ai.items.slice(0, BOOKING_IMPORT_MAX), skipped: ai.skipped || [], warnings, source: 'ai' };
+    return { items: ai.items.slice(0, BOOKING_IMPORT_MAX), skipped: ai.skipped || [], truncated: truncatedRows > 0, warnings, source: 'ai', ai_used: true };
   }
 
   const fallback = ruleParseMixedSheets(rawSheets, '');
   if (ai && !ai.items?.length) aiWarnings.push('AI 未识别到有效资源行，已切换规则解析');
-  return { ...fallback, warnings: [...aiWarnings, ...fallback.warnings], source: 'rules_fallback', sheetCount };
+  return { ...fallback, warnings: [...aiWarnings, ...fallback.warnings], source: 'rules_fallback', ai_used: false, sheetCount };
 }

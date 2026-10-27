@@ -608,3 +608,9 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **安全与校验**：AI 解析不落库，新增 `POST /api/booking/projects/:id/resources/ai-parse-import` 只返回预览；路由层用既有 `normResourceBody` 逐行标注 issues/valid、表格内重名和项目内同名，最终仍走原 `/resources/bulk` 事务。`bookingImport.js` 增加 `kind=mixed` 模板；无数据库迁移。
 - **前端**：`ResourceImportDialog.vue` 改为「AI 混合识别 / 仅物品 / 仅空间」三模式；混合模式统一展示类型、名称、规格、库存、单位、位置、容量、室内设备、审批方式、来源 Sheet#行，支持行内切换 item/space、低置信度/异常高亮、手工修正和混合批量提交；`ResourcePanel.vue` 传入 existingNames 做前端重名预校验；`api.js` 增加 120s AI 解析接口。
 - **验证**：WSL Node `--check` 三个后端文件通过；Vite build 通过；临时 DB 起后端实测 DeepSeek 解析同一 Sheet 的物品+空间返回 200、stats `{total:2,item:1,space:1,invalid:0,skipped:1}`，审批方式补回「需审批/先到先得」，随后 mixed bulk 成功创建 2 条资源；AI 无 Key 时自动规则回退测试通过；mixed 模板下载 200。
+## 2026-10-27 📥 资源导入入口统一：标准直导，非标 AI 预览
+
+- **产品口径**：资源页不再单独暴露「批量导入」和「AI 混合识别」标签页。`ResourcePanel.vue` 将导入收进「＋ 添加资源」split-button；`ResourceImportDialog.vue` 改为上传/拖拽统一入口，默认勾选“标准表格识别无误后自动导入”。标准表格不展示 AI 模式、不调用 AI；非标准字段、多 Sheet、上下分段或类型模糊时才调用 AI，并强制进入人工核对预览。
+- **后端编排**：`bookingAiImport.js` 新增 `autoParseMixedBooking()` 与标准表格探测器：首个非空行必须命中标准表头；无类型列时按库存/容量列或 Sheet 名判定 item/space；混合表每行类型必须可明确归一化。标准结果标记 `standard_item/standard_space/standard_mixed`、`ai_used:false`、置信度 high；非标才走原 `aiParseMixedBooking()`，AI 异常/无 Key 时规则兜底并标记低置信度。弱兜底会跳过首行表头/字段说明，避免把表头导成资源。
+- **接口**：新增 `POST /api/booking/projects/:id/resources/auto-parse`，只解析/校验不落库，返回 `strategy/source/ai_used/can_auto_import/items/skipped/warnings/stats`；标准且无异常时前端立即调用既有 `/resources/bulk` 事务导入，标准但有错误/重名/缺字段或任何 AI/兜底结果都进入可编辑预览。旧 `parse-import`、`ai-parse-import` 保留兼容；路由层抽出 `enrichBookingImportItems()` 统一 norm/重名/issues/stats。
+- **验证**：WSL `/usr/bin/node` 运行自动解析单测和临时后端 :31325 冒烟通过：标准物品、标准空间、多 Sheet 物品+空间、混合模板均不调用 AI；有效标准混合 `can_auto_import=true` 并可 bulk 2 条；缺容量的标准混合 `can_auto_import=false, invalid=1`；非标无 Key 走 `rules_fallback`，表头进入 skipped。WSL Vite production build 通过；后端 `node --check bookingAiImport.js booking.js` 和 `git diff --check` 通过。

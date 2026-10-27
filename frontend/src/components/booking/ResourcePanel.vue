@@ -1,8 +1,15 @@
 <template>
   <div class="rp-wrap">
     <div v-if="project.canManage" class="rp-bar">
-      <el-button type="primary" size="small" @click="formOpen = true">＋ 添加资源</el-button>
-      <el-button size="small" @click="importOpen = true">📋 批量导入</el-button>
+      <el-dropdown split-button type="primary" size="small" @click="formOpen = true" @command="handleAddCommand">
+        ＋ 添加资源
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="manual">✍️ 手动添加</el-dropdown-item>
+            <el-dropdown-item command="import">📥 导入表格（AI 自动识别）</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-radio-group v-model="showStatus" size="small" style="margin-left: auto">
         <el-radio-button value="active">在用</el-radio-button>
         <el-radio-button value="all">全部（含归档）</el-radio-button>
@@ -75,6 +82,10 @@ const importOpen = ref(false);
 const editing = ref(null);
 const detailRes = ref(null);
 function openDetail(r) { detailRes.value = r; }
+function handleAddCommand(cmd) {
+  if (cmd === 'import') importOpen.value = true;
+  else formOpen.value = true;
+}
 
 const groups = computed(() => KINDS.map((k) => ({
   ...k,

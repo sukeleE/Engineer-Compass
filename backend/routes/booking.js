@@ -14,7 +14,7 @@ import {
   BookingImportError, recognizeBookingXlsx, recognizeBookingCsv, buildBookingTemplate,
   BOOKING_IMPORT_LIMIT_BYTES,
 } from '../lib/bookingImport.js';
-import { aiParseMixedBooking } from '../lib/bookingAiImport.js';
+import { aiParseMixedBooking, autoParseMixedBooking } from '../lib/bookingAiImport.js';
 
 const r = Router();
 r.use(authRequired);
@@ -66,6 +66,15 @@ const importMem = multer({
   limits: { fileSize: BOOKING_IMPORT_LIMIT_BYTES, files: 1 },
   defParamCharset: 'utf8',
 }).single('file');
+
+function handleBookingImportUploadError(err, req, res, next) {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
+    return res.status(400).json({ error: `上传失败：${err.message}` });
+  }
+  if (err instanceof BookingImportError) return res.status(400).json({ error: err.message });
+  next(err);
+}
 
 const p2 = (n) => String(n).padStart(2, '0');
 const nowSlot = () => {
@@ -605,6 +614,61 @@ r.post('/projects/:id/resources', ah((req, res) => {
   res.status(201).json({ resource: resourceOut(getResource(info.lastInsertRowid)), message: '资源已添加' });
 }));
 
+// 资源表格解析结果统一做重名/字段校验；解析阶段不落库，确认后仍走 bulk 事务。
+function enrichBookingImportItems(out, project) {
+  const existing = new Map(
+    db.prepare('SELECT id, name FROM booking_resource WHERE project_id = ?').all(project.id).map((x) => [x.name, x.id])
+  );
+  const seen = new Set();
+  const items = (Array.isArray(out.items) ? out.items : []).slice(0, 200).map((it) => {
+    const issues = Array.isArray(it.issues) ? [...it.issues] : [];
+    const name = String(it.name || '').trim();
+    if (name) {
+      if (seen.has(name)) issues.push('表格内存在同名资源（同项目资源名不可重复）');
+      seen.add(name);
+      if (existing.has(name)) issues.push('项目内已存在同名资源');
+    }
+    try {
+      normResourceBody(it.kind, it, project.default_approve_mode);
+    } catch (e) {
+      issues.push(e.message);
+    }
+    return {
+      kind: it.kind,
+      name,
+      spec: String(it.spec || ''),
+      quantity: it.quantity ?? '',
+      unit: String(it.unit || ''),
+      location: String(it.location || ''),
+      capacity: it.capacity ?? '',
+      equipment: Array.isArray(it.equipment) ? it.equipment : [],
+      approve_mode: it.approve_mode || '',
+      confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',
+      warnings: Array.isArray(it.warnings) ? it.warnings : [],
+      reason: String(it.reason || ''),
+      issues: [...new Set(issues)],
+      _sheet: it._sheet || '',
+      _sheet_index: Number.isInteger(Number(it._sheet_index)) ? Number(it._sheet_index) : 0,
+      _row: Number(it._row || 0),
+    };
+  }).map((it) => ({ ...it, valid: it.issues.length === 0 }));
+  const skipped = Array.isArray(out.skipped) ? out.skipped : [];
+  return {
+    items,
+    skipped,
+    warnings: Array.isArray(out.warnings) ? out.warnings : [],
+    stats: {
+      total: items.length,
+      item: items.filter((x) => x.kind === 'item').length,
+      space: items.filter((x) => x.kind === 'space').length,
+      invalid: items.filter((x) => !x.valid).length,
+      low_confidence: items.filter((x) => x.confidence === 'low').length,
+      skipped: skipped.length,
+      truncated: Boolean(out.truncated),
+    },
+  };
+}
+
 // 类型表单批量导入：任一坏行整体回滚，错误带行号
 r.post('/projects/:id/resources/bulk', ah((req, res) => {
   const p = getProject(req.params.id);
@@ -679,7 +743,7 @@ r.post('/projects/:id/resources/parse-import', importMem, ah((req, res) => {
   next(err);
 });
 
-// AI 混合表格解析（multipart；只解析不落库）。物品/空间可在同一表或多 Sheet，预览后仍走 bulk 事务入库。
+// AI 混合表格解析（兼容旧入口；新前端使用 auto-parse）
 r.post('/projects/:id/resources/ai-parse-import', importMem, ah(async (req, res) => {
   const p = getProject(req.params.id);
   if (!p) throw new HttpError(404, '项目不存在');
@@ -701,64 +765,37 @@ r.post('/projects/:id/resources/ai-parse-import', importMem, ah(async (req, res)
     out.source = `rule_${mode}`;
   }
 
-  const existing = new Map(
-    db.prepare('SELECT id, name FROM booking_resource WHERE project_id = ?').all(p.id).map((x) => [x.name, x.id])
-  );
-  const seen = new Set();
-  const items = out.items.slice(0, 200).map((it) => {
-    const issues = Array.isArray(it.issues) ? it.issues : [];
-    const name = String(it.name || '').trim();
-    if (name) {
-      if (seen.has(name)) issues.push('表格内存在同名资源（同项目资源名不可重复）');
-      seen.add(name);
-      if (existing.has(name)) issues.push('项目内已存在同名资源');
-    }
-    try {
-      normResourceBody(it.kind, it, p.default_approve_mode);
-    } catch (e) {
-      issues.push(e.message);
-    }
-    return {
-      kind: it.kind,
-      name,
-      spec: String(it.spec || ''),
-      quantity: it.quantity ?? '',
-      unit: String(it.unit || ''),
-      location: String(it.location || ''),
-      capacity: it.capacity ?? '',
-      equipment: Array.isArray(it.equipment) ? it.equipment : [],
-      approve_mode: it.approve_mode || '',
-      confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',
-      warnings: Array.isArray(it.warnings) ? it.warnings : [],
-      issues: [...new Set(issues)],
-      _sheet: it._sheet || '',
-      _sheet_index: Number.isInteger(Number(it._sheet_index)) ? Number(it._sheet_index) : 0,
-      _row: Number(it._row || 0),
-    };
-  }).map((it) => ({ ...it, valid: it.issues.length === 0 }));
+  res.json({ source: out.source || 'ai', ...enrichBookingImportItems(out, p) });
+}), handleBookingImportUploadError);
+
+// 统一资源表格导入：标准表格不走 AI；非标准表格才调用 AI。本接口只解析/校验，不直接落库。
+r.post('/projects/:id/resources/auto-parse', importMem, ah(async (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
+  const file = req.file;
+  if (!file) throw new HttpError(400, '未收到文件（字段名 file，multipart/form-data）');
+  const ext = extname(basename(file.originalname || '')).slice(1).toLowerCase();
+  if (!['xlsx', 'xls', 'csv'].includes(ext)) throw new HttpError(400, '仅支持 .xlsx/.xls/.csv 表格文件');
+
+  const out = await autoParseMixedBooking(file.buffer, ext);
+  const enriched = enrichBookingImportItems(out, p);
+  const source = out.source || 'rules_fallback';
+  const standard = source.startsWith('standard_');
+  const can_auto_import = standard
+    && !out.truncated
+    && enriched.items.length > 0
+    && enriched.skipped.length === 0
+    && enriched.items.every((x) => x.valid && x.confidence === 'high');
 
   res.json({
-    source: out.source || 'ai',
-    items,
-    skipped: Array.isArray(out.skipped) ? out.skipped : [],
-    warnings: Array.isArray(out.warnings) ? out.warnings : [],
-    stats: {
-      total: items.length,
-      item: items.filter((x) => x.kind === 'item').length,
-      space: items.filter((x) => x.kind === 'space').length,
-      invalid: items.filter((x) => !x.valid).length,
-      low_confidence: items.filter((x) => x.confidence === 'low').length,
-      skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
-    },
+    strategy: source,
+    source,
+    ai_used: Boolean(out.ai_used),
+    can_auto_import: can_auto_import,
+    ...enriched,
   });
-}), (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
-    return res.status(400).json({ error: `上传失败：${err.message}` });
-  }
-  if (err instanceof BookingImportError) return res.status(400).json({ error: err.message });
-  next(err);
-});
+}), handleBookingImportUploadError);
 
 r.put('/resources/:rid', ah((req, res) => {
   const rs = getResource(req.params.rid);

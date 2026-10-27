@@ -495,6 +495,14 @@ export const api = {
     return req(`/booking/projects/${id}/resources/parse-import`,
       { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 60000);
   },
+  // 统一表格导入：标准格式不走 AI，非标准格式才自动调用 AI，只解析不落库
+  bookingResourceAutoParseImport: (id, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const token = localStorage.getItem('ec_token');
+    return req(`/booking/projects/${id}/resources/auto-parse`,
+      { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 120000);
+  },
   // AI 混合表格导入：支持同一工作簿/同一 Sheet 中混合物品和空间，只解析不落库
   bookingResourceAiParseImport: (id, mode, file) => {
     const fd = new FormData();
