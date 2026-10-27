@@ -614,3 +614,9 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **后端编排**：`bookingAiImport.js` 新增 `autoParseMixedBooking()` 与标准表格探测器：首个非空行必须命中标准表头；无类型列时按库存/容量列或 Sheet 名判定 item/space；混合表每行类型必须可明确归一化。标准结果标记 `standard_item/standard_space/standard_mixed`、`ai_used:false`、置信度 high；非标才走原 `aiParseMixedBooking()`，AI 异常/无 Key 时规则兜底并标记低置信度。弱兜底会跳过首行表头/字段说明，避免把表头导成资源。
 - **接口**：新增 `POST /api/booking/projects/:id/resources/auto-parse`，只解析/校验不落库，返回 `strategy/source/ai_used/can_auto_import/items/skipped/warnings/stats`；标准且无异常时前端立即调用既有 `/resources/bulk` 事务导入，标准但有错误/重名/缺字段或任何 AI/兜底结果都进入可编辑预览。旧 `parse-import`、`ai-parse-import` 保留兼容；路由层抽出 `enrichBookingImportItems()` 统一 norm/重名/issues/stats。
 - **验证**：WSL `/usr/bin/node` 运行自动解析单测和临时后端 :31325 冒烟通过：标准物品、标准空间、多 Sheet 物品+空间、混合模板均不调用 AI；有效标准混合 `can_auto_import=true` 并可 bulk 2 条；缺容量的标准混合 `can_auto_import=false, invalid=1`；非标无 Key 走 `rules_fallback`，表头进入 skipped。WSL Vite production build 通过；后端 `node --check bookingAiImport.js booking.js` 和 `git diff --check` 通过。
+
+## 2026-10-27 🪶 小组资料支持飞书云盘导入
+
+- **问题根因**：小组资料页虽然复用了带「飞书云盘」Tab 的 `ResourcePicker`，但确认后统一按站内「我的资源」处理；飞书项只有 `id=0` 和飞书 URL，前端却调用 `teamFileRef(teamId,0)`，而后端 `team_file` 也没有外链字段，导致无法引用/导入飞书文档或云盘文件。
+- **实现**：`team_file` 增加 `external_url`（schema + 启动迁移）；新增 `POST /api/team/:id/file/feishu-ref`，仅小组成员且有 `file_upload` 权限可保存白名单校验后的 HTTPS 飞书/Lark 链接，下载接口对该类记录 302 跳转。`ResourcePicker` 的飞书选择额外回传 `source/token/feishu_type`；`TeamFiles.vue` 对飞书 `docx` 读取 Markdown 后作为 `.md` 复制入组，普通云盘文件通过后端代理下载，≤20MB 复制到组内，超限、表格/幻灯片/Base/思维笔记等类型或复制失败时回退为飞书链接。
+- **验证**：修复了 `TeamFiles.vue` 补丁时误插入重复代码导致的模板字符串损坏；`node --check backend/routes/teamCollab.js backend/db/database.js`、`git diff --check`、临时 DB 集成测试（迁移、非法 URL 400、非成员 403、建链、列表、302）和 WSL Vite 生产构建均通过。

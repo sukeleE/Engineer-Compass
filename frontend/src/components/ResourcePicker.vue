@@ -10,6 +10,7 @@ import { api } from '../api.js';
 const props = defineProps({
   modelValue: Boolean,
   onlyImage: Boolean, // true 时只展示图片类资源（富文本插图 / 讨论附图）→ 不显示飞书云盘 tab
+  feishuConfirmText: { type: String, default: '📎 引用飞书链接' },
 });
 const emit = defineEmits(['update:modelValue', 'pick']);
 
@@ -105,7 +106,7 @@ async function confirm() {
 }
 function confirmFeishu() {
   if (!fsel.value) return ElMessage.warning('请先选择要引用的文件');
-  emit('pick', { id: 0, name: fsel.value.name, size: 0, mime: 'application/octet-stream', url: fsel.value.url });
+  emit('pick', { id: 0, source: 'feishu', token: fsel.value.token, name: fsel.value.name, size: 0, mime: '', feishu_type: fsel.value.type, url: fsel.value.url });
   emit('update:modelValue', false);
 }
 </script>
@@ -173,7 +174,7 @@ function confirmFeishu() {
         <el-button type="primary" :disabled="!sel" :loading="picking" @click="confirm">📎 使用此文件</el-button>
       </template>
       <template v-else>
-        <el-button type="primary" :disabled="!fsel || !feishu.bound" @click="confirmFeishu">📎 引用飞书链接</el-button>
+        <el-button type="primary" :disabled="!fsel || !feishu.bound" @click="confirmFeishu">{{ feishuConfirmText }}</el-button>
       </template>
     </template>
   </el-dialog>

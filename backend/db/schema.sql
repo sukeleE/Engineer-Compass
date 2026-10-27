@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS team_file (
   file_size   INTEGER,                         -- 字节
   file_type   TEXT,                            -- mime
   data        TEXT,                            -- base64 内容
+  external_url TEXT NOT NULL DEFAULT '',       -- 外部资源链接（如飞书云文档/云盘文件）
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

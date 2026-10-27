@@ -342,7 +342,7 @@ r.get('/:id/files', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
-    `SELECT f.id, f.user_id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader, f.resource_ref,
+    `SELECT f.id, f.user_id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader, f.resource_ref, f.external_url,
             CASE WHEN f.resource_ref IS NOT NULL AND ur.share_token IS NOT NULL
                  THEN '/api/resource/share/' || ur.share_token END AS share_url
      FROM team_file f JOIN user u ON u.id = f.user_id
@@ -384,12 +384,43 @@ r.post('/:id/file/ref', (req, res) => {
   res.status(201).json({ id: rr.lastInsertRowid, file_name: src.file_name, file_size: src.file_size, share_url: share.url, message: '已引用' });
 });
 
+
+function safeFeishuUrl(u) {
+  try {
+    const url = new URL(String(u || '').trim());
+    if (url.protocol !== 'https:') return null;
+    if (!/(^|\.)(feishu\.cn|larksuite\.com)$/.test(url.hostname)) return null;
+    const okPrefix = ['/docx/', '/docs/', '/doc/', '/sheet/', '/sheets/', '/file/', '/files/', '/wiki/', '/wikis/', '/slides/', '/base/', '/bitable/', '/mindnotes/', '/drive/folder/'];
+    if (!okPrefix.some((x) => url.pathname.startsWith(x))) return null;
+    return url.toString();
+  } catch { return null; }
+}
+
+// POST /api/team/:id/file/feishu-ref — 从飞书云盘引用文档/文件链接（file_upload 权限；不复制文件，权限由飞书侧控制）
+r.post('/:id/file/feishu-ref', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  const deny = requirePerm(ctx, res, 'file_upload');
+  if (deny) return deny;
+  const url = safeFeishuUrl(req.body?.url);
+  if (!url) return res.status(400).json({ error: '仅支持飞书/Lark 文档、表格或云盘文件链接' });
+  const name = String(req.body?.file_name || req.body?.name || '').trim().slice(0, 150);
+  if (!name) return res.status(400).json({ error: '文件名必填' });
+  const fileType = String(req.body?.file_type || '').trim().slice(0, 100);
+  const size = Math.max(0, Math.min(Number(req.body?.file_size) || 0, 1024 * 1024 * 1024));
+  const rr = db.prepare(
+    'INSERT INTO team_file (team_id, user_id, file_name, file_size, file_type, resource_ref, external_url, data) VALUES (?,?,?,?,?,NULL,?,NULL)'
+  ).run(ctx.team.id, req.user.id, name, size, fileType, url);
+  logAudit(req, 'team-file-feishu-ref', ctx.team.name, { team_file_id: rr.lastInsertRowid, name, url });
+  res.status(201).json({ id: rr.lastInsertRowid, file_name: name, external_url: url, message: '已引用飞书资源' });
+});
+
 // GET /api/team/file/:fid/download — 下载（返回原始字节流；引用型走资源磁盘文件）
 r.get('/file/:fid/download', (req, res) => {
   const f = db.prepare('SELECT * FROM team_file WHERE id = ?').get(Number(req.params.fid));
   if (!f) return res.status(404).json({ error: '文件不存在' });
   const ctx = teamCtx(f.team_id, req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  if (f.external_url) return res.redirect(302, f.external_url);
   if (f.resource_ref) {
     // 引用型：从 user_resource 磁盘取（token 在则资源可用；撤销分享 = 引用失效）
     const src = db.prepare('SELECT * FROM user_resource WHERE id = ?').get(f.resource_ref);

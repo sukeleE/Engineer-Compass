@@ -280,6 +280,7 @@ export const api = {
   resourceUnshare: (id) => req(`/resource/${id}/share`, { method: 'DELETE' }),
   // 小组资料：从「我的资源」引用（不复制文件，生成分享 token 后建引用行）
   teamFileRef: (teamId, rid) => req(`/team/${teamId}/file/ref`, { method: 'POST', body: JSON.stringify({ resource_id: rid }) }),
+  teamFileFeishuRef: (teamId, card) => req(`/team/${teamId}/file/feishu-ref`, { method: 'POST', body: JSON.stringify(card) }),
   // 计划导入：上传 .docx/.pdf/.xlsx/.md → AI 转成固定格式计划（不落库，前端确认后走 scheduleManual/studyManual）
   planImport: (file, mode) => {
     const fd = new FormData();
@@ -380,6 +381,16 @@ export const api = {
   feishuDocCreate: (body) => req('/feishu/doc/create', { method: 'POST', body: JSON.stringify(body) }),
   // 文档读取：blocks 分页 + 转换可能较慢，120s 超时（与 AI 接口一致，默认 30s 会误杀大文档）
   feishuDocContent: (documentId, format = 'markdown') => req(`/feishu/doc/content?document_id=${documentId}&format=${format}`, {}, 120000),
+  feishuFileDownloadBlob: async (fileToken) => {
+    const token = localStorage.getItem('ec_token');
+    const res = await fetch(`${BASE}/feishu/file/download?file_token=${encodeURIComponent(fileToken)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `飞书文件下载失败（${res.status}）`);
+    }
+    return { blob: await res.blob() };
+  },
   // ==================== 报销整理（/expense）====================
   // 成员免登录：邀请码 code 即钥匙，打开 /expense?code=xxx 只读；认领后写操作带 X-Claim-Token
   // claim token 存 localStorage（expense_claim_{code}），按项目独立 —— 一个浏览器/账户在一项目只占一个名字：

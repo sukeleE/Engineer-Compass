@@ -49,6 +49,7 @@ migCol('expense_member', 'is_owner', 'ALTER TABLE expense_member ADD COLUMN is_o
 migCol('user_resource', 'share_token', 'ALTER TABLE user_resource ADD COLUMN share_token TEXT'); // 公开分享 token（引用功能：可撤销下载链接）
 migCol('user_resource', 'feishu_token', 'ALTER TABLE user_resource ADD COLUMN feishu_token TEXT'); // 飞书分享：云盘 file_token（撤销分享时删除飞书文件）
 migCol('team_file', 'resource_ref', 'ALTER TABLE team_file ADD COLUMN resource_ref INTEGER'); // 引用型文件：指向 user_resource.id（data 为空）
+migCol('team_file', 'external_url', "ALTER TABLE team_file ADD COLUMN external_url TEXT NOT NULL DEFAULT ''"); // 外部链接引用：飞书文档/云盘文件等
 migCol('share_post', 'gitee_repo', "ALTER TABLE share_post ADD COLUMN gitee_repo TEXT DEFAULT ''"); // Gitee 仓库 owner/repo（空=非仓库帖）
 migCol('share_post', 'gitee_ref', "ALTER TABLE share_post ADD COLUMN gitee_ref TEXT DEFAULT ''");   // Gitee 分支/标签/sha
 migCol('user', 'password_set', 'ALTER TABLE user ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1'); // 0=初始密码待修改
