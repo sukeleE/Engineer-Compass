@@ -9,7 +9,7 @@ import AttachmentList from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
 import ResourcePicker from '../ResourcePicker.vue';
 import { fmtShort } from '../../utils/time.js';
-import { selfName } from '../../utils/displayName.js';
+import { teamDisplayName } from '../../utils/displayName.js';
 
 const router = useRouter();
 // 点击作者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -78,6 +78,7 @@ const canMod = (m) => Number(m.user_id) === Number(props.me.user_id) || props.pe
 
 // 作者角色（members 由 TeamDetail 传入，含 role_names 数组）
 const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
+const memberName = (m) => teamDisplayName(m, props.members);
 
 // 原地编辑：消息体切换为输入框
 const editId = ref(null);
@@ -104,7 +105,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <div v-if="!msgs.length" class="chat-empty">还没有讨论 — 来聊第一句吧 💬</div>
       <div v-for="m in msgs" :key="m.id" class="chat-item" :class="{ mine: m.user_id === me.user_id }">
         <div class="ci-head">
-          <b class="u-link" @click="toProfile(m)">{{ selfName(m, me.user_id) }}</b>
+          <b class="u-link" @click="toProfile(m)">{{ memberName(m) }}</b>
           <el-tag v-for="rn in roleNamesOf(m.user_id)" :key="rn" size="small" effect="plain" style="margin-left:2px">{{ rn }}</el-tag>
           <span class="ci-time">{{ fmtShort(m.create_time) }}</span>
           <span class="ci-ops">
@@ -119,7 +120,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         </div>
         <div v-else-if="m.content" class="ci-body">{{ m.content }}</div>
         <AttachmentList v-if="m.attachments?.length" :attachments="m.attachments" />
-        <CommentThread :team-id="teamId" type="message" :target="m" />
+        <CommentThread :team-id="teamId" type="message" :target="m" :members="members" />
       </div>
     </div>
     <div class="chat-input">

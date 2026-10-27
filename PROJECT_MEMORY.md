@@ -592,3 +592,11 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **需求**：项目小组页面里当前用户自己要显示真实姓名；他人仍显示昵称（小组接口刻意不回传他人 real_name，不扩大暴露面，故只改自己）。
 - **实现**：`utils/displayName.js` 新增 `selfName(obj, meId, fallbackKey='nickname')`——对象 id/user_id 命中 meId 且 `auth.user.real_name` 存在时按全站统一口径渲染「真名（昵称）」（复用 displayName：昵称已含真名则只显示昵称），否则原样返回 nickname/user_name/uploader 等快照名；auth.user.real_name 由 /auth/me 提供（USER_COLS 含 real_name），无需改后端。
 - **接入点**：TeamMembers 成员行/头像 title/AI 分组建议、TeamPlans 成员小方块与个人计划弹窗标题（props 无 me，直接用 auth.user?.id；mp-cname 有 ellipsis 兜底）、TeamChat 消息作者、CommentThread 评论作者、TeamFiles 上传者（fallback 'uploader'）、TeamDevices 预约人（'user_name'）、TeamProgress 优秀汇报/时间线/任务负责人下拉/任务 assignee_name（构造 {id,nickname} 传入）/提交看板成员列（m.name 构造 {id:m.id,nickname:m.name}）。历史快照（done_by/completions/审批快照）不改。WSL vite build 过（34.34s）。
+
+## 2026-10-27 👥 小组成员互见实名 + 成员/角色方块化
+
+- **需求**：同一小组成员互相可见真实姓名（自己也显示实名）；「成员与角色」页的成员列表与自定义角色列表都改为紧凑小方块，点击后在页内展开详情，减少纵向占用；可按角色标签筛选成员。
+- **后端隐私口径**：仅对已登录且属于该组的成员返回同组 real_name。team.js 的 `GET /team/:id` 成员 SQL 补 `u.real_name`（AI 分组提示词与建议不回传/发送 real_name，前端按建议里的 user_id 从当前成员名单解析展示）；checkin.js 的 MEMBER_SQL 补 `u.real_name`（提交看板/排行榜）；teamCollab.js 的 `GET /team/:id/plans` 补 real_name，文件列表补 `f.user_id`。邀请预览 `/team/peek` 仍只返回组名/人数/组长昵称，不返回成员 real_name；非成员 GET 小组详情仍 403。
+- **前端姓名口径**：`utils/displayName.js` 新增 `teamDisplayName(obj, members, fallbackKey)`——优先按 id/user_id/assignee_id/uploader_id 在当前小组成员名单中解析 displayName；已退组成员的历史消息/评论/文件/汇报/预约匹配不到名单时，继续显示历史昵称快照，避免退组后继续暴露实名。TeamChat/CommentThread/TeamFiles/TeamDevices/TeamProgress/TeamPlans 全部接入；TeamView 顶部显示 `displayName(auth.user)` 且 load() 中用 /auth/me 的 user patchUser，避免旧缓存缺实名。
+- **成员与角色 UI**：TeamMembers 重写为「角色筛选 chips + 成员卡片网格 + 成员详情面板」和「角色卡片网格 + 角色详情面板 + 新建/编辑角色 dialog」。成员卡显示头像/真名（昵称）/首角色/组长或我；详情内嵌角色多选（≤3）、转让、移除、自选角色；角色卡显示等级/人数/权限数，详情可查看权限和成员、一键筛选成员。拉人、AI 分组、邀请、排行榜、解散等原功能保留。
+- **验证**：WSL Linux Node 直跑 `node node_modules/vite/bin/vite.js build` 通过（Windows npm 会误用 Windows npm/缺 rollup win32 optional dep；WSL 里也要避开 /mnt/c 的 npm shim）。临时 DB 在 :31323 自起后端，自定义实名接口冒烟 15/15 通过：A/B 互见双方 real_name、非成员 C 403、/team/peek 不含 real_name、/plans 含同组实名。

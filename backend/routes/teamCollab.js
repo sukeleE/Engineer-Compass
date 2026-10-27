@@ -224,7 +224,7 @@ r.get('/:id/plans', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const members = db.prepare(
-    `SELECT u.id, u.nickname FROM team_member tm JOIN user u ON u.id = tm.user_id
+    `SELECT u.id, u.nickname, u.real_name FROM team_member tm JOIN user u ON u.id = tm.user_id
      WHERE tm.team_id = ? ORDER BY tm.join_time`
   ).all(ctx.team.id);
   // 多角色聚合：user_id → 角色名数组（最高 level 优先）
@@ -261,7 +261,7 @@ r.get('/:id/plans', (req, res) => {
         phases: plan.phases.map((p) => ({ phase: p.phase, date: p.date, done: p.tasks.filter((t) => t.done).length, total: p.tasks.length })),
       };
     });
-    return { user_id: m.id, nickname: m.nickname, role_names: roleMap[m.id] || [], role_name: (roleMap[m.id] || [])[0] || null, is_owner: m.id === ctx.team.owner_id, schedules, studies };
+    return { user_id: m.id, nickname: m.nickname, real_name: m.real_name || '', role_names: roleMap[m.id] || [], role_name: (roleMap[m.id] || [])[0] || null, is_owner: m.id === ctx.team.owner_id, schedules, studies };
   });
   res.json(rows);
 });
@@ -342,7 +342,7 @@ r.get('/:id/files', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const rows = db.prepare(
-    `SELECT f.id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader, f.resource_ref,
+    `SELECT f.id, f.user_id, f.file_name, f.file_size, f.file_type, f.create_time, u.nickname AS uploader, f.resource_ref,
             CASE WHEN f.resource_ref IS NOT NULL AND ur.share_token IS NOT NULL
                  THEN '/api/resource/share/' || ur.share_token END AS share_url
      FROM team_file f JOIN user u ON u.id = f.user_id

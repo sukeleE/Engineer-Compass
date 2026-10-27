@@ -3,9 +3,9 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
-import { selfName } from '../../utils/displayName.js';
+import { teamDisplayName } from '../../utils/displayName.js';
 
-const props = defineProps({ teamId: Number, me: Object, perms: Object, devices: Array });
+const props = defineProps({ teamId: Number, me: Object, perms: Object, devices: Array, members: { type: Array, default: () => [] } });
 
 const devices = ref(props.devices || []);
 const bookings = ref([]);
@@ -17,6 +17,7 @@ const book = ref({ device_id: null, start_time: '', end_time: '', purpose: '' })
 const STATUS = { pending: { label: '待审批', tag: 'warning' }, approved: { label: '已批准', tag: 'success' }, rejected: { label: '已拒绝/取消', tag: 'info' } };
 
 const myBookings = computed(() => bookings.value.filter((b) => b.user_id === props.me.user_id));
+const bookingName = (b) => teamDisplayName(b, props.members, 'user_name');
 const allBookings = computed(() => bookings.value);
 
 async function reload() {
@@ -140,7 +141,7 @@ onMounted(() => reload().catch((e) => ElMessage.error(e.message)));
           <b>{{ b.device_name }}</b>
           <span class="bk-time">{{ b.start_time }} ~ {{ b.end_time }}</span>
           <el-tag size="small" :type="STATUS[b.status].tag">{{ STATUS[b.status].label }}</el-tag>
-          <span class="bk-who">{{ selfName(b, me.user_id, 'user_name') }} · {{ b.purpose }}</span>
+          <span class="bk-who">{{ bookingName(b) }} · {{ b.purpose }}</span>
           <template v-if="b.status === 'pending'">
             <el-button size="small" type="success" plain @click="approve(b, 'approved')">批准</el-button>
             <el-button size="small" type="danger" plain @click="approve(b, 'rejected')">驳回</el-button>

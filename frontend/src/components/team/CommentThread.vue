@@ -5,9 +5,10 @@ import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { fmtShort } from '../../utils/time.js';
-import { selfName } from '../../utils/displayName.js';
+import { teamDisplayName } from '../../utils/displayName.js';
 
-const props = defineProps({ teamId: Number, type: String, target: Object });
+const props = defineProps({ teamId: Number, type: String, target: Object, members: { type: Array, default: () => [] } });
+const commentName = (c) => teamDisplayName(c, props.members);
 const open = ref(false);
 const text = ref('');
 const sending = ref(false);
@@ -21,7 +22,7 @@ async function send() {
     if (props.type === 'log') await api.teamLogComment(props.teamId, props.target.id, text.value);
     else await api.teamMessageComment(props.teamId, props.target.id, text.value);
     props.target.comments.push({
-      id: Date.now(), user_id: auth.user.id, nickname: auth.user.nickname || auth.user.username,
+      id: Date.now(), user_id: auth.user.id, nickname: auth.user.nickname || auth.user.username, real_name: auth.user.real_name || '',
       content: text.value.trim(), create_time: new Date().toISOString(),
     });
     text.value = '';
@@ -49,7 +50,7 @@ const canDel = (c) => c.user_id === auth.user.id;
     <div v-if="open" class="ct-panel">
       <div v-if="!target.comments?.length" class="ct-empty">还没有评论，来抢沙发～</div>
       <div v-for="c in target.comments" :key="c.id" class="ct-item">
-        <b>{{ selfName(c, auth.user?.id) }}</b>
+        <b>{{ commentName(c) }}</b>
         <span class="ct-time">{{ fmt(c.create_time) }}</span>
         <p>{{ c.content }}</p>
         <el-button v-if="canDel(c)" size="small" text type="danger" class="ct-del" @click="remove(c)">删</el-button>

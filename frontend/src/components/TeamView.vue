@@ -4,7 +4,8 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
-import auth, { clearAuth } from '../auth.js';
+import auth, { clearAuth, patchUser } from '../auth.js';
+import { displayName } from '../utils/displayName.js';
 import TeamDetail from './TeamDetail.vue';
 import PlanChat from './PlanChat.vue';
 
@@ -40,6 +41,7 @@ async function load() {
   loading.value = true;
   try {
     const res = await api.me();
+    patchUser(res.user);
     teams.value = res.teams;
     // 保持选中状态（标签页仍存在则保留，否则重置为第一个）
     if (selTeamId.value && !teams.value.some((t) => t.id === selTeamId.value)) selTeamId.value = null;
@@ -175,7 +177,7 @@ onMounted(async () => {
       <div class="team-head">
         <div>
           <h2>🏗️ 项目小组</h2>
-          <p class="head-sub">👤 {{ auth.user?.nickname }}<span v-if="auth.user?.is_admin" class="admin-tag">管理员</span>
+          <p class="head-sub">👤 {{ displayName(auth.user) }}<span v-if="auth.user?.is_admin" class="admin-tag">管理员</span>
             · 加入 {{ teams.length }} 个小组</p>
         </div>
         <div class="head-actions">

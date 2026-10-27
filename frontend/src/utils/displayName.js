@@ -25,3 +25,21 @@ export const selfName = (obj, meId, fallbackKey = 'nickname') => {
     username: obj.username ?? auth.user.username,
   });
 };
+// 项目小组内展示名：优先按 user_id/id 在「当前小组成员」名单中解析。
+// 当前成员已由 /team/:id 返回 real_name，故同组互见「真名（昵称）」；
+// 已退组成员的历史消息/文件/汇报匹配不到名单，继续显示当时的昵称快照。
+export const teamDisplayName = (obj, members, fallbackKey = 'nickname') => {
+  if (!obj) return '';
+  const uid = obj.id ?? obj.user_id ?? obj.uid ?? obj.assignee_id ?? obj.uploader_id ?? null;
+  if (uid != null && Array.isArray(members)) {
+    const member = members.find((m) => Number(m.id ?? m.user_id) === Number(uid));
+    if (member) return displayName(member);
+  }
+  const base = obj[fallbackKey] ?? obj.nickname ?? obj.user_name ?? obj.uploader ?? obj.assignee_name ?? obj.username ?? '';
+  if (uid == null || !auth.user || Number(uid) !== Number(auth.user.id) || !auth.user.real_name) return base;
+  return displayName({
+    real_name: auth.user.real_name,
+    nickname: obj.nickname ?? auth.user.nickname,
+    username: obj.username ?? auth.user.username,
+  });
+};

@@ -8,7 +8,7 @@ import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
 import ResourcePicker from '../ResourcePicker.vue';
 import { fmtDateOnly } from '../../utils/time.js';
-import { selfName } from '../../utils/displayName.js';
+import { teamDisplayName } from '../../utils/displayName.js';
 
 const router = useRouter();
 // 点击上传者昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -55,6 +55,7 @@ async function load() {
 
 // 上传者角色（members 由 TeamDetail 传入，含 role_names 数组）
 const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
+const uploaderName = (f) => teamDisplayName(f, props.members, 'uploader');
 
 async function pickFile(e) {
   const file = e.target.files?.[0];
@@ -120,7 +121,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
       <div class="f-info">
         <b :title="f.file_name">{{ f.file_name }}</b>
         <span class="f-meta">
-          {{ fmtSize(f.file_size) }} · <span class="u-link" @click="toProfile(f)">{{ selfName(f, me.user_id, 'uploader') }}</span>
+          {{ fmtSize(f.file_size) }} · <span class="u-link" @click="toProfile(f)">{{ uploaderName(f) }}</span>
           <el-tag v-for="rn in roleNamesOf(f.user_id)" :key="rn" size="small" effect="plain" style="margin-left:4px">{{ rn }}</el-tag>
           · {{ fmtDateOnly(f.create_time) }}
           <el-tag v-if="f.resource_ref" size="small" type="info" effect="plain" style="margin-left:4px">📁 引用</el-tag>

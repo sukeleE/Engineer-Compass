@@ -13,7 +13,7 @@ import CommentThread from './CommentThread.vue';
 import ResourcePicker from '../ResourcePicker.vue';
 import DocPicker from './DocPicker.vue';
 import LiteEditor from './LiteEditor.vue';
-import { selfName } from '../../utils/displayName.js';
+import { displayName, teamDisplayName } from '../../utils/displayName.js';
 
 const router = useRouter();
 // 点击作者头像/昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -454,6 +454,8 @@ const canEditLog = (l) => Number(l.user_id) === Number(props.me.user_id) || prop
 
 // 作者角色（members 由 TeamDetail 传入，含 role_names 数组）
 const roleNamesOf = (uid) => props.members?.find((x) => Number(x.id) === Number(uid))?.role_names || [];
+const memberName = (x, fallbackKey = 'nickname') => teamDisplayName(x, props.members, fallbackKey);
+const boardName = (m) => displayName({ real_name: m.real_name, nickname: m.name });
 
 // 富文本内容里的图片：点击 → 全屏预览
 function onRichClick(e, l) {
@@ -663,7 +665,7 @@ reload().catch((e) => ElMessage.error(e.message));
           <tbody>
             <tr v-for="m in board.members" :key="m.id">
               <td class="b-name">
-                <div class="b-name-line">{{ selfName({ id: m.id, nickname: m.name }, me.user_id) }}<span v-if="m.is_owner"> 👑</span></div>
+                <div class="b-name-line">{{ boardName(m) }}<span v-if="m.is_owner"> 👑</span></div>
                 <div class="b-roles">
                   <el-tag v-for="rn in m.role_names" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
                   <span v-if="!m.role_names.length && !m.is_owner" class="b-norole">无角色</span>
@@ -717,7 +719,7 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-input v-model="newTask.title" placeholder="任务标题（如：机械结构装配）" style="flex:2" />
         <el-select v-model="newTask.assignee_id" placeholder="负责人" clearable style="flex:1">
           <el-option v-for="m in members.filter(x => !x.is_owner || x.is_me)" :key="m.id" :value="m.id"
-            :label="`${selfName(m, me.user_id)}${m.is_owner ? '（组长）' : ''}`" />
+            :label="`${memberName(m)}${m.is_owner ? '（组长）' : ''}`" />
         </el-select>
         <el-date-picker v-model="newTask.deadline" type="date" placeholder="截止日期" value-format="YYYY-MM-DD" style="flex:1" />
         <el-button type="primary" @click="createTask">创建</el-button>
@@ -736,7 +738,7 @@ reload().catch((e) => ElMessage.error(e.message));
         </div>
         <div v-else-if="canEditTask(t)" class="tc-desc"><el-button size="small" text type="primary" @click="openDesc(t)">✏️ 添加说明</el-button></div>
         <div class="tc-meta">
-          <span v-if="t.assignee_name">👤 {{ selfName({ id: t.assignee_id, nickname: t.assignee_name }, me.user_id) }}</span>
+          <span v-if="t.assignee_name">👤 {{ memberName(t, 'assignee_name') }}</span>
           <span v-if="t.deadline">⏰ {{ t.deadline }}</span>
           <span class="tc-date">创建 {{ fmtDateOnly(t.create_time) }}</span>
         </div>
@@ -787,8 +789,8 @@ reload().catch((e) => ElMessage.error(e.message));
         <div v-for="f in featured" :key="f.id" class="ft-card">
           <div class="ft-head">
             <span class="lb-avatar" v-if="f.avatar"><img :src="f.avatar" alt="" /></span>
-            <span class="lb-avatar no-img" v-else>{{ (f.nickname || '?').slice(0, 1) }}</span>
-            <b class="u-link" @click="toProfile(f)">{{ selfName(f, me.user_id) }}</b>
+            <span class="lb-avatar no-img" v-else>{{ (memberName(f) || '?').slice(0, 1) }}</span>
+            <b class="u-link" @click="toProfile(f)">{{ memberName(f) }}</b>
             <el-tag size="small" type="warning" effect="dark">⭐ {{ f.score || '—' }}</el-tag>
             <el-tag size="small" effect="plain" v-if="f.schedule_title">{{ f.schedule_title }}</el-tag>
             <span class="ft-date">{{ fmtShort(f.create_time) }}</span>
@@ -819,7 +821,7 @@ reload().catch((e) => ElMessage.error(e.message));
           <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
           <div class="log-head">
             <span class="log-avatar u-link" v-if="l.avatar" @click="toProfile(l)"><img :src="l.avatar" alt="" /></span>
-            <span class="log-author u-link" @click="toProfile(l)">{{ selfName(l, me.user_id) || '未知成员' }}</span>
+            <span class="log-author u-link" @click="toProfile(l)">{{ memberName(l) || '未知成员' }}</span>
             <el-tag v-for="rn in roleNamesOf(l.user_id)" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
             <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
             <span class="log-actions">
@@ -856,7 +858,7 @@ reload().catch((e) => ElMessage.error(e.message));
             <span v-if="l.score" class="ci-review-show">组长评分 <b>{{ '★'.repeat(l.score) }}</b></span>
             <span v-if="l.review" class="ci-review-show">“{{ l.review }}”</span>
           </div>
-          <CommentThread :team-id="teamId" type="log" :target="l" />
+          <CommentThread :team-id="teamId" type="log" :target="l" :members="members" />
         </el-timeline-item>
       </el-timeline>
       <div v-else class="tp-empty">还没有汇报 — 点右上「📝 编写汇报」记录进展</div>

@@ -92,7 +92,7 @@ async function copyInviteLink() {
           <TeamFiles :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" />
         </el-tab-pane>
         <el-tab-pane :label="lab('🔧 设备预约', '设备')" name="devices">
-          <TeamDevices :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :devices="detail.devices" />
+          <TeamDevices :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :devices="detail.devices" :members="detail.members" />
         </el-tab-pane>
         <el-tab-pane :label="lab('👥 成员与角色', '成员')" name="members">
           <TeamMembers :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" :roles="detail.roles" />

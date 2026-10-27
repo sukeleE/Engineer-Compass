@@ -12,7 +12,7 @@ const r = Router();
 r.use(authRequired);
 
 const MEMBER_SQL = `
-  SELECT u.id, COALESCE(u.nickname, u.username) AS name, u.avatar
+  SELECT u.id, COALESCE(u.nickname, u.username) AS name, u.real_name, u.avatar
   FROM team_member tm JOIN user u ON u.id = tm.user_id
   WHERE tm.team_id = ? ORDER BY tm.join_time, u.id`;
 
