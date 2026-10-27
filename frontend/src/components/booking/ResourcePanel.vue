@@ -50,7 +50,7 @@
     <ResourceFormDialog v-if="formOpen" :model-value="formOpen" :project="project" :resource="editing"
       @close="formOpen = false" @saved="onSaved" />
     <ResourceImportDialog v-if="importOpen" :model-value="importOpen" :project="project"
-      @close="importOpen = false" @saved="onSaved" />
+      :existing-names="resources.map((r) => r.name)" @close="importOpen = false" @saved="onSaved" />
     <ResourceDetailDialog v-if="detailRes" :resource="detailRes" @close="detailRes = null" />
   </div>
 </template>

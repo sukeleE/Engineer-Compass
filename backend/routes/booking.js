@@ -14,6 +14,7 @@ import {
   BookingImportError, recognizeBookingXlsx, recognizeBookingCsv, buildBookingTemplate,
   BOOKING_IMPORT_LIMIT_BYTES,
 } from '../lib/bookingImport.js';
+import { aiParseMixedBooking } from '../lib/bookingAiImport.js';
 
 const r = Router();
 r.use(authRequired);
@@ -645,9 +646,10 @@ r.get('/projects/:id/resources/import-template', ah((req, res) => {
   if (!p) throw new HttpError(404, '项目不存在');
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
   const kind = String(req.query.kind || '');
-  if (!KINDS.has(kind)) throw new HttpError(400, '资源类型不合法（物品资源/空间资源）');
+  const isMixedTpl = kind === 'mixed';
+  if (!KINDS.has(kind) && !isMixedTpl) throw new HttpError(400, '资源类型不合法（物品资源/空间资源/混合）');
   const buf = buildBookingTemplate(kind);
-  const fname = `资源导入模板_${kind === 'space' ? '空间' : '物品'}.xlsx`;
+  const fname = isMixedTpl ? '资源导入模板_混合.xlsx' : `资源导入模板_${kind === 'space' ? '空间' : '物品'}.xlsx`;
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="template.xlsx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);
@@ -674,6 +676,87 @@ r.post('/projects/:id/resources/parse-import', importMem, ah((req, res) => {
     if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
     return res.status(400).json({ error: `上传失败：${err.message}` });
   }
+  next(err);
+});
+
+// AI 混合表格解析（multipart；只解析不落库）。物品/空间可在同一表或多 Sheet，预览后仍走 bulk 事务入库。
+r.post('/projects/:id/resources/ai-parse-import', importMem, ah(async (req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
+  const mode = String(req.body?.mode || 'mixed');
+  if (!['mixed', 'auto', 'item', 'space'].includes(mode)) throw new HttpError(400, '导入模式不合法');
+  const file = req.file;
+  if (!file) throw new HttpError(400, '未收到文件（字段名 file，multipart/form-data）');
+  const ext = extname(basename(file.originalname || '')).slice(1).toLowerCase();
+  if (!['xlsx', 'xls', 'csv'].includes(ext)) throw new HttpError(400, '仅支持 .xlsx/.xls/.csv 表格文件');
+
+  let out;
+  if (mode === 'mixed' || mode === 'auto') {
+    out = await aiParseMixedBooking(file.buffer, ext);
+  } else {
+    out = ext === 'csv' ? recognizeBookingCsv(mode, file.buffer) : recognizeBookingXlsx(mode, file.buffer);
+    out.items = (out.items || []).map((x) => ({ ...x, confidence: 'high', warnings: [] }));
+    out.skipped = [];
+    out.source = `rule_${mode}`;
+  }
+
+  const existing = new Map(
+    db.prepare('SELECT id, name FROM booking_resource WHERE project_id = ?').all(p.id).map((x) => [x.name, x.id])
+  );
+  const seen = new Set();
+  const items = out.items.slice(0, 200).map((it) => {
+    const issues = Array.isArray(it.issues) ? it.issues : [];
+    const name = String(it.name || '').trim();
+    if (name) {
+      if (seen.has(name)) issues.push('表格内存在同名资源（同项目资源名不可重复）');
+      seen.add(name);
+      if (existing.has(name)) issues.push('项目内已存在同名资源');
+    }
+    try {
+      normResourceBody(it.kind, it, p.default_approve_mode);
+    } catch (e) {
+      issues.push(e.message);
+    }
+    return {
+      kind: it.kind,
+      name,
+      spec: String(it.spec || ''),
+      quantity: it.quantity ?? '',
+      unit: String(it.unit || ''),
+      location: String(it.location || ''),
+      capacity: it.capacity ?? '',
+      equipment: Array.isArray(it.equipment) ? it.equipment : [],
+      approve_mode: it.approve_mode || '',
+      confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',
+      warnings: Array.isArray(it.warnings) ? it.warnings : [],
+      issues: [...new Set(issues)],
+      _sheet: it._sheet || '',
+      _sheet_index: Number.isInteger(Number(it._sheet_index)) ? Number(it._sheet_index) : 0,
+      _row: Number(it._row || 0),
+    };
+  }).map((it) => ({ ...it, valid: it.issues.length === 0 }));
+
+  res.json({
+    source: out.source || 'ai',
+    items,
+    skipped: Array.isArray(out.skipped) ? out.skipped : [],
+    warnings: Array.isArray(out.warnings) ? out.warnings : [],
+    stats: {
+      total: items.length,
+      item: items.filter((x) => x.kind === 'item').length,
+      space: items.filter((x) => x.kind === 'space').length,
+      invalid: items.filter((x) => !x.valid).length,
+      low_confidence: items.filter((x) => x.confidence === 'low').length,
+      skipped: Array.isArray(out.skipped) ? out.skipped.length : 0,
+    },
+  });
+}), (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
+    return res.status(400).json({ error: `上传失败：${err.message}` });
+  }
+  if (err instanceof BookingImportError) return res.status(400).json({ error: err.message });
   next(err);
 });
 

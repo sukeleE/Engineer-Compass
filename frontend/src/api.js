@@ -495,6 +495,15 @@ export const api = {
     return req(`/booking/projects/${id}/resources/parse-import`,
       { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 60000);
   },
+  // AI 混合表格导入：支持同一工作簿/同一 Sheet 中混合物品和空间，只解析不落库
+  bookingResourceAiParseImport: (id, mode, file) => {
+    const fd = new FormData();
+    fd.append('mode', mode);
+    fd.append('file', file);
+    const token = localStorage.getItem('ec_token');
+    return req(`/booking/projects/${id}/resources/ai-parse-import`,
+      { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 120000);
+  },
   // 导入模板下载（xlsx blob；token 走头不进 URL）
   bookingResourceTemplateBlob: async (id, kind) => {
     const token = localStorage.getItem('ec_token');
@@ -504,7 +513,7 @@ export const api = {
       const d = await res.json().catch(() => ({}));
       throw new Error(d.error || `模板下载失败（${res.status}）`);
     }
-    let name = `资源导入模板_${kind === 'space' ? '空间' : '物品'}.xlsx`;
+    let name = kind === 'mixed' ? '资源导入模板_混合.xlsx' : `资源导入模板_${kind === 'space' ? '空间' : '物品'}.xlsx`;
     const cd = res.headers.get('content-disposition') || '';
     const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
     if (star) { try { name = decodeURIComponent(star[1]); } catch { /* 用默认名 */ } }

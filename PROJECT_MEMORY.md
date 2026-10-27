@@ -600,3 +600,11 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **前端姓名口径**：`utils/displayName.js` 新增 `teamDisplayName(obj, members, fallbackKey)`——优先按 id/user_id/assignee_id/uploader_id 在当前小组成员名单中解析 displayName；已退组成员的历史消息/评论/文件/汇报/预约匹配不到名单时，继续显示历史昵称快照，避免退组后继续暴露实名。TeamChat/CommentThread/TeamFiles/TeamDevices/TeamProgress/TeamPlans 全部接入；TeamView 顶部显示 `displayName(auth.user)` 且 load() 中用 /auth/me 的 user patchUser，避免旧缓存缺实名。
 - **成员与角色 UI**：TeamMembers 重写为「角色筛选 chips + 成员卡片网格 + 成员详情面板」和「角色卡片网格 + 角色详情面板 + 新建/编辑角色 dialog」。成员卡显示头像/真名（昵称）/首角色/组长或我；详情内嵌角色多选（≤3）、转让、移除、自选角色；角色卡显示等级/人数/权限数，详情可查看权限和成员、一键筛选成员。拉人、AI 分组、邀请、排行榜、解散等原功能保留。
 - **验证**：WSL Linux Node 直跑 `node node_modules/vite/bin/vite.js build` 通过（Windows npm 会误用 Windows npm/缺 rollup win32 optional dep；WSL 里也要避开 /mnt/c 的 npm shim）。临时 DB 在 :31323 自起后端，自定义实名接口冒烟 15/15 通过：A/B 互见双方 real_name、非成员 C 403、/team/peek 不含 real_name、/plans 含同组实名。
+
+## 2026-10-27 📋 资源预约：AI 混合台账批量导入
+
+- **需求**：资源批量导入支持 AI 识别 Excel/CSV 表格内容；物品资源和空间资源可能混在同一张表、上下分段或不同 Sheet 中。第一期仅做 xlsx/xls/csv，PDF/图片 OCR 留到后续。
+- **实现**：新增 `backend/lib/bookingAiImport.js`：多 Sheet 读取并保留原始行号；DeepSeek JSON 模式只做字段理解、类型判断、审批方式归一化和行筛选，输出必须带 `sheet_index/row`，无原始来源行一律丢弃。AI 异常/无 Key/非法 JSON 时自动回退本地规则解析；标准「资源类型/名称/规格/库存/位置/容量/室内设备/审批方式」模板无需 AI 也能识别。
+- **安全与校验**：AI 解析不落库，新增 `POST /api/booking/projects/:id/resources/ai-parse-import` 只返回预览；路由层用既有 `normResourceBody` 逐行标注 issues/valid、表格内重名和项目内同名，最终仍走原 `/resources/bulk` 事务。`bookingImport.js` 增加 `kind=mixed` 模板；无数据库迁移。
+- **前端**：`ResourceImportDialog.vue` 改为「AI 混合识别 / 仅物品 / 仅空间」三模式；混合模式统一展示类型、名称、规格、库存、单位、位置、容量、室内设备、审批方式、来源 Sheet#行，支持行内切换 item/space、低置信度/异常高亮、手工修正和混合批量提交；`ResourcePanel.vue` 传入 existingNames 做前端重名预校验；`api.js` 增加 120s AI 解析接口。
+- **验证**：WSL Node `--check` 三个后端文件通过；Vite build 通过；临时 DB 起后端实测 DeepSeek 解析同一 Sheet 的物品+空间返回 200、stats `{total:2,item:1,space:1,invalid:0,skipped:1}`，审批方式补回「需审批/先到先得」，随后 mixed bulk 成功创建 2 条资源；AI 无 Key 时自动规则回退测试通过；mixed 模板下载 200。

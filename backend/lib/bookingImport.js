@@ -161,12 +161,19 @@ export function recognizeBookingCsv(kind, buf) {
 // ---------------- 导入模板（仅表头，无示例行——示例行会被原样导成垃圾资源） ----------------
 const TEMPLATE = {
   space: {
+    sheet: '空间资源',
     head: ['名称', '位置', '容量', '室内设备（多个用逗号或顿号分隔）', '审批方式（需审批/先到先得，留空用项目默认）'],
     widths: [22, 18, 10, 34, 36],
   },
   item: {
+    sheet: '物品资源',
     head: ['名称', '规格型号', '库存', '单位', '位置', '审批方式（需审批/先到先得，留空用项目默认）'],
     widths: [22, 20, 8, 8, 18, 36],
+  },
+  mixed: {
+    sheet: '混合资源',
+    head: ['资源类型（物品/空间）', '资源名称', '规格型号（物品）', '库存数量（物品）', '单位（物品）', '位置/房间号', '可容纳人数（空间）', '室内设备（多个用逗号或顿号分隔）', '审批方式（需审批/先到先得，留空用项目默认）'],
+    widths: [20, 20, 18, 14, 10, 20, 16, 34, 36],
   },
 };
 
@@ -175,6 +182,6 @@ export function buildBookingTemplate(kind) {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([t.head]);
   ws['!cols'] = t.widths.map((w) => ({ wch: w }));
-  XLSX.utils.book_append_sheet(wb, ws, kind === 'space' ? '空间资源' : '物品资源');
+  XLSX.utils.book_append_sheet(wb, ws, TEMPLATE[kind].sheet || '资源导入');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
