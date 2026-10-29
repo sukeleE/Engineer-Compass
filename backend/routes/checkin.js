@@ -5,7 +5,7 @@ import { authRequired, teamCtx, requirePerm, hasPerm } from './middleware.js';
 import { sanitizeAttachments } from './teamCollab.js';
 import {
   cnDateStr, parseWeekdays, currentDue, checkOccurrence, boardPeriods,
-  periodLabel, streakOf, sanitizeHtml,
+  periodLabel, streakOf, sanitizeHtml, isWeeklyV2, weeklyShiftOccurrence,
 } from '../lib/checkin.js';
 
 const r = Router();
@@ -50,8 +50,13 @@ function normBody(body, { partial = false, prev = null } = {}) {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(out.due_time)) throw bad('截止时间格式错误（HH:MM）');
     out.weekdays = '[]';
     if (out.freq === 'weekly') {
+      const prevWd = prev ? parseWeekdays(prev.weekdays) : [];
       const wd = parseWeekdays(JSON.stringify(get('weekdays', prev ? JSON.parse(prev.weekdays || '[]') : [])));
-      if (!wd.length) throw bad('每周打卡至少选择一个星期');
+      if (!wd.length) throw bad('请选择每周截止星期');
+      // 新版周报一个周期只有一个截止星期；旧版一周多次打卡（历史数据）保留多选
+      if (wd.length > 1 && prevWd.length <= 1) {
+        throw bad('每周周期任务只能选择一个截止星期；如需一周多次提交，请创建多个每周任务或使用每日任务');
+      }
       out.weekdays = JSON.stringify(wd);
     }
     out.start_date = String(get('start_date', prev?.start_date || cnDateStr())).trim();
@@ -187,19 +192,31 @@ r.get('/:id/checkin/my', (req, res) => {
   const now = new Date();
   const list = db.prepare('SELECT * FROM checkin_schedule WHERE team_id = ? AND active = 1 ORDER BY id DESC')
     .all(ctx.team.id);
+  const logStmt = db.prepare(
+    'SELECT id, is_late, self_progress, self_rating, score, featured FROM progress_log WHERE schedule_id = ? AND user_id = ? AND period_key = ?'
+  );
+  const toItem = (s, due, log, overdue = false) => ({
+    schedule: { ...s, weekdays: parseWeekdays(s.weekdays) },
+    period_key: due.key, due_at: due.dueAt,
+    period_start: due.periodStart || null, period_end: due.periodEnd || due.date,
+    late: !!log?.is_late, overdue,
+    status: log ? 'submitted' : (now.getTime() > due.dueMs ? (s.allow_late ? 'late_window' : 'missed') : 'waiting'),
+    log: log || null,
+  });
   const out = [];
   for (const s of list) {
     const due = currentDue(s, now);
-    if (!due) continue;
-    const log = db.prepare(
-      'SELECT id, is_late, self_progress, self_rating, score, featured FROM progress_log WHERE schedule_id = ? AND user_id = ? AND period_key = ?'
-    ).get(s.id, req.user.id, due.key);
-    out.push({
-      schedule: { ...s, weekdays: parseWeekdays(s.weekdays) },
-      period_key: due.key, due_at: due.dueAt, late: !!log?.is_late,
-      status: log ? 'submitted' : (now.getTime() > due.dueMs ? (s.allow_late ? 'late_window' : 'missed') : 'waiting'),
-      log: log || null,
-    });
+    if (due) out.push(toItem(s, due, logStmt.get(s.id, req.user.id, due.key)));
+    // 新版周报（长期允许补交）：再找最近一期已截止但未提交的历史周期，作为补交入口
+    if (due && isWeeklyV2(s) && s.allow_late) {
+      for (let i = 1; i <= 52; i++) {
+        const prev = weeklyShiftOccurrence(s, due, -i);
+        if (s.start_date && prev.date < s.start_date) break;
+        if (now.getTime() <= prev.dueMs) continue;
+        const prevLog = logStmt.get(s.id, req.user.id, prev.key);
+        if (!prevLog) { out.push(toItem(s, prev, null, true)); break; }
+      }
+    }
   }
   res.json({ dues: out });
 });

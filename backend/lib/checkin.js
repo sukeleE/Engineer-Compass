@@ -47,6 +47,32 @@ export function periodKeyOf(schedule, dateStr) {
   return schedule.freq === 'weekly' ? isoWeek(dateStr).key : dateStr;
 }
 
+// ===== 新版周报：weekdays 恰一个值 = 每期「截止星期」；周期自截止日往前 6 天 00:00 开始，周期内可提前提交 =====
+// weekdays 多个值为旧版「每周多次打卡」，仍走 dateMatches 旧逻辑
+export function isWeeklyV2(schedule) {
+  return schedule.kind !== 'once' && schedule.freq === 'weekly'
+    && parseWeekdays(schedule.weekdays).length === 1;
+}
+function weeklyDueDow(schedule) {
+  return isWeeklyV2(schedule) ? parseWeekdays(schedule.weekdays)[0] : 0;
+}
+const dowOfCn = (dateStr) => DOWMAP[dtfDow.format(new Date(cnDay(dateStr)))];
+// 任意日期所属周期的截止日（当天正是截止星期时为当天）
+function weeklyDueDate(dueDow, dateStr) {
+  return addDays(dateStr, (dueDow - dowOfCn(dateStr) + 7) % 7);
+}
+// 截止日对应的周期对象：periodStart=截止日-6天，periodEnd=截止日；key 取截止日所在 ISO 周
+export function weeklyOccurrenceAt(schedule, dueDate) {
+  const occ = dueOf(schedule, dueDate);
+  occ.periodStart = addDays(dueDate, -6);
+  occ.periodEnd = dueDate;
+  return occ;
+}
+// 以截止日为锚向前 n 个周期（n 可为负表示未来）
+export function weeklyShiftOccurrence(schedule, occ, n) {
+  return weeklyOccurrenceAt(schedule, addDays(occ.date, n * 7));
+}
+
 // 某天是否该打卡（在生效窗口内且命中频率规则）
 export function dateMatches(schedule, dateStr) {
   if (schedule.start_date && dateStr < schedule.start_date) return false;
@@ -68,7 +94,7 @@ export function dueOf(schedule, dateStr) {
   return { date: dateStr, key: periodKeyOf(schedule, dateStr), dueMs, dueAt: `${dateStr} ${hhmm}` };
 }
 
-// 最近一个「应交期」（<= 今天且命中规则），周报提醒/今日待办都基于它；无则 null
+// 最近一个「当前开放周期」：新版周报周期一开始即返回（截止日可在未来，支持提前提交）；旧版/每日取 <= 今天且命中的最近一期
 export function currentDue(schedule, now = new Date()) {
   const today = cnDateStr(now);
   if (schedule.kind === 'once') {
@@ -77,7 +103,16 @@ export function currentDue(schedule, now = new Date()) {
     if (schedule.start_date && d < schedule.start_date) return null;
     return dueOf(schedule, d);
   }
-  const lookback = schedule.freq === 'weekly' ? 13 : 7;
+  const v2 = weeklyDueDow(schedule);
+  if (v2) {
+    // 任务已整体结束则不再产生新周期（历史周期仍可按 checkOccurrence 长期补交）
+    if (schedule.end_date && today > schedule.end_date) return null;
+    const dueDate = weeklyDueDate(v2, today);
+    if (schedule.start_date && dueDate < schedule.start_date) return null;
+    if (schedule.end_date && dueDate > schedule.end_date) return null; // 截止日已超出任务结束日，最后一期不开放
+    return weeklyOccurrenceAt(schedule, dueDate);
+  }
+  const lookback = 13;
   const start = schedule.start_date || addDays(today, -lookback);
   for (let i = 0; i <= lookback; i++) {
     const d = addDays(today, -i);
@@ -87,9 +122,30 @@ export function currentDue(schedule, now = new Date()) {
   return null;
 }
 
-// 提交校验：period_key 必须是真实应交期；未来期拒；过期看 allow_late。返回 {date,key,late}
+// 提交校验：周期开始后即可提交（可提前）；截止前 late=0；截止后 allow_late 决定补交/拒绝；未开始或无效周期拒绝
 export function checkOccurrence(schedule, key, now = new Date()) {
   const today = cnDateStr(now);
+  const v2 = weeklyDueDow(schedule);
+  if (v2) {
+    const fail = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
+    // 以当前周期截止日为锚，按周反查 period_key（允许长期补交，向前扫约 5 年）
+    const curDueDate = weeklyDueDate(v2, today);
+    let dueDate = '';
+    for (let j = -300; j <= 2; j++) {
+      const d = addDays(curDueDate, j * 7);
+      if (periodKeyOf(schedule, d) === key) { dueDate = d; break; }
+    }
+    if (!dueDate) fail('打卡周期不存在或还未开始');
+    if (schedule.start_date && dueDate < schedule.start_date) fail('该周期在任务生效前已截止');
+    if (schedule.end_date && dueDate > schedule.end_date) fail('该周期不在任务生效区间内');
+    const occ = weeklyOccurrenceAt(schedule, dueDate);
+    // 首期可能在 start_date 之前就已开始：实际开放时刻取 max(周期开始, 任务开始)
+    const openDate = schedule.start_date && occ.periodStart < schedule.start_date ? schedule.start_date : occ.periodStart;
+    if (now.getTime() < cnDay(openDate)) fail('本期打卡还未开始，周期开始后即可提交');
+    if (now.getTime() < occ.dueMs) return { ...occ, late: 0 };
+    if (!schedule.allow_late) fail(`本期打卡已于 ${occ.dueAt} 截止，不能补交`);
+    return { ...occ, late: 1 };
+  }
   const maxScan = 400; // 防止 start_date 极早时全表扫描
   let start = schedule.start_date || addDays(today, -30);
   if (today < start) start = today;
@@ -110,7 +166,7 @@ export function checkOccurrence(schedule, key, now = new Date()) {
   e.status = 400; throw e;
 }
 
-// 看板周期列：每日取近 14 天；每周取近 6 周；一次性取自己
+// 看板周期列：每日取近 14 天；新版周报取含当前开放周期在内的近 6 期；旧版周报按已到来的打卡日；一次性取自己
 export function boardPeriods(schedule, now = new Date(), days = 14) {
   if (schedule.kind === 'once') {
     const d = (schedule.once_at || '').slice(0, 10);
@@ -118,6 +174,17 @@ export function boardPeriods(schedule, now = new Date(), days = 14) {
   }
   const today = cnDateStr(now);
   const out = [];
+  const v2 = weeklyDueDow(schedule);
+  if (v2) {
+    const cur = weeklyDueDate(v2, today); // 当前周期截止日（可能在未来，本周一到周六即显示本周列）
+    for (let j = 5; j >= 0; j--) {
+      const d = addDays(cur, -7 * j);
+      if (schedule.start_date && d < schedule.start_date) continue;
+      if (schedule.end_date && d > schedule.end_date) continue;
+      out.push(weeklyOccurrenceAt(schedule, d));
+    }
+    return out;
+  }
   if (schedule.freq === 'weekly') {
     const seen = new Set();
     for (let i = 0; i < 7 * days; i++) {
@@ -140,7 +207,13 @@ export function boardPeriods(schedule, now = new Date(), days = 14) {
 
 export function periodLabel(schedule, p) {
   if (schedule.kind === 'once') return `${p.date} 定时`;
-  if (schedule.freq === 'weekly') return p.key.replace(/^\d+-W/, '第 ') + ' 周';
+  if (schedule.freq === 'weekly') {
+    if (isWeeklyV2(schedule)) {
+      const mmdd = (x) => x.slice(5).replace('-', '/');
+      return `第${isoWeek(p.date).week}周（${mmdd(p.periodStart)}-${mmdd(p.periodEnd)}）`;
+    }
+    return p.key.replace(/^\d+-W/, '第 ') + ' 周';
+  }
   return `${p.date.slice(5)} 周${'日一二三四五六'[DOWMAP[dtfDow.format(new Date(cnDay(p.date)))]]}`;
 }
 
@@ -236,7 +309,7 @@ export function runCheckinReminders(db, now = new Date()) {
     if (!due) continue;
     const diffMin = (now.getTime() - due.dueMs) / 60000;
     let phase = null;
-    if (diffMin >= 15) phase = 'missed';
+    if (diffMin >= 15 && diffMin <= 24 * 60) phase = 'missed';
     else if (diffMin >= -60) phase = 'soon';
     if (!phase) continue;
     for (const m of membersStmt.all(s.team_id)) {

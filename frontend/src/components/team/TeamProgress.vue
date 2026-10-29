@@ -67,8 +67,8 @@ function schedFreqText(s) {
   if (s.freq === 'daily') return `每日 ${s.due_time} 截止`;
   const names = ['一', '二', '三', '四', '五', '六', '日'];
   const wd = (s.weekdays || []).slice().sort().map((x) => '周' + names[x - 1]).join('、');
-  return `每周 ${wd} · ${s.due_time} 截止`;
-
+  if ((s.weekdays || []).length === 1) return `每${wd} ${s.due_time} 截止 · 周期内可提前提交`;
+  return `每周 ${wd} · ${s.due_time} 截止`; // 旧版一周多次打卡
 }
 
 // ---- 打卡任务建/改/删 ----
@@ -99,14 +99,30 @@ function openSchedEdit(s) {
   });
   schedDlg.value = true;
 }
+// 正在编辑的旧版「一周多次打卡」任务保留多选；新建/新版周报只有一个截止星期（单选）
+const legacyMultiWeek = computed(() =>
+  !!(schedEditing.value && (schedEditing.value.weekdays?.length || 0) > 1));
 function toggleWeekday(n) {
-  const i = sf.weekdays.indexOf(n);
-  if (i >= 0) sf.weekdays.splice(i, 1); else sf.weekdays.push(n);
+  if (legacyMultiWeek.value) {
+    const i = sf.weekdays.indexOf(n);
+    if (i >= 0) sf.weekdays.splice(i, 1); else sf.weekdays.push(n);
+  } else {
+    sf.weekdays = [n];
+  }
+}
+function onFreqChange(v) {
+  if (v === 'weekly' && !legacyMultiWeek.value) {
+    if (sf.weekdays.length !== 1) sf.weekdays = [7]; // 默认周日截止
+    if (!schedEditing.value) sf.due_time = '23:59';   // 新建周报默认周日 23:59
+  }
 }
 async function saveSched() {
   if (!sf.title.trim()) return ElMessage.warning('请填写任务名称');
   if (sf.kind === 'recurring' && sf.freq === 'weekly' && !sf.weekdays.length) {
-    return ElMessage.warning('每周打卡至少选择一个星期');
+    return ElMessage.warning('请选择每周截止星期');
+  }
+  if (sf.kind === 'recurring' && sf.freq === 'weekly' && !legacyMultiWeek.value && sf.weekdays.length !== 1) {
+    return ElMessage.warning('每周任务只能选择一个截止星期');
   }
   const body = {
     title: sf.title.trim(), kind: sf.kind,
@@ -146,6 +162,7 @@ const ciBusy = ref(false);
 const ciSched = ref(null);
 const ciPeriod = ref('');
 const ciDueAt = ref('');
+const ciPeriodRange = ref('');
 const ciLate = ref(false);
 const ciHtml = ref('');
 const ciProgress = ref(0);
@@ -162,10 +179,12 @@ function openCiFromDue(d) {
   ciSched.value = d.schedule;
   ciPeriod.value = d.period_key;
   ciDueAt.value = d.due_at;
+  ciPeriodRange.value = d.period_start ? `${d.period_start} 至 ${d.period_end}` : '';
   ciHtml.value = ''; reportAtts.value = []; ciProgress.value = 0; ciRating.value = 0;
   ciLate.value = d.status === 'late_window';
   if (d.status === 'submitted') {
-    const old = logs.value.find((x) => Number(x.schedule_id) === Number(d.schedule.id) && x.period_key === d.period_key);
+    const old = logs.value.find((x) => Number(x.schedule_id) === Number(d.schedule.id)
+      && x.period_key === d.period_key && x.user_id === props.me.user_id);
     if (old) fillCiFromLog(old);
   }
   ciDlg.value = true;
@@ -173,7 +192,7 @@ function openCiFromDue(d) {
 function openCiFromLog(l) {
   const s = schedules.value.find((x) => Number(x.id) === Number(l.schedule_id));
   if (!s) return;
-  ciSched.value = s; ciPeriod.value = l.period_key; ciDueAt.value = '';
+  ciSched.value = s; ciPeriod.value = l.period_key; ciDueAt.value = ''; ciPeriodRange.value = '';
   fillCiFromLog(l);
   ciDlg.value = true;
 }
@@ -488,14 +507,14 @@ reload().catch((e) => ElMessage.error(e.message));
 
     <!-- 今日打卡待办：应交未交/可补交醒目提示，已交显示自评与评分入口 -->
     <div v-if="myDues.length" class="ci-due">
-      <div v-for="d in myDues" :key="d.schedule.id" class="due-card" :class="d.status">
+      <div v-for="d in myDues" :key="d.schedule.id + '-' + d.period_key + (d.overdue ? '-ov' : '')" class="due-card" :class="d.status">
         <div class="due-main">
           <span class="due-icon">{{ d.status === 'submitted' ? '✅' : (d.status === 'missed' ? '⛔' : (d.status === 'late_window' ? '⏰' : '📌')) }}</span>
           <div class="due-text">
-            <b>{{ d.schedule.title }}</b>
+            <b>{{ d.schedule.title }}<el-tag v-if="d.overdue" size="small" type="warning" effect="plain">补交</el-tag></b>
             <span class="due-sub">
               截止 {{ d.due_at }}
-              <template v-if="d.status === 'waiting'"> · 待提交</template>
+              <template v-if="d.status === 'waiting'"> · {{ d.period_start ? '周期内可提前提交 · 待提交' : '待提交' }}</template>
               <template v-else-if="d.status === 'late_window'"> · 已超时，可补交（标迟交）</template>
               <template v-else-if="d.status === 'missed'"> · 已截止，不能补交</template>
               <template v-else-if="d.late"> · 已补交（迟交）</template>
@@ -559,16 +578,19 @@ reload().catch((e) => ElMessage.error(e.message));
 
         <template v-if="sf.kind === 'recurring'">
           <el-form-item label="频率">
-            <el-radio-group v-model="sf.freq">
+            <el-radio-group v-model="sf.freq" @change="onFreqChange">
               <el-radio label="daily">每日</el-radio>
-              <el-radio label="weekly">每周指定星期</el-radio>
+              <el-radio label="weekly">每周（周报）</el-radio>
             </el-radio-group>
           </el-form-item>
-          <el-form-item v-if="sf.freq === 'weekly'" label="打卡日">
+          <el-form-item v-if="sf.freq === 'weekly'" :label="legacyMultiWeek ? '打卡日（旧版每周多次）' : '每周截止星期'">
             <div class="wd-row">
               <el-button v-for="(n, i) in [1,2,3,4,5,6,7]" :key="n" size="small"
                 :type="sf.weekdays.includes(n) ? 'primary' : 'default'"
                 @click="toggleWeekday(n)">{{ ['周一','周二','周三','周四','周五','周六','周日'][i] }}</el-button>
+            </div>
+            <div v-if="!legacyMultiWeek" class="ci-hint">
+              周期为截止星期往前 7 天（如周日截止＝周一至周日）；周期开始后即可提前提交，超过截止时间提交将标记为迟交，补交长期有效。
             </div>
           </el-form-item>
           <el-form-item label="每期截止时间">
@@ -613,6 +635,7 @@ reload().catch((e) => ElMessage.error(e.message));
       <div class="ci-dlg-meta">
         <el-tag size="small" effect="plain">本期：{{ ciPeriod }}</el-tag>
         <el-tag v-if="ciLate" size="small" type="warning">迟交</el-tag>
+        <span v-if="ciPeriodRange" class="ci-period-range">周期 {{ ciPeriodRange }}</span>
         <span v-if="ciDueAt">截止 {{ ciDueAt }}</span>
       </div>
       <LiteEditor v-model="ciHtml" placeholder="本期做了什么？卡在哪？下一步？（可直接粘贴图片）" />
@@ -685,7 +708,7 @@ reload().catch((e) => ElMessage.error(e.message));
           <el-tag size="small" type="success" effect="dark">✓ 准时</el-tag>
           <el-tag size="small" type="warning" effect="dark">迟 迟交</el-tag>
           <el-tag size="small" type="danger" effect="dark">缺 未交</el-tag>
-          <el-tag size="small" type="info" effect="plain">待 未到期</el-tag>
+          <el-tag size="small" type="info" effect="plain">待 待提交</el-tag>
         </div>
       </div>
     </el-dialog>
@@ -977,11 +1000,14 @@ reload().catch((e) => ElMessage.error(e.message));
 }
 .ci-form {
   .wd-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ci-hint { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--text-2); }
   .ci-dash { margin: 0 8px; color: var(--text-2); }
   .ci-opts { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
   .ci-auto { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
 }
-.ci-dlg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-2); }
+.ci-dlg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-2);
+  .ci-period-range { color: var(--text-2); }
+}
 .ci-self-form { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px;
   .ci-self-item { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 }
