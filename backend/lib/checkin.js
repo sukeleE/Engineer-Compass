@@ -109,7 +109,8 @@ export function currentDue(schedule, now = new Date()) {
     if (schedule.end_date && today > schedule.end_date) return null;
     const dueDate = weeklyDueDate(v2, today);
     if (schedule.start_date && dueDate < schedule.start_date) return null;
-    if (schedule.end_date && dueDate > schedule.end_date) return null; // 截止日已超出任务结束日，最后一期不开放
+    // 末期：只要本期在任务结束前已经开始（周期开始日 ≤ end_date），本期仍可提交
+    if (schedule.end_date && addDays(dueDate, -6) > schedule.end_date) return null;
     return weeklyOccurrenceAt(schedule, dueDate);
   }
   const lookback = 13;
@@ -137,8 +138,8 @@ export function checkOccurrence(schedule, key, now = new Date()) {
     }
     if (!dueDate) fail('打卡周期不存在或还未开始');
     if (schedule.start_date && dueDate < schedule.start_date) fail('该周期在任务生效前已截止');
-    if (schedule.end_date && dueDate > schedule.end_date) fail('该周期不在任务生效区间内');
     const occ = weeklyOccurrenceAt(schedule, dueDate);
+    if (schedule.end_date && occ.periodStart > schedule.end_date) fail('该周期不在任务生效区间内');
     // 首期可能在 start_date 之前就已开始：实际开放时刻取 max(周期开始, 任务开始)
     const openDate = schedule.start_date && occ.periodStart < schedule.start_date ? schedule.start_date : occ.periodStart;
     if (now.getTime() < cnDay(openDate)) fail('本期打卡还未开始，周期开始后即可提交');
@@ -180,7 +181,7 @@ export function boardPeriods(schedule, now = new Date(), days = 14) {
     for (let j = 5; j >= 0; j--) {
       const d = addDays(cur, -7 * j);
       if (schedule.start_date && d < schedule.start_date) continue;
-      if (schedule.end_date && d > schedule.end_date) continue;
+      if (schedule.end_date && addDays(d, -6) > schedule.end_date) continue;
       out.push(weeklyOccurrenceAt(schedule, d));
     }
     return out;
