@@ -105,12 +105,15 @@ export function currentDue(schedule, now = new Date()) {
   }
   const v2 = weeklyDueDow(schedule);
   if (v2) {
-    // 任务已整体结束则不再产生新周期（历史周期仍可按 checkOccurrence 长期补交）
-    if (schedule.end_date && today > schedule.end_date) return null;
-    const dueDate = weeklyDueDate(v2, today);
+    let dueDate = weeklyDueDate(v2, today);
     if (schedule.start_date && dueDate < schedule.start_date) return null;
-    // 末期：只要本期在任务结束前已经开始（周期开始日 ≤ end_date），本期仍可提交
-    if (schedule.end_date && addDays(dueDate, -6) > schedule.end_date) return null;
+    if (schedule.end_date) {
+      // end_date 表示任务不再产生“新周期”，但最后一期可能在 end_date 后才截止；
+      // 钳制到最后一期，保证末期在截止前可见、截止后仍作为长期补交入口。
+      const lastDueDate = weeklyDueDate(v2, schedule.end_date);
+      if (lastDueDate < (schedule.start_date || '0000-01-01')) return null;
+      if (dueDate > lastDueDate) dueDate = lastDueDate;
+    }
     return weeklyOccurrenceAt(schedule, dueDate);
   }
   const lookback = 13;

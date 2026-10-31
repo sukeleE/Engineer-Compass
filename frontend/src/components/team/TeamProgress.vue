@@ -266,6 +266,24 @@ async function openBoard(s) {
 }
 const boardCellType = { on: 'success', late: 'warning', miss: 'danger', wait: 'info' };
 const boardCellText = { on: '✓', late: '迟', miss: '缺', wait: '待' };
+const boardRoleFilters = computed(() => {
+  const all = props.members || [];
+  const hasRole = (m, role) => {
+    const id = Number(role.id);
+    if (Array.isArray(m.role_ids) && m.role_ids.map(Number).includes(id)) return true;
+    return Array.isArray(m.role_names) && m.role_names.includes(role.name);
+  };
+  const noRoleCount = all.filter((m) => !m.is_owner && !(m.role_ids?.length || m.role_names?.length)).length;
+  return [
+    { value: '', label: '全部', count: all.length || board.value?.members?.length || 0 },
+    { value: 'owner', label: '👑 组长', count: all.filter((m) => m.is_owner).length },
+    ...(board.value?.roles || []).map((r) => ({
+      value: String(r.id), label: r.name, count: all.filter((m) => hasRole(m, r)).length,
+    })),
+    ...(noRoleCount ? [{ value: 'none', label: '无角色', count: noRoleCount }] : []),
+  ];
+});
+function selectBoardRole(value) { loadBoard(value); }
 
 // 优秀汇报卡片展开
 const expandedFt = ref(new Set());
@@ -670,40 +688,43 @@ reload().catch((e) => ElMessage.error(e.message));
       top="8vh" append-to-body>
       <div v-if="board" class="board-wrap">
         <div class="board-filter">
-          <span class="bf-label">查看角色：</span>
-          <el-select :model-value="boardRole" size="small" style="width:170px" @change="loadBoard">
-            <el-option label="全部成员" value="" />
-            <el-option label="👑 组长" value="owner" />
-            <el-option v-for="r in board.roles" :key="r.id" :value="r.id" :label="r.name" />
-          </el-select>
+          <div class="board-role-tags">
+            <button v-for="f in boardRoleFilters" :key="f.value" type="button" class="board-role-chip"
+              :class="{ active: String(boardRole || '') === f.value }" @click="selectBoardRole(f.value)">
+              {{ f.label }} <span>{{ f.count }}</span>
+            </button>
+          </div>
           <span class="bf-count">已交 {{ board.submitted_total }} 格 / 共 {{ board.members.length * board.periods.length }} 格</span>
         </div>
-        <table class="board-table">
-          <thead>
-            <tr>
-              <th class="b-name">成员</th>
-              <th v-for="p in board.periods" :key="p.key">{{ p.label }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in board.members" :key="m.id">
-              <td class="b-name">
-                <div class="b-name-line">{{ boardName(m) }}<span v-if="m.is_owner"> 👑</span></div>
-                <div class="b-roles">
-                  <el-tag v-for="rn in m.role_names" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
-                  <span v-if="!m.role_names.length && !m.is_owner" class="b-norole">无角色</span>
-                </div>
-              </td>
-              <td v-for="c in m.cells" :key="c.key" class="b-cell">
+        <div class="board-scroll">
+          <div class="board-grid" :style="{ '--periods': board.periods.length }">
+            <div class="bg-head bg-corner">成员</div>
+            <div v-for="p in board.periods" :key="p.key" class="bg-head" :title="p.dueAt ? `截止 ${p.dueAt}` : p.label">{{ p.label }}</div>
+            <template v-for="m in board.members" :key="m.id">
+              <div class="bg-member">
+                <span class="bg-avatar">
+                  <img v-if="m.avatar" :src="m.avatar" alt="" />
+                  <template v-else>{{ boardName(m).charAt(0) || '?' }}</template>
+                </span>
+                <span class="bg-info">
+                  <b class="bg-name">{{ boardName(m) }}<i v-if="m.is_owner"> 👑</i></b>
+                  <span class="bg-meta">
+                    <template v-if="m.is_owner">组长</template>
+                    <template v-else-if="m.role_names?.length">{{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em></template>
+                    <template v-else>无角色</template>
+                  </span>
+                </span>
+              </div>
+              <div v-for="c in m.cells" :key="c.key" class="bg-cell" :class="c.state">
                 <el-tag size="small" :type="boardCellType[c.state]" effect="c.state === 'wait' ? 'plain' : 'dark'">
                   {{ boardCellText[c.state] }}
                 </el-tag>
                 <span v-if="c.featured" title="优秀">🏅</span>
-              </td>
-            </tr>
-            <tr v-if="!board.members.length"><td :colspan="board.periods.length + 1" class="b-empty">该角色下暂无成员</td></tr>
-          </tbody>
-        </table>
+              </div>
+            </template>
+            <div v-if="!board.members.length" class="b-empty" style="grid-column: 1 / -1">该角色下暂无成员</div>
+          </div>
+        </div>
         <div class="board-legend">
           <el-tag size="small" type="success" effect="dark">✓ 准时</el-tag>
           <el-tag size="small" type="warning" effect="dark">迟 迟交</el-tag>
@@ -1043,23 +1064,61 @@ reload().catch((e) => ElMessage.error(e.message));
     border-radius: 8px; padding: 6px 10px; }
 }
 
-// 看板
-.board-wrap { overflow-x: auto; }
-.board-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
-  .bf-label { font-size: 13px; color: var(--text-2); }
-  .bf-count { font-size: 12.5px; color: var(--text-2); }
+// 看板：角色筛选小方块 + 成员方块网格（成员多时在弹窗内滚动，避免显示不全）
+.board-wrap { min-width: 0; }
+.board-filter { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+  .bf-count { margin-left: auto; font-size: 12.5px; color: var(--text-2); padding-top: 6px; white-space: nowrap; }
 }
-.board-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 480px;
-  th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: center; white-space: nowrap; font-size: 13px; }
-  th { background: var(--surface-3, #f8fafc); position: sticky; top: 0; }
-  .b-name { text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--card-bg); z-index: 1; }
-  .b-name-line { font-weight: 600; }
-  .b-roles { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; font-weight: 400; }
-  .b-norole { font-size: 11px; color: #cbd5e1; }
-  .b-cell { display: table-cell; }
-  .b-cell :deep(.el-tag) { margin-right: 2px; }
-  .b-empty { text-align: center; color: #94a3b8; padding: 20px 0; }
+.board-role-tags { display: flex; gap: 7px; flex-wrap: wrap; flex: 1; }
+.board-role-chip {
+  border: 1px solid var(--border); background: var(--card-bg); color: var(--text-2);
+  border-radius: 999px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; transition: all .15s;
+  span { color: #94a3b8; margin-left: 3px; }
+  &:hover { border-color: color-mix(in srgb, var(--primary) 45%, white); color: var(--primary); }
+  &.active { background: var(--primary); border-color: var(--primary); color: #fff; span { color: rgba(255,255,255,.82); } }
 }
+.board-scroll {
+  max-height: min(62vh, 680px); overflow: auto; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--card-bg);
+}
+.board-grid {
+  display: grid; grid-template-columns: 168px repeat(var(--periods), minmax(82px, 1fr));
+  min-width: 680px;
+}
+.bg-head {
+  position: sticky; top: 0; z-index: 2; padding: 9px 8px; background: var(--surface-3, #f8fafc);
+  border-bottom: 1px solid var(--border); text-align: center; font-size: 12px; font-weight: 600;
+  line-height: 1.25; white-space: nowrap;
+}
+.bg-corner { position: sticky; left: 0; z-index: 4; text-align: left; }
+.bg-member {
+  position: sticky; left: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  min-height: 58px; padding: 8px 10px; background: var(--card-bg);
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.bg-avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; overflow: hidden; font-size: 13px; font-weight: 600;
+  background: var(--primary); color: #fff;
+  img { width: 100%; height: 100%; object-fit: cover; }
+}
+.bg-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.bg-name {
+  font-size: 13px; line-height: 1.2; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; i { font-style: normal; }
+}
+.bg-meta { color: var(--text-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  em { font-style: normal; color: #94a3b8; }
+}
+.bg-cell {
+  min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 2px;
+  border-bottom: 1px solid var(--border); padding: 6px 4px;
+  &.on { background: color-mix(in srgb, #22c55e 5%, transparent); }
+  &.late { background: color-mix(in srgb, #f59e0b 7%, transparent); }
+  &.miss { background: color-mix(in srgb, #ef4444 6%, transparent); }
+  &.wait { background: transparent; }
+}
+.b-empty { grid-column: 1 / -1; text-align: center; color: #94a3b8; padding: 24px 0; }
 .board-legend { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
 @media (max-width: 768px) {

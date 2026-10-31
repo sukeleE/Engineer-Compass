@@ -246,6 +246,7 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
   // 可选：按角色筛选（role_id=数字 或 owner 仅看组长）
   const roleFilter = String(req.query.role_id || '');
   if (roleFilter === 'owner') members = members.filter((m) => m.is_owner);
+  else if (roleFilter === 'none') members = members.filter((m) => !m.is_owner && !m.role_ids.length);
   else if (/^\d+$/.test(roleFilter)) members = members.filter((m) => m.role_ids.includes(Number(roleFilter)));
   const logs = periods.length
     ? db.prepare(
