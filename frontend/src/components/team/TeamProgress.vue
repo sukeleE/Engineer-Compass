@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
-import { fmtDateOnly, fmtShort } from '../../utils/time.js';
+import { fmtDateOnly, fmtShort, fmtDateTime } from '../../utils/time.js';
 import AttachmentList, { normAtts } from './AttachmentList.vue';
 import CommentThread from './CommentThread.vue';
 import ResourcePicker from '../ResourcePicker.vue';
@@ -266,6 +266,27 @@ async function openBoard(s) {
 }
 const boardCellType = { on: 'success', late: 'warning', miss: 'danger', wait: 'info' };
 const boardCellText = { on: '✓', late: '迟', miss: '缺', wait: '待' };
+const boardStateName = { on: '准时提交', late: '迟交补交', miss: '逾期未交', wait: '待提交' };
+const selectedBoardMemberId = ref(null);
+const selectedBoardMember = computed(() => board.value?.members?.find((m) => Number(m.id) === Number(selectedBoardMemberId.value)) || null);
+const boardCurrentCell = (m) => m.cells?.[m.cells.length - 1] || null;
+const boardCount = (m, state) => m.cells?.filter((c) => c.state === state).length || 0;
+const boardSubmittedCount = (m) => boardCount(m, 'on') + boardCount(m, 'late');
+const boardDetailRows = computed(() => {
+  const m = selectedBoardMember.value;
+  if (!m) return [];
+  return board.value.periods.map((p, i) => ({ ...p, ...m.cells[i] }));
+});
+function openBoardMember(m) { selectedBoardMemberId.value = m.id; }
+function closeBoardMember() { selectedBoardMemberId.value = null; }
+async function openBoardLog(c) {
+  if (!c?.log_id) return;
+  const l = logs.value.find((x) => Number(x.id) === Number(c.log_id));
+  if (!l) return ElMessage.warning('请在时间线中查看这条汇报');
+  boardDlg.value = false;
+  closeBoardMember();
+  openCiFromLog(l);
+}
 const boardRoleFilters = computed(() => {
   const all = props.members || [];
   const hasRole = (m, role) => {
@@ -684,7 +705,7 @@ reload().catch((e) => ElMessage.error(e.message));
     </el-dialog>
 
     <!-- ============ 提交看板弹窗（成员 × 周期） ============ -->
-    <el-dialog v-model="boardDlg" :title="board ? `提交看板 · ${board.schedule.title}` : '提交看板'" width="780px"
+    <el-dialog v-model="boardDlg" :title="board ? `提交看板 · ${board.schedule.title}` : '提交看板'" width="900px"
       top="8vh" append-to-body>
       <div v-if="board" class="board-wrap">
         <div class="board-filter">
@@ -696,40 +717,95 @@ reload().catch((e) => ElMessage.error(e.message));
           </div>
           <span class="bf-count">已交 {{ board.submitted_total }} 格 / 共 {{ board.members.length * board.periods.length }} 格</span>
         </div>
-        <div class="board-scroll">
-          <div class="board-grid" :style="{ '--periods': board.periods.length }">
-            <div class="bg-head bg-corner">成员</div>
-            <div v-for="p in board.periods" :key="p.key" class="bg-head" :title="p.dueAt ? `截止 ${p.dueAt}` : p.label">{{ p.label }}</div>
-            <template v-for="m in board.members" :key="m.id">
-              <div class="bg-member">
-                <span class="bg-avatar">
-                  <img v-if="m.avatar" :src="m.avatar" alt="" />
-                  <template v-else>{{ boardName(m).charAt(0) || '?' }}</template>
-                </span>
-                <span class="bg-info">
-                  <b class="bg-name">{{ boardName(m) }}<i v-if="m.is_owner"> 👑</i></b>
-                  <span class="bg-meta">
-                    <template v-if="m.is_owner">组长</template>
-                    <template v-else-if="m.role_names?.length">{{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em></template>
-                    <template v-else>无角色</template>
-                  </span>
-                </span>
-              </div>
-              <div v-for="c in m.cells" :key="c.key" class="bg-cell" :class="c.state">
-                <el-tag size="small" :type="boardCellType[c.state]" effect="c.state === 'wait' ? 'plain' : 'dark'">
-                  {{ boardCellText[c.state] }}
-                </el-tag>
-                <span v-if="c.featured" title="优秀">🏅</span>
-              </div>
-            </template>
-            <div v-if="!board.members.length" class="b-empty" style="grid-column: 1 / -1">该角色下暂无成员</div>
+        <div class="board-scroll board-member-scroll">
+          <div class="board-member-grid">
+            <button v-for="m in board.members" :key="m.id" type="button" class="board-member-card"
+              :class="{ me: Number(m.id) === Number(props.me.user_id) }" @click="openBoardMember(m)">
+              <span class="bm-avatar">
+                <img v-if="m.avatar" :src="m.avatar" alt="" />
+                <template v-else>{{ boardName(m).charAt(0) || '?' }}</template>
+              </span>
+              <b class="bm-name">{{ boardName(m) }}</b>
+              <span class="bm-role">
+                <template v-if="m.is_owner">👑 组长</template>
+                <template v-else-if="m.role_names?.length">
+                  {{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em>
+                </template>
+                <template v-else>无角色</template>
+              </span>
+              <span class="bm-current" :class="boardCurrentCell(m)?.state">
+                本期 · {{ boardCellText[boardCurrentCell(m)?.state] || '?' }} {{ boardStateName[boardCurrentCell(m)?.state] || '' }}
+                <i v-if="boardCurrentCell(m)?.featured">🏅</i>
+              </span>
+              <span class="bm-dots" :title="`准时 ${boardCount(m,'on')} / 迟交 ${boardCount(m,'late')} / 缺 ${boardCount(m,'miss')}`">
+                <i v-for="c in m.cells" :key="c.key" :class="c.state" :title="c.label"></i>
+              </span>
+              <span class="bm-count">已交 {{ boardSubmittedCount(m) }}/{{ board.periods.length }}</span>
+            </button>
           </div>
+          <div v-if="!board.members.length" class="b-empty">该角色下暂无成员</div>
         </div>
         <div class="board-legend">
           <el-tag size="small" type="success" effect="dark">✓ 准时</el-tag>
           <el-tag size="small" type="warning" effect="dark">迟 迟交</el-tag>
           <el-tag size="small" type="danger" effect="dark">缺 未交</el-tag>
           <el-tag size="small" type="info" effect="plain">待 待提交</el-tag>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 看板成员详情弹窗：成员卡片矩阵的展开视图 -->
+    <el-dialog v-model="selectedBoardMemberId" title="成员汇报详情" width="640px" top="9vh" append-to-body
+      :close-on-click-modal="false" @update:model-value="(v) => { if (!v) closeBoardMember(); }">
+      <div v-if="selectedBoardMember" class="bm-detail">
+        <div class="bmd-head">
+          <span class="bm-avatar large">
+            <img v-if="selectedBoardMember.avatar" :src="selectedBoardMember.avatar" alt="" />
+            <template v-else>{{ boardName(selectedBoardMember).charAt(0) || '?' }}</template>
+          </span>
+          <div class="bmd-title">
+            <div class="bmd-name-line">
+              <b>{{ boardName(selectedBoardMember) }}</b>
+              <el-tag v-if="selectedBoardMember.is_owner" size="small" type="warning">👑 组长</el-tag>
+              <el-tag v-if="Number(selectedBoardMember.id) === Number(props.me.user_id)" size="small" type="info" effect="plain">我</el-tag>
+            </div>
+            <div class="bmd-roles">
+              <el-tag v-for="rn in selectedBoardMember.role_names || []" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
+              <el-tag v-if="!selectedBoardMember.is_owner && !selectedBoardMember.role_names?.length" size="small" type="info" effect="plain">无角色</el-tag>
+            </div>
+          </div>
+        </div>
+
+        <div class="bmd-stats">
+          <span class="ok">准时 {{ boardCount(selectedBoardMember, 'on') }}</span>
+          <span class="late">迟交 {{ boardCount(selectedBoardMember, 'late') }}</span>
+          <span class="miss">缺交 {{ boardCount(selectedBoardMember, 'miss') }}</span>
+          <span class="wait">待交 {{ boardCount(selectedBoardMember, 'wait') }}</span>
+        </div>
+
+        <div class="bmd-periods">
+          <div v-for="row in boardDetailRows" :key="row.key" class="bmd-period" :class="row.state">
+            <div class="bmd-period-main">
+              <b>{{ row.label }}</b>
+              <span class="bmd-due">截止 {{ row.due_at }}</span>
+              <el-tag size="small" :type="boardCellType[row.state]" effect="row.state === 'wait' ? 'plain' : 'dark'">
+                {{ boardStateName[row.state] }}
+              </el-tag>
+              <el-tag v-if="row.featured" size="small" type="warning" effect="plain">🏅 优秀</el-tag>
+            </div>
+            <div class="bmd-period-sub">
+              <template v-if="row.log_id">
+                <span>提交：{{ fmtDateTime(row.submitted_at) }}</span>
+                <span v-if="row.self_progress !== null">进度 {{ row.self_progress }}%</span>
+                <span v-if="row.self_rating !== null">自评 {{ row.self_rating }}★</span>
+                <span v-if="row.score">组长评分 {{ row.score }}★</span>
+                <el-button v-if="Number(selectedBoardMember.id) === Number(props.me.user_id) || props.perms.task"
+                  size="small" text type="primary" @click="openBoardLog(row)">查看/修改汇报</el-button>
+              </template>
+              <span v-else-if="row.state === 'miss'" class="bmd-miss">已逾期，可长期补交</span>
+              <span v-else class="bmd-wait">周期内待提交，可提前提交</span>
+            </div>
+          </div>
         </div>
       </div>
     </el-dialog>
@@ -1077,49 +1153,84 @@ reload().catch((e) => ElMessage.error(e.message));
   &:hover { border-color: color-mix(in srgb, var(--primary) 45%, white); color: var(--primary); }
   &.active { background: var(--primary); border-color: var(--primary); color: #fff; span { color: rgba(255,255,255,.82); } }
 }
-.board-scroll {
-  max-height: min(62vh, 680px); overflow: auto; border: 1px solid var(--border);
-  border-radius: 12px; background: var(--card-bg);
+.board-member-scroll {
+  padding: 10px;
 }
-.board-grid {
-  display: grid; grid-template-columns: 168px repeat(var(--periods), minmax(82px, 1fr));
-  min-width: 680px;
+.board-member-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap: 10px;
 }
-.bg-head {
-  position: sticky; top: 0; z-index: 2; padding: 9px 8px; background: var(--surface-3, #f8fafc);
-  border-bottom: 1px solid var(--border); text-align: center; font-size: 12px; font-weight: 600;
-  line-height: 1.25; white-space: nowrap;
+.board-member-card {
+  position: relative; text-align: left; border: 1px solid var(--border); background: var(--card-bg);
+  border-radius: 14px; padding: 12px; min-height: 138px; cursor: pointer; transition: all .15s;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  &:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--primary) 45%, white); box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 10%, transparent); }
+  &.me { background: var(--primary-tint); border-color: color-mix(in srgb, var(--primary) 30%, white); }
 }
-.bg-corner { position: sticky; left: 0; z-index: 4; text-align: left; }
-.bg-member {
-  position: sticky; left: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
-  min-height: 58px; padding: 8px 10px; background: var(--card-bg);
-  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
-}
-.bg-avatar {
-  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: inline-flex;
-  align-items: center; justify-content: center; overflow: hidden; font-size: 13px; font-weight: 600;
+.bm-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; overflow: hidden; font-size: 15px; font-weight: 600;
   background: var(--primary); color: #fff;
+  &.large { width: 48px; height: 48px; font-size: 19px; }
   img { width: 100%; height: 100%; object-fit: cover; }
 }
-.bg-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.bg-name {
-  font-size: 13px; line-height: 1.2; font-weight: 600; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; i { font-style: normal; }
+.bm-name {
+  max-width: 100%; font-size: 13.5px; line-height: 1.25; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.bg-meta { color: var(--text-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.bm-role { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   em { font-style: normal; color: #94a3b8; }
 }
-.bg-cell {
-  min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 2px;
-  border-bottom: 1px solid var(--border); padding: 6px 4px;
-  &.on { background: color-mix(in srgb, #22c55e 5%, transparent); }
-  &.late { background: color-mix(in srgb, #f59e0b 7%, transparent); }
-  &.miss { background: color-mix(in srgb, #ef4444 6%, transparent); }
-  &.wait { background: transparent; }
+.bm-current {
+  display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+  font-size: 11.5px; border-radius: 999px; padding: 3px 7px; white-space: nowrap;
+  &.on { color: #15803d; background: #dcfce7; }
+  &.late { color: #b45309; background: #fef3c7; }
+  &.miss { color: #b91c1c; background: #fee2e2; }
+  &.wait { color: var(--text-2); background: rgba(148,163,184,.14); }
+  i { font-style: normal; }
 }
-.b-empty { grid-column: 1 / -1; text-align: center; color: #94a3b8; padding: 24px 0; }
+.bm-dots { display: flex; gap: 4px; margin-top: auto;
+  i { width: 9px; height: 9px; border-radius: 50%; background: #cbd5e1; }
+  i.on { background: #22c55e; }
+  i.late { background: #f59e0b; }
+  i.miss { background: #ef4444; }
+}
+.bm-count { font-size: 11.5px; color: #94a3b8; }
+.b-empty { text-align: center; color: #94a3b8; padding: 24px 0; }
 .board-legend { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+// 看板成员详情
+.bm-detail { display: flex; flex-direction: column; gap: 14px; }
+.bmd-head { display: flex; align-items: center; gap: 12px; }
+.bmd-title { flex: 1; min-width: 0; }
+.bmd-name-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  b { font-size: 16px; }
+}
+.bmd-roles { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.bmd-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  span { border-radius: 10px; padding: 8px 10px; font-size: 12.5px; text-align: center; background: var(--surface-3, #f8fafc); }
+  .ok { color: #15803d; background: #dcfce7; }
+  .late { color: #b45309; background: #fef3c7; }
+  .miss { color: #b91c1c; background: #fee2e2; }
+  .wait { color: var(--text-2); background: rgba(148,163,184,.14); }
+}
+.bmd-periods { display: flex; flex-direction: column; gap: 8px; max-height: 48vh; overflow: auto; padding-right: 2px; }
+.bmd-period { border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px; padding: 9px 11px;
+  display: flex; flex-direction: column; gap: 6px;
+  &.on { border-left-color: #22c55e; }
+  &.late { border-left-color: #f59e0b; }
+  &.miss { border-left-color: #ef4444; }
+  &.wait { border-left-color: #cbd5e1; }
+}
+.bmd-period-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  b { font-size: 13px; }
+}
+.bmd-due { color: var(--text-2); font-size: 12px; }
+.bmd-period-sub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-2); font-size: 12px;
+  .el-button { margin-left: auto; }
+}
+.bmd-miss { color: #b91c1c; }
+.bmd-wait { color: var(--text-2); }
 
 @media (max-width: 768px) {
   .ci-head { .ci-freq { width: 100%; } }

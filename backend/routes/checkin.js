@@ -250,7 +250,8 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
   else if (/^\d+$/.test(roleFilter)) members = members.filter((m) => m.role_ids.includes(Number(roleFilter)));
   const logs = periods.length
     ? db.prepare(
-      `SELECT id, user_id, period_key, is_late, score, featured, create_time
+      `SELECT id, user_id, period_key, is_late, score, featured, create_time,
+              self_progress, self_rating
        FROM progress_log WHERE team_id = ? AND schedule_id = ? AND period_key IN (${periods.map(() => '?').join(',')})`
     ).all(ctx.team.id, sched.id, ...periods.map((p) => p.key))
     : [];
@@ -264,7 +265,12 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
       let state = 'wait';
       if (l) state = l.is_late ? 'late' : 'on';
       else if (now > p.dueMs) state = 'miss';
-      return { key: p.key, state, score: l?.score || null, featured: !!l?.featured };
+      return {
+        key: p.key, label: p.label, due_at: p.dueAt, state,
+        log_id: l?.id || null, score: l?.score || null, featured: !!l?.featured,
+        submitted_at: l?.create_time || null,
+        self_progress: l?.self_progress ?? null, self_rating: l?.self_rating ?? null,
+      };
     }),
   }));
   res.json({
