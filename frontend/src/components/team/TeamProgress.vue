@@ -26,14 +26,8 @@ const logs = ref([]);
 const showNew = ref(false);
 const newTask = ref({ title: '', desc: '', deadline: '', assignee_id: null });
 
-// —— 汇报编写/编辑弹窗 ——
-const reportDlg = ref(false);
-const reportHtml = ref('');
-const reportAtts = ref([]); // [{name,size,mime,data}]
-const editingLogId = ref(null); // null=新汇报；有值=编辑该条
-const impDlg = ref(false);   // 从飞书导入文档选择器
-const fileInput = ref(null);
-const ciFileInput = ref(null); // 打卡弹窗独立的附件 input（避免与自由汇报弹窗的同名 ref 冲突）
+// —— 汇报 / 附件 ——
+const impDlg = ref(false);   // 旧版飞书横幅的导入选择器；统一弹窗使用 reportImpDlg(raw)
 const MAX_ATT_TOTAL = 25 * 1024 * 1024;
 
 const STATUS = { todo: { label: '待开始', tag: 'info' }, doing: { label: '进行中', tag: 'warning' }, done: { label: '已完成', tag: 'success' } };
@@ -156,62 +150,297 @@ async function removeSched(s) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
-// ---- 打卡提交弹窗（本地富文本 + 附件 + 自评） ----
-const ciDlg = ref(false);
-const ciBusy = ref(false);
-const ciSched = ref(null);
-const ciPeriod = ref('');
-const ciDueAt = ref('');
-const ciPeriodRange = ref('');
-const ciLate = ref(false);
-const ciHtml = ref('');
-const ciProgress = ref(0);
-const ciRating = ref(0);
+// ---- 统一汇报弹窗：有打卡任务优先提交到当前周期；没有任务时才是自由汇报 ----
+const unifiedDlg = ref(false);
+const unifiedLoading = ref(false);
+const unifiedBusy = ref(false);
+const reportTargets = ref([]);
+const activeTargetKey = ref('');
+const unifiedHtml = ref('');
+const unifiedAtts = ref([]);
+const unifiedProgress = ref(0);
+const unifiedRating = ref(0);
+const unifiedFileInput = ref(null);
+const reportImpDlg = ref(false);
 
-function fillCiFromLog(l) {
-  ciHtml.value = l.content || '';
-  reportAtts.value = normAtts(l.attachments).map((a) => ({ ...a }));
-  ciProgress.value = l.self_progress || 0;
-  ciRating.value = l.self_rating || 0;
-  ciLate.value = !!l.is_late;
+const activeReportTarget = computed(() =>
+  reportTargets.value.find((t) => t.key === activeTargetKey.value) || reportTargets.value[0] || null);
+
+function findMyCheckinLog(scheduleId, periodKey) {
+  return logs.value.find((x) => Number(x.schedule_id) === Number(scheduleId)
+    && x.period_key === periodKey
+    && Number(x.user_id) === Number(props.me.user_id)) || null;
 }
-function openCiFromDue(d) {
-  ciSched.value = d.schedule;
-  ciPeriod.value = d.period_key;
-  ciDueAt.value = d.due_at;
-  ciPeriodRange.value = d.period_start ? `${d.period_start} 至 ${d.period_end}` : '';
-  ciHtml.value = ''; reportAtts.value = []; ciProgress.value = 0; ciRating.value = 0;
-  ciLate.value = d.status === 'late_window';
-  if (d.status === 'submitted') {
-    const old = logs.value.find((x) => Number(x.schedule_id) === Number(d.schedule.id)
-      && x.period_key === d.period_key && x.user_id === props.me.user_id);
-    if (old) fillCiFromLog(old);
+function htmlHasText(h) {
+  return String(h || '').replace(/<[^>]*>/g, '').trim().length > 0;
+}
+function reportDueMs(t) {
+  return t.due_at ? Date.parse(String(t.due_at).replace(' ', 'T')) || 0 : 0;
+}
+function makeDueTarget(d) {
+  return {
+    key: `checkin:${d.schedule.id}:${d.period_key}`,
+    kind: 'checkin',
+    schedule: d.schedule,
+    period_key: d.period_key,
+    due_at: d.due_at,
+    period_start: d.period_start || null,
+    period_end: d.period_end || null,
+    status: d.status,
+    overdue: !!d.overdue,
+    existingLog: findMyCheckinLog(d.schedule.id, d.period_key),
+  };
+}
+function makeLogTarget(l) {
+  if (l.schedule_id) {
+    const schedule = schedules.value.find((x) => Number(x.id) === Number(l.schedule_id)) || {
+      id: l.schedule_id,
+      title: l.schedule_title || '周期汇报',
+      need_self_progress: 0,
+      need_self_rating: 0,
+      allow_late: 1,
+    };
+    return {
+      key: `checkin:${l.schedule_id}:${l.period_key}`,
+      kind: 'checkin',
+      schedule,
+      period_key: l.period_key,
+      due_at: '',
+      period_start: null,
+      period_end: null,
+      status: 'submitted',
+      overdue: false,
+      existingLog: l,
+    };
   }
-  ciDlg.value = true;
+  return { key: 'free', kind: 'free', label: '自由汇报', existingLog: l };
 }
-function openCiFromLog(l) {
-  const s = schedules.value.find((x) => Number(x.id) === Number(l.schedule_id));
-  if (!s) return;
-  ciSched.value = s; ciPeriod.value = l.period_key; ciDueAt.value = ''; ciPeriodRange.value = '';
-  fillCiFromLog(l);
-  ciDlg.value = true;
+function reportTargetRank(t) {
+  if (t.kind === 'free') return 90;
+  if (t.existingLog) return t.existingLog.is_late ? 35 : 25;
+  if (t.status === 'waiting') return 10;
+  if (t.status === 'late_window') return 20;
+  return 40;
 }
-async function submitCi() {
-  const text = ciHtml.value.replace(/<[^>]*>/g, '').trim();
-  if (!text && !reportAtts.value.length) return ElMessage.warning('写点本期进展，或附上文件');
-  ciBusy.value = true;
-  try {
-    const r = await api.teamCheckinSubmit(props.teamId, {
-      schedule_id: ciSched.value.id, period_key: ciPeriod.value,
-      content: ciHtml.value, attachments: reportAtts.value,
-      self_progress: ciSched.value.need_self_progress ? ciProgress.value : undefined,
-      self_rating: ciSched.value.need_self_rating ? ciRating.value : undefined,
+function buildReportTargets(preset = {}) {
+  const map = new Map();
+  myDues.value
+    .filter((d) => d.status !== 'missed')
+    .forEach((d) => {
+      const t = makeDueTarget(d);
+      if (!map.has(t.key)) map.set(t.key, t);
     });
-    ElMessage.success(r.message || '打卡成功');
-    ciDlg.value = false;
+  if (preset.log) {
+    const t = makeLogTarget(preset.log);
+    map.set(t.key, t);
+  }
+  if (!map.has('free')) {
+    map.set('free', { key: 'free', kind: 'free', label: '自由汇报', existingLog: null });
+  }
+  return [...map.values()].sort((a, b) =>
+    (reportTargetRank(a) - reportTargetRank(b)) || (reportDueMs(a) - reportDueMs(b)));
+}
+function fillUnifiedTarget(t) {
+  const l = t.existingLog;
+  unifiedHtml.value = l?.content || '';
+  unifiedAtts.value = normAtts(l?.attachments).map((a) => ({ ...a }));
+  unifiedProgress.value = Number(l?.self_progress || 0);
+  unifiedRating.value = Number(l?.self_rating || 0);
+  feishuDoc.value = l?.feishu_url || '';
+  feishuOpened.value = false;
+}
+function selectReportTarget(key) {
+  const t = reportTargets.value.find((x) => x.key === key);
+  if (!t) return;
+  activeTargetKey.value = key;
+  fillUnifiedTarget(t);
+}
+async function openReport(preset = {}) {
+  unifiedLoading.value = true;
+  try {
+    try {
+      await reload();
+    } catch (e) {
+      ElMessage.warning('汇报状态刷新失败，已打开当前缓存');
+    }
+    const presetLog = preset.log
+      ? (logs.value.find((x) => Number(x.id) === Number(preset.log.id)) || preset.log)
+      : null;
+    const targets = buildReportTargets({ log: presetLog });
+    reportTargets.value = targets;
+    const preferred = targets.find((t) => preset.due && t.kind === 'checkin'
+      && Number(t.schedule.id) === Number(preset.due.schedule.id)
+      && t.period_key === preset.due.period_key)
+      || targets.find((t) => presetLog && t.key === (presetLog.schedule_id
+        ? `checkin:${presetLog.schedule_id}:${presetLog.period_key}` : 'free'))
+      || targets[0];
+    activeTargetKey.value = preferred.key;
+    fillUnifiedTarget(preferred);
+    unifiedDlg.value = true;
+  } catch (e) {
+    ElMessage.error(e.message || '打开汇报窗口失败');
+  } finally {
+    unifiedLoading.value = false;
+  }
+}
+function reportTargetChipLabel(t) {
+  if (t.kind === 'free') return '✍️ 自由汇报';
+  const icon = t.existingLog ? '✅' : ((t.overdue || t.status === 'late_window') ? '⏰' : '📌');
+  return `${icon} ${t.schedule.title} · ${t.period_key}`;
+}
+function reportPeriodRange(t) {
+  return t.period_start ? `${t.period_start} 至 ${t.period_end}` : '';
+}
+function reportIsLate(t) {
+  return t.kind === 'checkin' && (!!t.overdue || t.status === 'late_window' || !!t.existingLog?.is_late);
+}
+function reportStatusType(t) {
+  if (t.kind === 'free') return 'is-free';
+  if (reportIsLate(t) && !t.existingLog) return 'is-late';
+  if (t.existingLog) return t.existingLog.is_late ? 'is-late' : 'is-done';
+  return 'is-waiting';
+}
+function reportStatusText(t) {
+  if (t.kind === 'free') {
+    return t.existingLog ? '自由汇报 · 已保存，可继续修改' : '自由汇报 · 不关联任何周期任务';
+  }
+  const due = t.due_at ? `截止 ${t.due_at}` : '';
+  if (t.existingLog) {
+    const base = t.existingLog.is_late ? '已补交（迟交），可修改' : '已提交，可修改';
+    return due ? `${base} · ${due}` : base;
+  }
+  if (t.status === 'late_window' || t.overdue) {
+    return `已超过截止时间，提交后会标记为迟交${due ? ` · ${due}` : ''}`;
+  }
+  if (t.period_start) return `周期内可提前提交 · ${due}`;
+  return due ? `待提交 · ${due}` : '待提交';
+}
+function unifiedSubmitText(t) {
+  if (!t) return '提交汇报';
+  if (t.kind === 'free') return t.existingLog ? '保存自由汇报' : '提交自由汇报';
+  if (t.existingLog) return '保存修改';
+  if (t.status === 'late_window' || t.overdue) return `补交「${t.schedule.title}」（标记迟交）`;
+  return `提交「${t.schedule.title}」`;
+}
+async function submitUnifiedReport() {
+  const t = activeReportTarget.value;
+  if (!t) return;
+  const text = unifiedHtml.value.replace(/<[^>]*>/g, '').trim();
+  if (!text && !unifiedAtts.value.length) return ElMessage.warning('写点本期进展，或附上文件');
+  unifiedBusy.value = true;
+  try {
+    if (t.kind === 'checkin') {
+      const r = await api.teamCheckinSubmit(props.teamId, {
+        schedule_id: t.schedule.id,
+        period_key: t.period_key,
+        content: unifiedHtml.value,
+        attachments: unifiedAtts.value,
+        self_progress: t.schedule.need_self_progress ? unifiedProgress.value : undefined,
+        self_rating: t.schedule.need_self_rating ? unifiedRating.value : undefined,
+      });
+      ElMessage.success(r.message || '打卡成功');
+    } else if (t.existingLog) {
+      await api.teamLogUpdate(props.teamId, t.existingLog.id, {
+        content: unifiedHtml.value,
+        attachments: unifiedAtts.value,
+      });
+      ElMessage.success('汇报已更新');
+    } else {
+      await api.teamLog(props.teamId, { content: unifiedHtml.value, attachments: unifiedAtts.value });
+      ElMessage.success('进度已汇报');
+    }
+    unifiedDlg.value = false;
     await reload();
+  } catch (e) {
+    ElMessage.error(e.message);
+  } finally {
+    unifiedBusy.value = false;
+  }
+}
+async function onReportFeishuPicked({ document_id } = {}) {
+  if (!document_id) return;
+  try {
+    const r = await api.feishuDocContent(document_id, 'html');
+    const html = r.content || '';
+    if (htmlHasText(unifiedHtml.value)) {
+      try {
+        await ElMessageBox.confirm(
+          '编辑器中已有内容。替换会清空当前内容；也可以选择“追加”放到原文末尾。',
+          '如何导入飞书内容？',
+          {
+            confirmButtonText: '替换',
+            cancelButtonText: '追加',
+            distinguishCancelAndClose: true,
+            type: 'warning',
+          },
+        );
+        unifiedHtml.value = html;
+      } catch (action) {
+        if (action === 'cancel') unifiedHtml.value = `${unifiedHtml.value}<hr/>${html}`;
+        // action === 'close'：取消导入
+      }
+    } else {
+      unifiedHtml.value = html;
+    }
+    ElMessage.success(r.title ? `已读取「${r.title}」` : '✅ 已读取飞书文档内容');
   } catch (e) { ElMessage.error(e.message); }
-  finally { ciBusy.value = false; }
+}
+async function ensureUnifiedFreeLog() {
+  const t = activeReportTarget.value;
+  if (!t || t.kind !== 'free') throw new Error('只有自由汇报支持在飞书直接编辑');
+  if (t.existingLog) return t.existingLog;
+  const text = unifiedHtml.value.replace(/<[^>]*>/g, '').trim();
+  if (!text && !unifiedAtts.value.length) {
+    throw new Error('写点今天的进展，再转飞书编辑');
+  }
+  const r = await api.teamLog(props.teamId, { content: unifiedHtml.value, attachments: unifiedAtts.value });
+  await reload();
+  const fresh = logs.value.find((x) => Number(x.id) === Number(r.id));
+  if (fresh) {
+    t.existingLog = fresh;
+    fillUnifiedTarget(t);
+  }
+  return fresh;
+}
+async function unifiedFeishuEdit() {
+  const t = activeReportTarget.value;
+  if (!t) return;
+  if (t.kind !== 'free') {
+    return ElMessage.info('周期汇报暂不支持直接在飞书编辑，请先在本站填写，或使用“从飞书导入”读取内容');
+  }
+  feishuBusy.value = true;
+  try {
+    const l = await ensureUnifiedFreeLog();
+    const r = await api.feishuBizOpen('progress_log', l.id);
+    feishuDoc.value = r.url || '';
+    feishuOpened.value = true;
+    lastLog.value = { id: l.id, url: r.url };
+    window.open(r.url, '_blank');
+    ElMessage.success(r.created ? '已创建飞书文档并打开' : '飞书文档已打开');
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+async function unifiedFeishuSync() {
+  const t = activeReportTarget.value;
+  if (!t || t.kind !== 'free' || !t.existingLog) {
+    return ElMessage.warning('请先点“在飞书编辑”创建文档');
+  }
+  feishuBusy.value = true;
+  try {
+    const r = await api.feishuBizSync('progress_log', t.existingLog.id);
+    ElMessage.success(r.message || '✅ 已从飞书同步');
+    await reload();
+    const fresh = logs.value.find((x) => Number(x.id) === Number(t.existingLog.id));
+    if (fresh) {
+      t.existingLog = fresh;
+      fillUnifiedTarget(t);
+    }
+  } catch (e) { ElMessage.error(e.message); }
+  finally { feishuBusy.value = false; }
+}
+function onUnifiedMore(command) {
+  if (command === 'feishu-edit') return unifiedFeishuEdit();
+  if (command === 'feishu-sync') return unifiedFeishuSync();
 }
 
 // ---- 组长评分 / 评语 / 优秀 ----
@@ -285,7 +514,7 @@ async function openBoardLog(c) {
   if (!l) return ElMessage.warning('请在时间线中查看这条汇报');
   boardDlg.value = false;
   closeBoardMember();
-  openCiFromLog(l);
+  openReport({ log: l });
 }
 const boardRoleFilters = computed(() => {
   const all = props.members || [];
@@ -388,52 +617,22 @@ async function pickAtts(e) {
       reader.onload = () => resolve(String(reader.result).split(',')[1]);
       reader.readAsDataURL(f);
     });
-    const total = reportAtts.value.reduce((s, a) => s + a.data.length, 0) + data.length;
+    const total = unifiedAtts.value.reduce((sum, a) => sum + a.data.length, 0) + data.length;
     if (total > MAX_ATT_TOTAL) { ElMessage.warning('附件总量超限（≤25MB）'); break; }
-    reportAtts.value.push({ name: f.name, size: f.size, mime: f.type || 'application/octet-stream', data });
+    unifiedAtts.value.push({ name: f.name, size: f.size, mime: f.type || 'application/octet-stream', data });
   }
 }
 
 // 从「我的资源」引用：生成/复用分享链接，push 引用型附件（无 data 有 url，撤销后时间线处失效）
 const resPickDlg = ref(false);
 const onResourcePick = (r) => {
-  reportAtts.value.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
+  unifiedAtts.value.push({ name: r.name, size: r.size, mime: r.mime, url: r.url });
   ElMessage.success(`已引用「${r.name}」`);
 };
 
 // 编辑已有汇报：预填内容与附件（附件浅拷贝，避免改坏时间线原数据）
 function editLog(l) {
-  if (l.schedule_id) { openCiFromLog(l); return; }
-  reportHtml.value = l.content || '';
-  reportAtts.value = normAtts(l.attachments).map((a) => ({ ...a }));
-  editingLogId.value = l.id;
-  reportDlg.value = true;
-  // 嵌入式查看：查询该汇报是否已关联飞书文档（有则显示「在飞书打开」徽标）
-  feishuDoc.value = l.feishu_url || '';
-  feishuOpened.value = false;
-}
-
-// 自由汇报（不挂打卡任务）：与「飞书编写」并列的本地入口
-function openFreeReport() {
-  reportHtml.value = ''; reportAtts.value = []; editingLogId.value = null;
-  feishuDoc.value = ''; feishuOpened.value = false;
-  reportDlg.value = true;
-}
-
-async function submitReport() {
-  const text = reportHtml.value.replace(/<[^>]*>/g, '').trim();
-  if (!text && !reportAtts.value.length) return ElMessage.warning('写点今天的进展，或附上文件');
-  try {
-    if (editingLogId.value) {
-      await api.teamLogUpdate(props.teamId, editingLogId.value, { content: reportHtml.value, attachments: reportAtts.value });
-      ElMessage.success('汇报已更新');
-    } else {
-      await api.teamLog(props.teamId, { content: reportHtml.value, attachments: reportAtts.value });
-      ElMessage.success('进度已汇报');
-    }
-    reportDlg.value = false;
-    await reload();
-  } catch (e) { ElMessage.error(e.message); }
+  openReport({ log: l });
 }
 
 // ---- 飞书编辑（P1）：进度汇报 ↔ 飞书文档（未提交过时先自动创建汇报记录，再在飞书里完善）
@@ -443,51 +642,14 @@ const feishuDoc = ref('');      // 已关联飞书文档链接（显示「在飞
 const feishuOpened = ref(false); // 本次编辑已打开飞书（显示「飞书编辑中」状态条）
 const lastLog = ref(null);      // 最近一次直跳创建的飞书汇报 {id, url} —— 横幅的同步/导入入口（弹窗只在点「✏️ 修改」后才有）
 
-// 「📝 编写汇报」主按钮：直接跳飞书编辑页（后端自动创建汇报记录，写完后回站横幅「从飞书同步」/「从飞书导入」）
-async function feishuNewLog() {
-  feishuBusy.value = true;
-  try {
-    const r = await api.feishuBizOpen('progress_log', null, { team_id: props.teamId });
-    lastLog.value = { id: r.id, url: r.url };
-    window.open(r.url, '_blank');
-    ElMessage.success(r.created ? '已创建飞书汇报文档并打开 — 写完后点上方横幅「🔄 从飞书同步」更新到这里' : '已同步最新内容，飞书文档已打开');
-    await reload();
-  } catch (e) { ElMessage.error(e.message); }
-  finally { feishuBusy.value = false; }
-}
-
-// 从飞书导入：内容回填编辑器；无记录时后端自动创建（id 绑定编辑态，提交走更新而非新建）
-function onImported(html, id) {
-  reportHtml.value = html;
-  if (id) editingLogId.value = id;
+// 旧版飞书横幅导入：DocPicker 已直接写回关联自由汇报，这里只需刷新时间线
+function onImported() {
   reload();
 }
 
-async function feishuEditLog() {
-  // 尚未提交过：先创建汇报记录拿 id（飞书文档需要业务记录 id）
-  if (!editingLogId.value) {
-    const text = reportHtml.value.replace(/<[^>]*>/g, '').trim();
-    if (!text && !reportAtts.value.length) return ElMessage.warning('写点今天的进展，再转飞书编辑');
-    try {
-      const r = await api.teamLog(props.teamId, { content: reportHtml.value, attachments: reportAtts.value });
-      editingLogId.value = r.id;
-      await reload();
-    } catch (e) { ElMessage.error(e.message); return; }
-  }
-  feishuBusy.value = true;
-  try {
-    const r = await api.feishuBizOpen('progress_log', editingLogId.value);
-    feishuDoc.value = r.url || '';
-    feishuOpened.value = true;
-    window.open(r.url, '_blank');
-    ElMessage.success(r.created ? '已创建飞书文档并打开，本站窗口保持可同步' : '已同步最新内容，飞书文档已打开');
-    await reload();
-  } catch (e) { ElMessage.error(e.message); }
-  finally { feishuBusy.value = false; }
-}
 async function feishuSyncLog() {
-  const pid = editingLogId.value || lastLog.value?.id;
-  if (!pid) return ElMessage.warning('先点「飞书编辑」或「编写汇报」创建文档，再从飞书同步');
+  const pid = lastLog.value?.id;
+  if (!pid) return ElMessage.warning('先在“更多”中使用飞书编辑创建文档，再从飞书同步');
   feishuBusy.value = true;
   try {
     const r = await api.feishuBizSync('progress_log', pid);
@@ -538,9 +700,7 @@ reload().catch((e) => ElMessage.error(e.message));
       <div class="tp-overall">
         <div class="tp-label">小组整体进度</div>
         <el-progress :percentage="overall" :stroke-width="12" :format="() => `${overall}%`" style="flex:1" />
-        <el-button plain type="success" @click="openFreeReport">✍️ 自由汇报</el-button>
-        <el-button type="primary" :loading="feishuBusy" @click="feishuNewLog">📝 编写汇报（飞书）</el-button>
-        <el-button plain :loading="feishuBusy" @click="impDlg = true">📥 从飞书导入</el-button>
+        <el-button v-if="perms.progress" type="primary" :loading="unifiedLoading" @click="openReport()">✍️ 写汇报</el-button>
       </div>
     </div>
 
@@ -563,41 +723,91 @@ reload().catch((e) => ElMessage.error(e.message));
         </div>
         <div class="due-actions">
           <el-tag v-if="d.status === 'submitted' && d.log?.score" size="small" type="warning">⭐ {{ d.log.score }} 分</el-tag>
-          <el-button v-if="d.status !== 'missed'" size="small" :type="d.status === 'submitted' ? 'default' : 'primary'"
-            @click="openCiFromDue(d)">{{ d.status === 'submitted' ? '查看/修改' : '去打卡' }}</el-button>
+          <el-button v-if="perms.progress && d.status !== 'missed'" size="small" :type="d.status === 'submitted' ? 'default' : 'primary'"
+            @click="openReport({ due: d })">{{ d.status === 'submitted' ? '查看/修改' : (d.status === 'late_window' ? '去补交' : '写汇报') }}</el-button>
         </div>
       </div>
     </div>
 
-    <!-- 汇报编写弹窗（富文本 + 附件，与浏览区分开） -->
-    <el-dialog v-model="reportDlg" :title="editingLogId ? '✏️ 编辑进度汇报' : '📝 编写进度汇报'" width="640px" top="4vh" class="editor-dlg" :close-on-click-modal="false"
-      destroy-on-close append-to-body>
-      <!-- 可切到飞书文档写长文（P1）；未提交过时点按钮自动创建汇报再编辑；打开后本站留窗显示状态条 -->
-      <div class="rp-feishu">
-        <el-button size="small" type="primary" plain :loading="feishuBusy" @click="feishuEditLog">📄 飞书编辑</el-button>
-        <el-button size="small" plain :loading="feishuBusy" @click="feishuSyncLog">🔄 从飞书同步</el-button>
-        <el-button size="small" plain @click="impDlg = true">📥 从飞书导入</el-button>
-      </div>
-      <div v-if="feishuOpened" class="rp-feishu-open">
-        ✅ 已在飞书打开该文档 — 在飞书写完后点「🔄 从飞书同步」更新到这里
-      </div>
-      <LiteEditor v-model="reportHtml" placeholder="今天做了什么？卡在哪？下一步？（可直接粘贴图片）" />
-      <div class="rp-tools">
-        <input ref="fileInput" type="file" multiple hidden @change="pickAtts" />
-        <el-button size="small" @click="fileInput.click()">📎 附件（图片/音频/视频/文件）</el-button>
-        <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
-        <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
-        <span v-if="reportAtts.length" class="att-chips">
-          <el-tag v-for="(a, i) in reportAtts" :key="i" closable size="small" class="att-tag" :title="a.name"
-            @close="reportAtts.splice(i, 1)">
-            {{ a.name }}
+    <!-- 统一汇报弹窗：系统自动分流到当前打卡或自由汇报，飞书只作为内容来源/高级工具 -->
+    <el-dialog v-model="unifiedDlg" title="✍️ 写汇报" width="720px" top="4vh" class="editor-dlg"
+      :close-on-click-modal="false" append-to-body>
+      <div v-if="activeReportTarget" class="ur-panel">
+        <div v-if="reportTargets.length > 1" class="ur-targets">
+          <el-button v-for="t in reportTargets" :key="t.key" size="small" round
+            :type="t.key === activeTargetKey ? 'primary' : 'default'"
+            @click="selectReportTarget(t.key)">
+            {{ reportTargetChipLabel(t) }}
+          </el-button>
+        </div>
+
+        <div class="ur-meta">
+          <el-tag size="small" type="primary" effect="plain">
+            {{ activeReportTarget.kind === 'free' ? '自由汇报' : activeReportTarget.schedule.title }}
           </el-tag>
-        </span>
-        <span class="rp-tip">图片会以缩略图展示，点击可放大下载</span>
+          <template v-if="activeReportTarget.kind === 'checkin'">
+            <el-tag size="small" effect="plain">本期：{{ activeReportTarget.period_key }}</el-tag>
+            <el-tag v-if="reportIsLate(activeReportTarget)" size="small" type="warning">迟交/补交</el-tag>
+            <span v-if="reportPeriodRange(activeReportTarget)" class="ur-period">
+              周期 {{ reportPeriodRange(activeReportTarget) }}
+            </span>
+            <span v-if="activeReportTarget.due_at">截止 {{ activeReportTarget.due_at }}</span>
+          </template>
+          <el-tag v-else size="small" type="success" effect="plain">不关联周期任务</el-tag>
+        </div>
+        <div class="ur-status" :class="reportStatusType(activeReportTarget)">
+          {{ reportStatusText(activeReportTarget) }}
+        </div>
+        <div v-if="feishuOpened" class="rp-feishu-open">
+          ✅ 已在飞书打开该文档 — 在飞书写完后点「更多 → 从飞书同步」更新到这里
+        </div>
+
+        <LiteEditor v-model="unifiedHtml" placeholder="这次做了什么？卡在哪？下一步？（可直接粘贴图片）" />
+        <div class="rp-tools">
+          <input ref="unifiedFileInput" type="file" multiple hidden @change="pickAtts" />
+          <el-button size="small" @click="unifiedFileInput.click()">📎 附件（图片/音频/视频/文件）</el-button>
+          <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
+          <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
+          <el-button size="small" plain @click="reportImpDlg = true">📥 从飞书导入</el-button>
+          <el-dropdown trigger="click" @command="onUnifiedMore">
+            <el-button size="small" plain>更多 ▾</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="feishu-edit" :disabled="activeReportTarget.kind !== 'free'">
+                  📄 在飞书编辑{{ activeReportTarget.kind !== 'free' ? '（周期汇报暂不支持）' : '' }}
+                </el-dropdown-item>
+                <el-dropdown-item command="feishu-sync"
+                  :disabled="activeReportTarget.kind !== 'free' || !activeReportTarget.existingLog">
+                  🔄 从飞书同步
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <span v-if="unifiedAtts.length" class="att-chips">
+            <el-tag v-for="(a, i) in unifiedAtts" :key="i" closable size="small" class="att-tag" :title="a.name"
+              @close="unifiedAtts.splice(i, 1)">{{ a.name }}</el-tag>
+          </span>
+          <span class="rp-tip">图片会以缩略图展示，点击可放大下载</span>
+        </div>
+
+        <div v-if="activeReportTarget.kind === 'checkin'
+          && (activeReportTarget.schedule.need_self_progress || activeReportTarget.schedule.need_self_rating)"
+          class="ci-self-form">
+          <div v-if="activeReportTarget.schedule.need_self_progress" class="ci-self-item">
+            <span>本期完成进度：<b>{{ unifiedProgress }}%</b></span>
+            <el-slider v-model="unifiedProgress" style="max-width:320px" />
+          </div>
+          <div v-if="activeReportTarget.schedule.need_self_rating" class="ci-self-item">
+            <span>完成效果自评：</span>
+            <el-rate v-model="unifiedRating" />
+          </div>
+        </div>
       </div>
       <template #footer>
-        <el-button @click="reportDlg = false">取消</el-button>
-        <el-button type="primary" @click="submitReport">提交汇报</el-button>
+        <el-button @click="unifiedDlg = false">取消</el-button>
+        <el-button type="primary" :loading="unifiedBusy" @click="submitUnifiedReport">
+          {{ unifiedSubmitText(activeReportTarget) }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -665,42 +875,6 @@ reload().catch((e) => ElMessage.error(e.message));
       <template #footer>
         <el-button @click="schedDlg = false">取消</el-button>
         <el-button type="primary" :loading="schedSaving" @click="saveSched">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- ============ 打卡提交弹窗（本地富文本 + 附件 + 自评） ============ -->
-    <el-dialog v-model="ciDlg" :title="ciSched ? `打卡 · ${ciSched.title}` : '打卡'" width="720px" top="4vh"
-      append-to-body :close-on-click-modal="false" class="editor-dlg">
-      <div class="ci-dlg-meta">
-        <el-tag size="small" effect="plain">本期：{{ ciPeriod }}</el-tag>
-        <el-tag v-if="ciLate" size="small" type="warning">迟交</el-tag>
-        <span v-if="ciPeriodRange" class="ci-period-range">周期 {{ ciPeriodRange }}</span>
-        <span v-if="ciDueAt">截止 {{ ciDueAt }}</span>
-      </div>
-      <LiteEditor v-model="ciHtml" placeholder="本期做了什么？卡在哪？下一步？（可直接粘贴图片）" />
-      <div class="rp-tools">
-        <input ref="ciFileInput" type="file" multiple hidden @change="pickAtts" />
-        <el-button size="small" @click="ciFileInput.click()">📎 附件（图片/音频/视频/文件）</el-button>
-        <el-button size="small" plain @click="resPickDlg = true">📁 我的资源</el-button>
-        <ResourcePicker v-model="resPickDlg" @pick="onResourcePick" />
-        <span v-if="reportAtts.length" class="att-chips">
-          <el-tag v-for="(a, i) in reportAtts" :key="i" closable size="small" class="att-tag" :title="a.name"
-            @close="reportAtts.splice(i, 1)">{{ a.name }}</el-tag>
-        </span>
-      </div>
-      <div v-if="ciSched?.need_self_progress || ciSched?.need_self_rating" class="ci-self-form">
-        <div v-if="ciSched?.need_self_progress" class="ci-self-item">
-          <span>本期完成进度：<b>{{ ciProgress }}%</b></span>
-          <el-slider v-model="ciProgress" style="max-width:320px" />
-        </div>
-        <div v-if="ciSched?.need_self_rating" class="ci-self-item">
-          <span>完成效果自评：</span>
-          <el-rate v-model="ciRating" />
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="ciDlg = false">取消</el-button>
-        <el-button type="primary" :loading="ciBusy" @click="submitCi">提交打卡</el-button>
       </template>
     </el-dialog>
 
@@ -822,8 +996,9 @@ reload().catch((e) => ElMessage.error(e.message));
       </template>
     </el-dialog>
     <!-- 从飞书导入文档选择器（弹窗与横幅共用；必须挂弹窗外面——弹窗 destroy-on-close 会销毁内部组件，横幅导入将无反应） -->
-    <DocPicker v-model="impDlg" biz-type="progress_log" :biz-id="editingLogId ?? lastLog?.id ?? null"
+    <DocPicker v-model="impDlg" biz-type="progress_log" :biz-id="lastLog?.id ?? null"
       :extra="{ team_id: props.teamId }" @imported="onImported" />
+    <DocPicker v-model="reportImpDlg" raw @picked="onReportFeishuPicked" />
     <DocPicker v-model="descImpDlg" raw @picked="onDescPicked" />
 
     <!-- 任务列表 -->
@@ -981,7 +1156,7 @@ reload().catch((e) => ElMessage.error(e.message));
           <CommentThread :team-id="teamId" type="log" :target="l" :members="members" />
         </el-timeline-item>
       </el-timeline>
-      <div v-else class="tp-empty">还没有汇报 — 点右上「📝 编写汇报」记录进展</div>
+      <div v-else class="tp-empty">还没有汇报 — 点上方「✍️ 写汇报」记录进展</div>
     </div>
   </div>
 </template>
@@ -1101,6 +1276,20 @@ reload().catch((e) => ElMessage.error(e.message));
   .ci-dash { margin: 0 8px; color: var(--text-2); }
   .ci-opts { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
   .ci-auto { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
+}
+.ur-targets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.ur-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--text-2); margin-bottom: 8px;
+  .ur-period { color: var(--text-2); }
+}
+.ur-status {
+  border-radius: 8px; padding: 7px 10px; margin-bottom: 8px;
+  font-size: 12.5px; line-height: 1.5;
+  &.is-waiting { color: #1d4ed8; background: #eff6ff; }
+  &.is-late { color: #b45309; background: #fffbeb; }
+  &.is-done { color: #15803d; background: #f0fdf4; }
+  &.is-free { color: var(--text-2); background: var(--surface-2, #f8fafc); }
 }
 .ci-dlg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-2);
   .ci-period-range { color: var(--text-2); }
