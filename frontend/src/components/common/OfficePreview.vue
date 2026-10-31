@@ -28,6 +28,8 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   height: { type: String, default: '70vh' },
+  // 弹窗内默认显示下载；项目文件预览面板顶部已有下载按钮时可关闭，避免重复
+  showDownload: { type: Boolean, default: true },
 });
 
 const EXCEL_MAX_ROWS = 500;
@@ -46,6 +48,7 @@ let parseSeq = 0;
 const typeLabel = computed(() => ({ word: 'Word', excel: 'Excel' }[view.value] || 'Office'));
 const showMask = computed(() => props.loading || busy.value);
 const shownError = computed(() => props.error || err.value);
+const bodyHeight = computed(() => `calc(${props.height} - 43px)`);
 
 function resetOutput() {
   view.value = '';
@@ -71,22 +74,36 @@ function hardenWordBody(body) {
   });
 }
 
-function buildWordDocument(bodyHtml, cssText) {
-  const safeCss = String(cssText || '')
-    .replace(/@import[^;]*(?:;|$)/gi, '')
-    .replace(/url\(\s*(['"]?)https?:[^)]+\)/gi, '');
+const WORD_LAYOUT_CSS = `
+html, body { margin: 0; padding: 0; background: #f3f4f6; }
+body { padding: 18px; box-sizing: border-box; }
+.docx-wrapper { background: transparent !important; padding: 0 !important; min-height: auto !important; }
+.docx-wrapper > section { margin: 0 auto 16px !important; box-shadow: 0 1px 4px rgba(15,23,42,.18) !important; }
+table { border-collapse: collapse; }
+`;
+
+function collectWordCss(styleContainer) {
+  // docx-preview 对正文样式、编号样式等可能输出多个 <style>。不能把包含完整
+  // <style>...</style> 的 innerHTML 再包进一个 <style>，否则第一个内部结束标签会
+  // 提前关闭外层样式，后续 CSS 被浏览器显示成正文。
+  const css = Array.from(styleContainer.querySelectorAll('style'))
+    .map((s) => s.textContent || '')
+    .join('\n');
+  return String(css || '')
+    .replace(/<\s*\/\s*style/gi, '<\\/style') // 防止文档内容意外闭合样式标签
+    .replace(/@import[^;]*(?:;|$)/gi, '') // 不允许样式导入外部资源
+    .replace(/url\(\s*(['"]?)\s*(?:https?:)?\/\/[^)]+\)/gi, ''); // 禁止外部图片/字体 URL
+}
+
+function buildWordDocument(bodyHtml, docCss) {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="referrer" content="no-referrer">
 <style>
-${safeCss}
-html, body { margin: 0; padding: 0; background: #f3f4f6; }
-body { padding: 18px; box-sizing: border-box; }
-.docx-wrapper { background: transparent !important; padding: 0 !important; min-height: auto !important; }
-.docx-wrapper > section { margin: 0 auto 16px !important; box-shadow: 0 1px 4px rgba(15,23,42,.18) !important; }
-table { border-collapse: collapse; }
+${WORD_LAYOUT_CSS}
+${docCss}
 </style>
 </head>
 <body>${bodyHtml}</body>
@@ -117,7 +134,19 @@ async function renderWord(blob) {
     useBase64URL: true,
   });
   hardenWordBody(body);
-  wordSrcDoc.value = buildWordDocument(body.innerHTML, style.innerHTML);
+  wordSrcDoc.value = buildWordDocument(body.innerHTML, collectWordCss(style));
+}
+
+function downloadOriginal() {
+  if (!props.blob) return;
+  const url = URL.createObjectURL(props.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = props.name || 'office-file';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 function cellText(XLSX, wb, ws, r, c) {
@@ -212,6 +241,9 @@ watch(() => [props.blob, props.name], () => parse(props.blob), { immediate: true
 
 <template>
   <div class="office-preview">
+    <div v-if="showDownload && blob && !showMask" class="office-toolbar">
+      <button type="button" class="office-download" @click="downloadOriginal">⬇ 下载原文件</button>
+    </div>
     <div v-if="showMask" class="office-mask">
       <span class="office-spinner"></span>
       正在解析{{ typeLabel }}文档…
@@ -244,7 +276,7 @@ watch(() => [props.blob, props.name], () => parse(props.blob), { immediate: true
         v-if="activeData.truncatedRows || activeData.truncatedCols"
         class="office-note"
       >仅预览前 {{ EXCEL_MAX_ROWS }} 行、{{ EXCEL_MAX_COLS }} 列；完整内容请下载查看。</p>
-      <div class="excel-scroll" :style="{ maxHeight: height }">
+      <div class="excel-scroll" :style="{ maxHeight: bodyHeight }">
         <table class="excel-grid">
           <thead>
             <tr>
@@ -272,10 +304,34 @@ watch(() => [props.blob, props.name], () => parse(props.blob), { immediate: true
 <style lang="scss" scoped>
 .office-preview {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 180px;
   background: var(--card-bg, #fff);
+  border: 1px solid var(--border-2, #cbd5e1);
   border-radius: 8px;
   overflow: hidden;
+}
+.office-toolbar {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 42px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.office-download {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1d4ed8;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  &:hover { border-color: #2563eb; background: #eff6ff; }
 }
 .office-mask {
   position: absolute;
@@ -311,7 +367,7 @@ watch(() => [props.blob, props.name], () => parse(props.blob), { immediate: true
 .office-word-frame {
   display: block;
   width: 100%;
-  height: v-bind(height);
+  height: v-bind(bodyHeight);
   border: 0;
   background: #f3f4f6;
 }

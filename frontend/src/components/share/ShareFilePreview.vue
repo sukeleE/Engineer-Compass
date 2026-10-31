@@ -178,7 +178,7 @@ async function download() {
       <iframe v-else-if="kind === 'pdf'" :src="blobUrl" class="fp-pdf" :title="file.name"></iframe>
       <audio v-else-if="kind === 'audio'" :src="blobUrl" controls class="fp-audio"></audio>
       <video v-else-if="kind === 'video'" :src="blobUrl" controls class="fp-video"></video>
-      <OfficePreview v-else-if="kind === 'office'" :name="file.name" :blob="officeBlob" height="480px" />
+      <OfficePreview v-else-if="kind === 'office'" :name="file.name" :blob="officeBlob" height="480px" :show-download="false" />
 
       <div v-else-if="!busy" class="fp-other">
         <p>这类文件不支持页内预览</p>
