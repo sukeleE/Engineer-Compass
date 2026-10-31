@@ -25,14 +25,17 @@ export const selfName = (obj, meId, fallbackKey = 'nickname') => {
     username: obj.username ?? auth.user.username,
   });
 };
-// 项目小组内展示名：优先按 user_id/id 在「当前小组成员」名单中解析。
+// 项目小组内展示名：优先按业务记录上的作者 ID 在「当前小组成员」名单中解析。
+// 注意：进度汇报/评论/消息等记录同时有自己的主键 id（汇报 ID、评论 ID）和作者 user_id，
+// 不能优先用 obj.id，否则会把“记录 ID”误当成“用户 ID”匹配到同名 ID 的其他成员。
+// 只有成员对象本身没有 user_id/assignee_id/uploader_id 时，才回退使用 obj.id。
 // 当前成员已由 /team/:id 返回 real_name，故同组互见「真名（昵称）」；
 // 已退组成员的历史消息/文件/汇报匹配不到名单，继续显示当时的昵称快照。
 export const teamDisplayName = (obj, members, fallbackKey = 'nickname') => {
   if (!obj) return '';
-  const uid = obj.id ?? obj.user_id ?? obj.uid ?? obj.assignee_id ?? obj.uploader_id ?? null;
+  const uid = obj.user_id ?? obj.assignee_id ?? obj.uploader_id ?? obj.uid ?? obj.id ?? null;
   if (uid != null && Array.isArray(members)) {
-    const member = members.find((m) => Number(m.id ?? m.user_id) === Number(uid));
+    const member = members.find((m) => Number(m.user_id ?? m.id) === Number(uid));
     if (member) return displayName(member);
   }
   const base = obj[fallbackKey] ?? obj.nickname ?? obj.user_name ?? obj.uploader ?? obj.assignee_name ?? obj.username ?? '';
