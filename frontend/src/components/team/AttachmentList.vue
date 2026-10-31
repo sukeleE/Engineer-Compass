@@ -9,9 +9,11 @@ export const normAtts = (a) => {
 </script>
 
 <script setup>
-// 附件渲染：图片→可点击缩略图（点开全屏预览+下载）、视频/音频内联播放、其他文件下载链接
-import { computed } from 'vue';
+// 附件渲染：图片全屏预览、音视频内联播放、Word/Excel 弹窗预览、其他文件下载
+import { computed, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import { openImage } from '../../utils/imageViewer.js';
+import OfficePreview, { officePreviewType } from '../common/OfficePreview.vue';
 
 const props = defineProps({ attachments: { type: [Array, String], default: () => [] } });
 const atts = computed(() => normAtts(props.attachments));
@@ -20,6 +22,43 @@ const atts = computed(() => normAtts(props.attachments));
 const src = (a) => (a.data ? `data:${a.mime || 'application/octet-stream'};base64,${a.data}` : a.url || '');
 const is = (a, prefix) => (a.mime || '').startsWith(prefix);
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : (n || 0) + ' B');
+
+const officeDlg = ref(false);
+const officeAtt = ref(null);
+const officeBlob = ref(null);
+const officeLoading = ref(false);
+const officeError = ref('');
+function isSameOriginUrl(u) {
+  try { return new URL(u, window.location.origin).origin === window.location.origin; }
+  catch { return false; }
+}
+function canPreviewOfficeAtt(a) {
+  return !!officePreviewType(a.name, a.mime) && (!!a.data || isSameOriginUrl(a.url || ''));
+}
+async function openOfficeAtt(a) {
+  officeAtt.value = a;
+  officeBlob.value = null;
+  officeError.value = '';
+  officeLoading.value = true;
+  officeDlg.value = true;
+  try {
+    const res = await fetch(src(a));
+    if (!res.ok) throw new Error(`读取失败（${res.status}）`);
+    const b = await res.blob();
+    officeBlob.value = a.mime ? new Blob([b], { type: a.mime }) : b;
+  } catch (e) {
+    officeError.value = e.message;
+    ElMessage.error(e.message);
+  } finally {
+    officeLoading.value = false;
+  }
+}
+function resetOfficeAtt() {
+  officeAtt.value = null;
+  officeBlob.value = null;
+  officeError.value = '';
+  officeLoading.value = false;
+}
 </script>
 
 <template>
@@ -36,10 +75,35 @@ const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1
     <template v-for="(a, i) in atts" :key="i">
       <video v-if="is(a, 'video/')" class="att-media" :src="src(a)" controls preload="metadata" />
       <audio v-else-if="is(a, 'audio/')" class="att-audio" :src="src(a)" controls preload="metadata" />
+      <a v-else-if="canPreviewOfficeAtt(a)" class="att-file" href="#" :title="`预览 ${a.name}`"
+        @click.prevent="openOfficeAtt(a)">
+        📄 {{ a.name }} <span class="att-size">{{ fmtSize(a.size) }}</span> 👁
+      </a>
       <a v-else-if="!is(a, 'image/')" class="att-file" :href="src(a)" :download="a.name" :title="a.name">
         📄 {{ a.name }} <span class="att-size">{{ fmtSize(a.size) }}</span> ⬇
       </a>
     </template>
+
+    <el-dialog
+      v-model="officeDlg"
+      :title="officeAtt?.name || 'Office 预览'"
+      width="92vw"
+      top="3vh"
+      append-to-body
+      destroy-on-close
+      class="att-office-dlg"
+      :close-on-click-modal="false"
+      @closed="resetOfficeAtt"
+    >
+      <OfficePreview
+        v-if="officeAtt"
+        :name="officeAtt.name"
+        :blob="officeBlob"
+        :loading="officeLoading"
+        :error="officeError"
+        height="72vh"
+      />
+    </el-dialog>
   </div>
 </template>
 

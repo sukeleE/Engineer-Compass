@@ -1,5 +1,5 @@
 <script setup>
-// 资料共享：上传（base64）/ 图片直接预览（点击放大）/ 下载 / 删除
+// 资料共享：上传、图片预览、Word/Excel 网页预览、下载 / 删除
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -7,6 +7,7 @@ import { api } from '../../api.js';
 import auth from '../../auth.js';
 import { openImage } from '../../utils/imageViewer.js';
 import ResourcePicker from '../ResourcePicker.vue';
+import OfficePreview, { officePreviewType } from '../common/OfficePreview.vue';
 import { fmtDateOnly } from '../../utils/time.js';
 import { teamDisplayName } from '../../utils/displayName.js';
 
@@ -23,6 +24,11 @@ const docPreviewDlg = ref(false);
 const docPreviewLoading = ref(false);
 const docPreviewTitle = ref('');
 const docPreviewHtml = ref('');
+const officePreviewDlg = ref(false);
+const officePreviewFile = ref(null);
+const officePreviewBlob = ref(null);
+const officePreviewLoading = ref(false);
+const officePreviewError = ref('');
 
 const MAX = 20 * 1024 * 1024;
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
@@ -50,6 +56,30 @@ const resPickDlg = ref(false);
 const refPicking = ref(false);
 function canPreviewDoc(f) {
   return !f.external_url && !f.resource_ref && /^text\/(html|markdown|plain)\b/.test(f.file_type || '');
+}
+function canPreviewOffice(f) {
+  // 飞书外链走飞书；站内上传/站内资源引用（含撤销前）由下载接口带鉴权返回 blob。
+  return !f.external_url && !!officePreviewType(f.file_name, f.file_type || '');
+}
+async function openOfficePreview(f) {
+  officePreviewFile.value = f;
+  officePreviewBlob.value = null;
+  officePreviewError.value = '';
+  officePreviewLoading.value = true;
+  officePreviewDlg.value = true;
+  try {
+    officePreviewBlob.value = await api.teamFileBlob(f.id);
+  } catch (e) {
+    officePreviewError.value = e.message;
+  } finally {
+    officePreviewLoading.value = false;
+  }
+}
+function resetOfficePreview() {
+  officePreviewFile.value = null;
+  officePreviewBlob.value = null;
+  officePreviewError.value = '';
+  officePreviewLoading.value = false;
 }
 function escapePreviewText(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -136,7 +166,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
     <div class="tf-tools">
       <div class="tf-info">
         <b>📁 小组资料（{{ files.length }}）</b>
-        <span class="tf-tip">支持本地文档/图片/压缩包（≤20MB），飞书文档会归档为含图网页并可在组内直接预览；普通文件复制到组内，表格等类型保存为飞书链接</span>
+        <span class="tf-tip">支持 Word(.docx)/Excel/PDF/图片/压缩包（≤20MB）；Word、Excel 可直接网页预览，飞书文档可归档为含图网页</span>
       </div>
       <div>
         <input ref="inputEl" type="file" hidden @change="pickFile" />
@@ -167,6 +197,7 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         </span>
       </div>
       <a v-if="canPreviewDoc(f)" class="f-dl" href="#" @click.prevent="openDocPreview(f)">👁 预览</a>
+      <a v-else-if="canPreviewOffice(f)" class="f-dl" href="#" @click.prevent="openOfficePreview(f)">👁 预览</a>
       <span v-if="f.resource_ref && !dlUrl(f)" class="f-dead">已失效</span>
       <a v-else class="f-dl" :href="dlUrl(f)" target="_blank" rel="noopener">{{ f.external_url ? "打开飞书 ↗" : "下载 ⬇" }}</a>
       <el-button v-if="f.user_id === me.user_id || perms.file_delete" size="small" text type="danger" @click="remove(f)">删除</el-button>
@@ -177,6 +208,27 @@ onMounted(() => load().catch((e) => ElMessage.error(e.message)));
         <iframe v-if="docPreviewHtml" class="doc-preview-frame" :srcdoc="docPreviewHtml"
           sandbox="allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
       </div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="officePreviewDlg"
+      :title="officePreviewFile?.file_name || 'Office 预览'"
+      width="92vw"
+      top="3vh"
+      append-to-body
+      destroy-on-close
+      class="office-preview-dlg"
+      :close-on-click-modal="false"
+      @closed="resetOfficePreview"
+    >
+      <OfficePreview
+        v-if="officePreviewFile"
+        :name="officePreviewFile.file_name"
+        :blob="officePreviewBlob"
+        :loading="officePreviewLoading"
+        :error="officePreviewError"
+        height="76vh"
+      />
     </el-dialog>
 </div>
 </template>

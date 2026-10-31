@@ -16,6 +16,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../../api.js';
 import { fmtSize, isTextLike } from '../../utils/share.js';
+import OfficePreview, { officePreviewType } from '../common/OfficePreview.vue';
 import GhIcon from './GhIcon.vue';
 
 const props = defineProps({
@@ -33,7 +34,8 @@ const truncated = ref(false);
 const codeLoaded = ref(false); // html 切到代码态时才懒拉 /text（默认渲染态不多拉一份）
 const codeLoading = ref(false);
 const htmlMode = ref('view'); // html 专属：view = 沙箱渲染网页 | code = 转义源码
-const kind = ref(''); // text | html | image | pdf | audio | video | other
+const kind = ref(''); // text | html | office | image | pdf | audio | video | other
+const officeBlob = ref(null);
 
 // html 判定：以扩展名为准、mime text/html 兜底（部分上传端把 .html 存成 octet-stream）
 const HTML_RE = /\.html?$/i;
@@ -47,7 +49,7 @@ const giteeBlobUrl = computed(() =>
 function cleanup() {
   if (blobUrl.value) { URL.revokeObjectURL(blobUrl.value); blobUrl.value = ''; }
   text.value = ''; truncated.value = false; codeLoaded.value = false;
-  err.value = ''; kind.value = ''; htmlMode.value = 'view';
+  err.value = ''; kind.value = ''; htmlMode.value = 'view'; officeBlob.value = null;
 }
 
 const IMG = /^image\/(?!svg)/;
@@ -88,10 +90,13 @@ async function load(f) {
     const mime = String(f.mime || '');
     // 先全部取到本地再一次性上屏：中途赋值会让「空 <pre>（假可见）/ src 为空的 <img>」先闪一下，
     // 探针与肉眼都会把它当成「加载完了但内容是空的」
-    let kind2 = 'other', txt = '', trun = false, url = '';
+    let kind2 = 'other', txt = '', trun = false, url = '', office = null;
     if (isHtmlFile(f)) {
       // html 默认沙箱渲染整页（不取文本，切到代码态再懒拉）
       kind2 = 'html'; url = await newHtmlUrl(f);
+    } else if (officePreviewType(f.name, mime)) {
+      // Word/Excel：浏览器端解析，blob 交给沙箱/表格渲染器；不暴露 token URL
+      kind2 = 'office'; office = await api.shareFileBlob(f.id, { raw: f.source === 'gitee' });
     } else if (isTextLike(mime, f.name)) {
       const r = await api.shareFileText(f.id);
       kind2 = 'text'; txt = r.text; trun = !!r.truncated;
@@ -106,8 +111,8 @@ async function load(f) {
     } else if (mime.startsWith('video/')) {
       kind2 = 'video'; url = await NEW_URL(f);
     }
-    // 压缩包/Office/未知 → other（只提供下载，不预览）
-    kind.value = kind2; text.value = txt; truncated.value = trun; blobUrl.value = url;
+    // 压缩包/未知 → other（只提供下载，不预览）
+    kind.value = kind2; text.value = txt; truncated.value = trun; blobUrl.value = url; officeBlob.value = office;
   } catch (e) { err.value = e.message; } finally { busy.value = false; }
 }
 
@@ -173,6 +178,7 @@ async function download() {
       <iframe v-else-if="kind === 'pdf'" :src="blobUrl" class="fp-pdf" :title="file.name"></iframe>
       <audio v-else-if="kind === 'audio'" :src="blobUrl" controls class="fp-audio"></audio>
       <video v-else-if="kind === 'video'" :src="blobUrl" controls class="fp-video"></video>
+      <OfficePreview v-else-if="kind === 'office'" :name="file.name" :blob="officeBlob" height="480px" />
 
       <div v-else-if="!busy" class="fp-other">
         <p>这类文件不支持页内预览</p>

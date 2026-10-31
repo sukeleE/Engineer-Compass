@@ -10,6 +10,7 @@ import auth, { clearAuth, patchUser } from '../auth.js';
 import { cnt, excerpt, firstImage, attDataURL } from '../utils/share.js';
 import AuthView from './AuthView.vue';
 import DmDialog from './DmDialog.vue'; // 公共私聊弹窗（3s 轮询，关闭即停）
+import OfficePreview, { officePreviewType } from './common/OfficePreview.vue';
 import { fmtDateTime } from '../utils/time.js';
 import { canAdmin } from '../utils/adminPerms.js';
 
@@ -234,6 +235,12 @@ const resQuota = ref(1024 * 1024 * 1024);
 const resLoading = ref(false);
 const resUploading = ref(false);
 const resLoaded = ref(false);
+const officePreviewDlg = ref(false);
+const officePreviewRow = ref(null);
+const officePreviewBlob = ref(null);
+const officePreviewLoading = ref(false);
+const officePreviewError = ref('');
+const OFFICE_PREVIEW_MAX = 20 * 1024 * 1024;
 const fmtBytes = (n) => {
   n = Number(n) || 0;
   if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
@@ -251,6 +258,30 @@ async function loadResources() {
     resQuota.value = r.quota;
   } catch (e) { ElMessage.error(e.message); }
   finally { resLoading.value = false; }
+}
+function canPreviewOfficeResource(row) {
+  return Number(row.file_size) <= OFFICE_PREVIEW_MAX
+    && !!officePreviewType(row.file_name, row.file_type || '');
+}
+async function previewResource(row) {
+  officePreviewRow.value = row;
+  officePreviewBlob.value = null;
+  officePreviewError.value = '';
+  officePreviewLoading.value = true;
+  officePreviewDlg.value = true;
+  try {
+    officePreviewBlob.value = await api.resourceFileBlob(row.id);
+  } catch (e) {
+    officePreviewError.value = e.message;
+  } finally {
+    officePreviewLoading.value = false;
+  }
+}
+function resetOfficePreview() {
+  officePreviewRow.value = null;
+  officePreviewBlob.value = null;
+  officePreviewError.value = '';
+  officePreviewLoading.value = false;
 }
 // 隐藏 input → 直接 FormData 上传（不经 FileReader，128MB 内存安全）；上传成功回第一页刷新
 async function onResFile(e) {
@@ -537,8 +568,9 @@ onMounted(() => {
               </el-table-column>
               <el-table-column prop="file_type" label="类型" width="150" show-overflow-tooltip />
               <el-table-column prop="create_time" label="上传时间" width="165" />
-              <el-table-column label="操作" width="225" fixed="right">
+              <el-table-column label="操作" width="270" fixed="right">
                 <template #default="{ row }">
+                  <a v-if="canPreviewOfficeResource(row)" class="res-dl" href="#" @click.prevent="previewResource(row)">👁 预览</a>
                   <a :href="`${api.resourceDownload(row.id)}?token=${auth.token}`" class="res-dl">⬇ 下载</a>
                   <el-button v-if="!row.shared" link type="primary" size="small" @click="shareResource(row)">🔗 分享</el-button>
                   <el-button v-else link type="warning" size="small" @click="unshareResource(row)">取消分享</el-button>
@@ -643,6 +675,27 @@ onMounted(() => {
 
     <!-- 私聊弹窗（DmDialog 内 3s 轮询拉新，关闭即停；@refresh 兜住好友未读徽标） -->
     <DmDialog :open="dmDlg" :user="dmFriend" @close="dmDlg = false" @refresh="loadFriends" />
+
+    <el-dialog
+      v-model="officePreviewDlg"
+      :title="officePreviewRow?.file_name || 'Office 预览'"
+      width="92vw"
+      top="3vh"
+      append-to-body
+      destroy-on-close
+      class="office-preview-dlg"
+      :close-on-click-modal="false"
+      @closed="resetOfficePreview"
+    >
+      <OfficePreview
+        v-if="officePreviewRow"
+        :name="officePreviewRow.file_name"
+        :blob="officePreviewBlob"
+        :loading="officePreviewLoading"
+        :error="officePreviewError"
+        height="76vh"
+      />
+    </el-dialog>
   </main>
 </template>
 

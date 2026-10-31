@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
+    "docx-preview": "^0.4.1",
     "echarts": "^5.6.0",
     "element-plus": "^2.9.7",
     "gsap": "^3.13.0",

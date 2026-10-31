@@ -182,6 +182,16 @@ export const api = {
   teamFiles: (id) => req(`/team/${id}/files`),
   teamFileUpload: (id, card) => req(`/team/${id}/file`, { method: 'POST', body: JSON.stringify(card) }),
   teamFileDownload: (fid) => `/api/team/file/${fid}/download`,
+  // Office 预览必须用 fetch 带 Authorization 取 blob，不能把 token 拼到 URL（access_log 会记录 query）
+  teamFileBlob: async (fid) => {
+    const token = localStorage.getItem('ec_token');
+    const res = await fetch(`${BASE}/team/file/${fid}/download`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `读取失败（${res.status}）`);
+    }
+    return res.blob();
+  },
   teamFileDelete: (id, fid) => req(`/team/${id}/file/${fid}`, { method: 'DELETE' }),
   // 设备预约
   teamDeviceAdd: (id, card) => req(`/team/${id}/device`, { method: 'POST', body: JSON.stringify(card) }),
@@ -274,6 +284,15 @@ export const api = {
     return req('/resource/upload', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 300000);
   },
   resourceDownload: (id) => `/api/resource/${id}/download`,
+  resourceFileBlob: async (id) => {
+    const token = localStorage.getItem('ec_token');
+    const res = await fetch(`${BASE}/resource/${id}/download`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `读取失败（${res.status}）`);
+    }
+    return res.blob();
+  },
   resourceDelete: (id) => req(`/resource/${id}`, { method: 'DELETE' }),
   // 资源分享（引用功能）：POST 幂等生成/查询公开下载链接，DELETE 撤销（token 清空后所有引用失效）
   resourceShare: (id) => req(`/resource/${id}/share`, { method: 'POST' }),
