@@ -126,6 +126,15 @@ try {
   const calendars = await page.locator('.att-calendar').count();
   ok('我的与月度统计渲染月历', calendars === 2, calendars);
   ok('不再显示最近 14 天列表', (await page.locator('text=最近 14 天').count()) === 0, await page.locator('text=最近 14 天').count());
+  const countText = await page.locator('.att-calendar').nth(1).locator('.ac-cell.today .ac-count').textContent();
+  ok('统计日历显示应到实到计数', /^2\/3$/.test(countText.trim()), countText);
+  const cellCheck = await page.locator('.att-calendar').nth(1).locator('.ac-cell.today').evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const count = el.querySelector('.ac-count');
+    return { bg: cs.backgroundColor, overflow: count ? count.scrollWidth > count.clientWidth : true };
+  });
+  ok('计数色块按出勤率着色且文字不溢出', cellCheck.bg.startsWith('rgb(') && !cellCheck.overflow, cellCheck);
+  await page.screenshot({ path: path.join(ROOT, 'scripts', '.probe_attendance_calendar.png'), fullPage: false });
   await page.locator('.att-calendar').nth(0).locator('.ac-cell.today').click();
   await page.waitForSelector('.el-dialog .cal-member', { timeout: 10000 });
   ok('我的月历点击查看当日详情', (await page.locator('.cal-member').count()) === 1 && (await page.locator('.cal-member .amd-slot').count()) === 2, {
@@ -137,8 +146,19 @@ try {
   ok('月度统计月历点击查看成员当日详情', (await page.locator('.cal-member').count()) === 3 && (await page.locator('.cal-member .amd-slot').count()) === 6, {
     members: await page.locator('.cal-member').count(), slots: await page.locator('.cal-member .amd-slot').count(),
   });
+  const summaryText = await page.locator('.cal-summary').textContent();
+  ok('详情显示应到实到汇总', summaryText.includes('应到 3') && summaryText.includes('实到 2'), summaryText);
   await page.keyboard.press('Escape');
-  await page.screenshot({ path: path.join(ROOT, 'scripts', '.probe_attendance_cards.png'), fullPage: false });
+  await page.getByText('成员表', { exact: true }).click();
+  await page.waitForSelector('.att-table-wrap', { timeout: 10000 });
+  const tableRows = await page.locator('.att-table-wrap .el-table__body tr').count();
+  ok('成员月度考勤表渲染 3 行', tableRows === 3, tableRows);
+  const exportBtn = page.getByText('导出 Excel', { exact: true });
+  ok('成员表提供导出 Excel 按钮', (await exportBtn.count()) === 1, await exportBtn.count());
+  const dlPromise = page.waitForEvent('download', { timeout: 8000 });
+  await exportBtn.click();
+  const dl = await dlPromise;
+  ok('导出 Excel 触发下载', dl.suggestedFilename().endsWith('.xlsx'), dl.suggestedFilename());
   ok('无页面 JS 错误', pageErrors.length === 0, pageErrors);
   ok('无意外 4xx/5xx', badResp.length === 0, badResp);
   console.log(`—— 探针完成 ${pass} 通过 / ${fail} 失败 ——`);

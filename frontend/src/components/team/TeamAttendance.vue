@@ -33,6 +33,7 @@ const codes = ref([]);
 const boardDate = ref(todayStr());
 const statsMonth = ref(todayStr().slice(0, 7));
 const myMonth = ref(todayStr().slice(0, 7));
+const statsView = ref('calendar');
 const codeInput = ref('');
 const leaveDlg = ref(false);
 const proxyDlg = ref(false);
@@ -345,7 +346,11 @@ const myCalCells = computed(() => {
 });
 const statsCalCells = computed(() => {
   if (!stats.value?.days) return [];
-  const map = Object.fromEntries((stats.value.days || []).map((d) => [d.date, d]));
+  const map = Object.fromEntries((stats.value.days || []).map((d) => {
+    const rows = d.rows || [];
+    const actual = rows.filter((r) => (r.cells || []).some((c) => c.status === 'normal' || c.status === 'late')).length;
+    return [d.date, { ...d, expected: rows.length, actual, rate: rows.length ? Math.round((actual / rows.length) * 100) : 0 }];
+  }));
   return buildCalGrid(statsMonth.value, map, statsDayStatus);
 });
 function openMyDay(cell) {
@@ -365,12 +370,45 @@ function openStatsDay(cell) {
   const d = cell.info;
   calDetail.value = {
     title: `${d.date} 成员考勤`,
+    summary: {
+      expected: d.expected ?? (d.rows || []).length,
+      actual: d.actual ?? (d.rows || []).filter((r) => (r.cells || []).some((c) => c.status === 'normal' || c.status === 'late')).length,
+      rate: d.rate ?? 0,
+    },
     rows: (d.rows || []).map((r) => {
       const m = props.members.find((x) => Number(x.user_id ?? x.id) === Number(r.user_id));
       return { user_id: r.user_id, name: m ? memberName(m) : `成员 ${r.user_id}`, avatar: m?.avatar, cells: r.cells || [] };
     }),
   };
   calDlg.value = true;
+}
+const attendanceRate = (row) => {
+  const done = (row.normal || 0) + (row.late || 0);
+  const total = row.total || 0;
+  return total ? Math.round((done / total) * 100) : 0;
+};
+async function exportStatsExcel() {
+  if (!stats.value?.rows?.length) return ElMessage.warning('暂无考勤数据可导出');
+  try {
+    const XLSX = await import('@e965/xlsx');
+    const aoa = [
+      ['成员', '正常', '迟到', '请假', '待批', '缺勤', '应签', '出勤率'],
+      ...stats.value.rows.map((r) => [
+        memberName(r),
+        r.normal || 0,
+        r.late || 0,
+        r.leave || 0,
+        r.leave_pending || 0,
+        r.absent || 0,
+        r.total || 0,
+        `${attendanceRate(r)}%`,
+      ]),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '成员月度考勤');
+    XLSX.writeFile(wb, `考勤统计_${stats.value.month}.xlsx`);
+  } catch (e) { ElMessage.error(e.message); }
 }
 function openBoardMember(m) { selectedBoardMemberId.value = m.id; boardMemberDlg.value = true; }
 function closeBoardMember() { boardMemberDlg.value = false; selectedBoardMemberId.value = null; }
@@ -451,21 +489,34 @@ onMounted(() => loadAll().catch(() => {}));
 
 
         <div class="att-section-title">月度统计 {{ statsMonth }}</div>
-        <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px; margin-bottom:8px" />
-        <AttendanceCalendar v-if="stats && stats.days" :cells="statsCalCells" :today="todayStr()" @pick="openStatsDay" />
-        <div v-if="stats" class="att-table-wrap">
-          <el-table :data="stats.rows" size="small" border>
-            <el-table-column label="成员" min-width="120">
-              <template #default="{ row }"><b>{{ memberName(row) }}</b></template>
-            </el-table-column>
-            <el-table-column prop="normal" label="正常" width="70" align="center" />
-            <el-table-column prop="late" label="迟到" width="70" align="center" />
-            <el-table-column prop="leave" label="请假" width="70" align="center" />
-            <el-table-column prop="leave_pending" label="待批" width="70" align="center" />
-            <el-table-column prop="absent" label="缺勤" width="70" align="center" />
-            <el-table-column prop="total" label="应签" width="70" align="center" />
-          </el-table>
+        <div class="att-tools">
+          <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px" />
+          <el-segmented v-model="statsView" :options="[{ label: '日历', value: 'calendar' }, { label: '成员表', value: 'table' }]" />
         </div>
+        <template v-if="statsView === 'calendar'">
+          <AttendanceCalendar v-if="stats && stats.days" mode="count" :cells="statsCalCells" :today="todayStr()" @pick="openStatsDay" />
+        </template>
+        <template v-else>
+          <div class="att-tools">
+            <el-button size="small" type="primary" plain @click="exportStatsExcel">导出 Excel</el-button>
+          </div>
+          <div v-if="stats" class="att-table-wrap">
+            <el-table :data="stats.rows" size="small" border>
+              <el-table-column label="成员" min-width="120">
+                <template #default="{ row }"><b>{{ memberName(row) }}</b></template>
+              </el-table-column>
+              <el-table-column prop="normal" label="正常" width="70" align="center" />
+              <el-table-column prop="late" label="迟到" width="70" align="center" />
+              <el-table-column prop="leave" label="请假" width="70" align="center" />
+              <el-table-column prop="leave_pending" label="待批" width="70" align="center" />
+              <el-table-column prop="absent" label="缺勤" width="70" align="center" />
+              <el-table-column prop="total" label="应签" width="70" align="center" />
+              <el-table-column label="出勤率" width="80" align="center">
+                <template #default="{ row }">{{ attendanceRate(row) }}%</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
       </el-tab-pane>
 
       <el-tab-pane label="请假" name="leaves">
@@ -682,6 +733,11 @@ onMounted(() => loadAll().catch(() => {}));
 </el-dialog>
 <el-dialog v-model="calDlg" :title="calDetail?.title" width="560px" top="9vh" append-to-body>
   <div v-if="calDetail" class="cal-detail">
+    <div v-if="calDetail.summary" class="cal-summary">
+      <span>应到 {{ calDetail.summary.expected }}</span>
+      <span>实到 {{ calDetail.summary.actual }}</span>
+      <span>出勤率 {{ calDetail.summary.rate }}%</span>
+    </div>
     <div v-for="row in calDetail.rows" :key="row.user_id" class="cal-member">
       <div class="amd-head">
         <span class="am-avatar large">
@@ -747,6 +803,7 @@ onMounted(() => loadAll().catch(() => {}));
 .tc-time { color: var(--text-2); font-size: 12px; margin-bottom: 8px; }
 .cal-tools { margin-bottom: 8px; }
 .cal-detail { max-height: 62vh; overflow: auto; padding-right: 2px; }
+.cal-summary { display: flex; gap: 14px; flex-wrap: wrap; background: var(--primary-tint); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; font-size: 13px; }
 .cal-member + .cal-member { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .cal-member .amd-slots { max-height: none; margin-top: 10px; }
 .att-table-wrap { overflow-x: auto; }
