@@ -12,6 +12,7 @@
     "smoke:repo": "node scripts/smoke_repo.mjs",
     "smoke:booking": "node scripts/smoke_booking.mjs",
     "smoke:checkin": "node scripts/smoke_checkin.mjs",
+    "smoke:attendance": "node scripts/smoke_attendance.mjs",
     "smoke:github": "node scripts/smoke_github.mjs",
     "smoke:admin-perms": "node scripts/smoke_admin_perms.mjs",
     "probe:claimlost": "node scripts/probe_claimlost.mjs",

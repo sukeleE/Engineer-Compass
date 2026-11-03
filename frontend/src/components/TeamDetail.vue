@@ -1,5 +1,5 @@
 <script setup>
-// 小组工作台：Tabs 切换（进度对齐 / 备赛计划 / 讨论 / 资料共享 / 设备预约 / 成员与角色）
+// 小组工作台：Tabs 切换（进度对齐 / 考勤 / 备赛计划 / 讨论 / 资料共享 / 设备预约 / 成员与角色）
 import { ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
@@ -9,6 +9,7 @@ import TeamChat from './team/TeamChat.vue';
 import TeamFiles from './team/TeamFiles.vue';
 import TeamDevices from './team/TeamDevices.vue';
 import TeamMembers from './team/TeamMembers.vue';
+import TeamAttendance from './team/TeamAttendance.vue';
 
 const props = defineProps({ teamId: Number, myRole: String });
 
@@ -81,6 +82,9 @@ async function copyInviteLink() {
       <el-tabs v-model="active">
         <el-tab-pane :label="lab('📊 进度对齐', '进度')" name="progress">
           <TeamProgress :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" :tasks="detail.tasks" />
+        </el-tab-pane>
+        <el-tab-pane :label="lab('🕐 考勤', '考勤')" name="attendance">
+          <TeamAttendance :team-id="detail.team.id" :me="detail.me" :perms="detail.perms" :members="detail.members" :roles="detail.roles" />
         </el-tab-pane>
         <el-tab-pane :label="lab('🎯 备赛计划', '计划')" name="plans">
           <TeamPlanView :team-id="detail.team.id" :me="detail.me" :roles="detail.roles" :perms="detail.perms" />

@@ -282,6 +282,7 @@ r.get('/:id', (req, res) => {
       task: hasPerm(ctx, 'task'), progress: hasPerm(ctx, 'progress'), message: hasPerm(ctx, 'message'),
       file_upload: hasPerm(ctx, 'file_upload'), file_delete: hasPerm(ctx, 'file_delete'),
       device: hasPerm(ctx, 'device'), device_approve: hasPerm(ctx, 'device_approve'),
+      attendance: hasPerm(ctx, 'attendance'),
       member: hasPerm(ctx, 'member'), role: hasPerm(ctx, 'role'), team: hasPerm(ctx, 'team'),
     },
     members, roles, tasks, devices,

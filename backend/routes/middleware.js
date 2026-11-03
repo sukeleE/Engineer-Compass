@@ -240,6 +240,7 @@ export const PERM_KEYS = {
   task: '任务管理', progress: '进度汇报', message: '发消息',
   file_upload: '上传资料', file_delete: '删除资料',
   device: '设备管理', device_approve: '预约审批',
+  attendance: '考勤管理',
   member: '成员管理', role: '角色管理', team: '小组设置',
 };
 

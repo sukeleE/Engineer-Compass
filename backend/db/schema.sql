@@ -889,3 +889,82 @@ CREATE INDEX IF NOT EXISTS idx_checkin_sched_team ON checkin_schedule(team_id);
 -- 部分唯一索引（同期一人一条）统一在 database.js 加完列之后创建——不能放在这里：
 -- 老库执行 schema.sql 时 progress_log 还是旧结构（无 schedule_id），提前建索引会
 -- 启动即崩（no such column: schedule_id）。
+
+-- ==================== 小组考勤（attendance） ====================
+-- attendance_policy 每小组一份：工作日/多时段/考勤范围/负责人/请假模式/特殊日期
+-- permissions JSON 新增键 attendance=考勤管理（负责人）；组长恒为负责人
+CREATE TABLE IF NOT EXISTS attendance_policy (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id         INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL DEFAULT '考勤规则',
+  workdays        TEXT NOT NULL DEFAULT '[1,2,3,4,5]',      -- JSON [1..7] 周一=1
+  slots           TEXT NOT NULL DEFAULT '[]',               -- JSON [{id,name,start,late,end}]
+  scope_type      TEXT NOT NULL DEFAULT 'all',              -- all / roles / members
+  scope_json      TEXT NOT NULL DEFAULT '[]',               -- 角色 id 或成员 id
+  managers_json   TEXT NOT NULL DEFAULT '[]',               -- 显式考勤负责人（组长+attendance权限恒为负责人）
+  leave_mode      TEXT NOT NULL DEFAULT 'approval',         -- approval 需审批 / register 仅登记
+  start_date      TEXT,                                     -- 生效起 YYYY-MM-DD（空=不限）
+  end_date        TEXT,                                     -- 生效止（空=不限）
+  exceptions_json TEXT NOT NULL DEFAULT '[]',               -- [{date,type:'off'|'work',name}]
+  active          INTEGER NOT NULL DEFAULT 1,
+  created_by      INTEGER REFERENCES user(id),
+  create_time     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_att_policy_team ON attendance_policy(team_id);
+
+-- 签到码：负责人发布，组员凭码在有效期内核销
+CREATE TABLE IF NOT EXISTS attendance_code (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id     INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  code        TEXT NOT NULL UNIQUE,
+  date        TEXT NOT NULL,                                -- 对应日期 YYYY-MM-DD
+  slot_id     TEXT NOT NULL,
+  slot_name   TEXT NOT NULL DEFAULT '',
+  expires_at  TEXT NOT NULL,                                -- 有效期至（东八区）
+  max_uses    INTEGER NOT NULL DEFAULT 0,                   -- 0=不限次数
+  use_count   INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'active',               -- active / disabled
+  created_by  INTEGER REFERENCES user(id),
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_att_code_team ON attendance_code(team_id, status);
+
+-- 打卡记录：(成员,日期,时段) 唯一；source self本人 / proxy代签 / code签到码
+CREATE TABLE IF NOT EXISTS attendance_record (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id      INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  user_id      INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  date         TEXT NOT NULL,
+  slot_id      TEXT NOT NULL,
+  slot_name    TEXT NOT NULL DEFAULT '',
+  checkin_time TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'normal',              -- normal / late
+  source       TEXT NOT NULL DEFAULT 'self',
+  proxy_by     INTEGER REFERENCES user(id),
+  code_id      INTEGER REFERENCES attendance_code(id) ON DELETE SET NULL,
+  note         TEXT DEFAULT '',
+  create_time  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(team_id, user_id, date, slot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_att_record_team_date ON attendance_record(team_id, date);
+CREATE INDEX IF NOT EXISTS idx_att_record_user ON attendance_record(user_id, date);
+
+-- 请假单：status pending待审批 / approved已批准（仅登记模式直接 approved） / rejected已驳回
+CREATE TABLE IF NOT EXISTS attendance_leave (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id     INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  start_date  TEXT NOT NULL,
+  end_date    TEXT NOT NULL,
+  slot_id     TEXT,                                         -- 空=全天；否则只请该时段
+  leave_type  TEXT NOT NULL DEFAULT '事假',
+  reason      TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  reviewer_id INTEGER REFERENCES user(id),
+  review_note TEXT DEFAULT '',
+  review_time DATETIME,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_att_leave_team ON attendance_leave(team_id, status);

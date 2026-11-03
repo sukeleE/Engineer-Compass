@@ -170,6 +170,22 @@ export const api = {
   teamCheckinLeaderboard: (id, range, sid) =>
     req(`/team/${id}/checkin/leaderboard?range=${range || 'month'}${sid ? `&schedule_id=${sid}` : ''}`),
   teamCheckinFeatured: (id, sid) => req(`/team/${id}/checkin/featured${sid ? `?schedule_id=${sid}` : ''}`),
+  // 小组考勤：规则/打卡/签到码/请假/看板统计
+  attendanceSettings: (id) => req(`/team/${id}/attendance/settings`),
+  attendanceSaveSettings: (id, b) => req(`/team/${id}/attendance/settings`, { method: 'PUT', body: JSON.stringify(b) }),
+  attendanceMy: (id) => req(`/team/${id}/attendance/my`),
+  attendanceCheckin: (id, b) => req(`/team/${id}/attendance/checkin`, { method: 'POST', body: JSON.stringify(b) }),
+  attendanceProxy: (id, b) => req(`/team/${id}/attendance/checkin/proxy`, { method: 'POST', body: JSON.stringify(b) }),
+  attendanceCodes: (id) => req(`/team/${id}/attendance/codes`),
+  attendanceCodeCreate: (id, b) => req(`/team/${id}/attendance/codes`, { method: 'POST', body: JSON.stringify(b) }),
+  attendanceCodeDisable: (id, cid) => req(`/team/${id}/attendance/codes/${cid}`, { method: 'DELETE' }),
+  attendanceCodeRedeem: (id, code) => req(`/team/${id}/attendance/codes/${encodeURIComponent(code)}/redeem`, { method: 'POST' }),
+  attendanceLeaves: (id, status) => req(`/team/${id}/attendance/leaves${status ? `?status=${status}` : ''}`),
+  attendanceLeaveCreate: (id, b) => req(`/team/${id}/attendance/leaves`, { method: 'POST', body: JSON.stringify(b) }),
+  attendanceLeaveStatus: (id, lid, b) => req(`/team/${id}/attendance/leaves/${lid}/status`, { method: 'PUT', body: JSON.stringify(b) }),
+  attendanceLeaveDelete: (id, lid) => req(`/team/${id}/attendance/leaves/${lid}`, { method: 'DELETE' }),
+  attendanceBoard: (id, date) => req(`/team/${id}/attendance/board${date ? `?date=${date}` : ''}`),
+  attendanceStats: (id, month) => req(`/team/${id}/attendance/stats?month=${month || ''}`),
   // 讨论
   teamMessages: (id) => req(`/team/${id}/messages`),
   teamMessage: (id, card) => req(`/team/${id}/message`, { method: 'POST', body: JSON.stringify(card) }),
