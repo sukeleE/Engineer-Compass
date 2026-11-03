@@ -37,6 +37,8 @@ const proxyDlg = ref(false);
 const codeDlg = ref(false);
 const generatedCode = ref(null);
 const saving = ref(false);
+const selectedBoardMemberId = ref(null);
+const boardMemberDlg = ref(false);
 
 const leaveForm = reactive({ start_date: '', end_date: '', slot_id: '', leave_type: '事假', reason: '' });
 const proxyForm = reactive({ user_id: null, date: boardDate.value, slot_id: '', time: '', note: '' });
@@ -280,6 +282,38 @@ function statusTag(s) { const m = cellMeta(s); return m.tag; }
 function statusLabel(s) { return cellMeta(s).label; }
 function fmtTime(t) { return String(t || '').slice(11, 16); }
 
+const boardMember = computed(() => board.value?.rows?.find((m) => Number(m.id) === Number(selectedBoardMemberId.value)) || null);
+const boardMemberSlots = computed(() => {
+  const m = boardMember.value;
+  if (!m) return [];
+  return (board.value?.slots || []).map((s) => {
+    const c = cellOf(m, s.id) || {};
+    return {
+      slot_id: s.id,
+      name: s.name,
+      time: `${s.start}-${s.end}`,
+      status: c.status || 'waiting',
+      checkin_time: c.record?.checkin_time,
+      leave_type: c.leave?.leave_type,
+    };
+  });
+});
+const boardCount = (m, state) => (m.cells || []).filter((c) => c.status === state).length;
+const boardDoneCount = (m) => boardCount(m, 'normal') + boardCount(m, 'late');
+const boardOverall = (m) => {
+  const s = (m.cells || []).map((c) => c.status);
+  if (s.includes('leave') || s.includes('leave_pending')) return s.includes('leave') ? 'leave' : 'leave_pending';
+  if (s.includes('absent')) return 'absent';
+  if (s.includes('late')) return 'late';
+  if (s.includes('normal')) return 'normal';
+  if (s.includes('can_checkin')) return 'can_checkin';
+  return 'waiting';
+};
+const boardCanProxy = (s) => ['absent', 'late', 'can_checkin'].includes(s);
+function openBoardMember(m) { selectedBoardMemberId.value = m.id; boardMemberDlg.value = true; }
+function closeBoardMember() { boardMemberDlg.value = false; selectedBoardMemberId.value = null; }
+function proxyBoardMember(m, s) { openProxy(m, s); }
+
 onMounted(() => loadAll().catch(() => {}));
 </script>
 
@@ -336,24 +370,28 @@ onMounted(() => loadAll().catch(() => {}));
           <el-date-picker v-model="boardDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
           <span v-if="board && !board.working" class="att-sub">该日不是考勤工作日</span>
         </div>
-        <div v-if="board && board.working" class="att-table-wrap">
-          <el-table :data="board.rows" size="small" border>
-            <el-table-column label="成员" min-width="120" fixed>
-              <template #default="{ row }">
-                <b>{{ memberName(row) }}</b>
-                <div class="cell-roles">{{ row.is_owner ? '组长' : (row.role_names || []).join('、') || '无角色' }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column v-for="s in board.slots" :key="s.id" :label="`${s.name} ${s.start}-${s.end}`" min-width="120">
-              <template #default="{ row }">
-                <div class="board-cell">
-                  <el-tag size="small" :type="statusTag(cellOf(row, s.id)?.status)">{{ statusLabel(cellOf(row, s.id)?.status) }}</el-tag>
-                  <el-button v-if="['absent', 'late', 'can_checkin'].includes(cellOf(row, s.id)?.status)" size="small" text type="primary" @click="openProxy(row, s)">代签</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
+        <div v-if="board && board.working" class="att-member-grid">
+  <button v-for="m in board.rows" :key="m.id" type="button" class="att-member-card"
+    :class="{ me: Number(m.id) === Number(props.me.user_id) }" @click="openBoardMember(m)">
+    <span class="am-avatar">
+      <img v-if="m.avatar" :src="m.avatar" alt="" />
+      <template v-else>{{ (m.real_name || m.nickname || '?').charAt(0) }}</template>
+    </span>
+    <b class="am-name">{{ m.real_name || m.nickname }}</b>
+    <span class="am-role">
+      <template v-if="m.is_owner">👑 组长</template>
+      <template v-else-if="m.role_names?.length">{{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em></template>
+      <template v-else>无角色</template>
+    </span>
+    <span class="am-status" :class="boardOverall(m)">{{ statusLabel(boardOverall(m)) }}</span>
+    <span class="am-dots" :title="m.cells.map((c) => `${c.slot_name} ${statusLabel(c.status)}`).join('；')">
+      <i v-for="c in m.cells" :key="c.slot_id" :class="c.status" :title="`${c.slot_name} ${statusLabel(c.status)}`"></i>
+    </span>
+    <span class="am-count">已签 {{ boardDoneCount(m) }}/{{ board.slots.length }}</span>
+    <span v-if="m.cells.some((c) => boardCanProxy(c.status))" class="am-proxy" @click.stop="proxyBoardMember(m, m.cells.find((c) => boardCanProxy(c.status)))">代签</span>
+  </button>
+</div>
+
 
         <div class="att-section-title">月度统计 {{ statsMonth }}</div>
         <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px; margin-bottom:8px" />
@@ -550,7 +588,41 @@ onMounted(() => loadAll().catch(() => {}));
       </template>
     </el-dialog>
 
-    <el-dialog v-model="codeDlg" title="发布签到码" width="420px">
+    <el-dialog v-model="boardMemberDlg" title="考勤详情" width="560px" top="9vh" append-to-body
+  @closed="closeBoardMember">
+  <div v-if="boardMember" class="am-detail">
+    <div class="amd-head">
+      <span class="am-avatar large">
+        <img v-if="boardMember.avatar" :src="boardMember.avatar" alt="" />
+        <template v-else>{{ (boardMember.real_name || boardMember.nickname || '?').charAt(0) }}</template>
+      </span>
+      <div class="amd-title">
+        <div class="amd-name-line">
+          <b>{{ boardMember.real_name || boardMember.nickname }}</b>
+          <el-tag size="small" :type="statusTag(boardOverall(boardMember))">{{ statusLabel(boardOverall(boardMember)) }}</el-tag>
+        </div>
+        <div class="amd-roles">{{ boardMember.is_owner ? '👑 组长' : (boardMember.role_names || []).join('、') || '无角色' }}</div>
+      </div>
+      <span class="amd-count">已签 {{ boardDoneCount(boardMember) }}/{{ board.slots.length }}</span>
+    </div>
+    <div class="amd-slots">
+      <div v-for="s in boardMemberSlots" :key="s.slot_id" class="amd-slot" :class="s.status">
+        <div class="ams-main">
+          <b>{{ s.name }}</b>
+          <span>{{ s.time }}</span>
+          <el-tag size="small" :type="statusTag(s.status)">{{ statusLabel(s.status) }}</el-tag>
+        </div>
+        <div class="ams-meta">
+          <span v-if="s.checkin_time">打卡 {{ fmtTime(s.checkin_time) }}<i v-if="s.source === 'proxy'">（代签）</i></span>
+          <span v-else-if="s.leave_type">请假 · {{ s.leave_type }}</span>
+          <span v-else>未打卡</span>
+        </div>
+        <el-button v-if="boardCanProxy(s.status)" size="small" text type="primary" @click="proxyBoardMember(boardMember, s)">代签</el-button>
+      </div>
+    </div>
+  </div>
+</el-dialog>
+<el-dialog v-model="codeDlg" title="发布签到码" width="420px">
       <el-form label-position="top">
         <el-form-item label="考勤时段">
           <el-select v-model="codeForm.slot_id" style="width:100%">
@@ -599,4 +671,55 @@ onMounted(() => loadAll().catch(() => {}));
 .slot-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .slot-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .date-pair { display: flex; gap: 8px; align-items: center; width: 100%; }
+.att-member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 10px; }
+.att-member-card {
+  position: relative; text-align: left; border: 1px solid var(--border); background: var(--card-bg);
+  border-radius: 12px; padding: 12px; min-height: 158px; cursor: pointer; transition: all .15s;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  &:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--primary) 45%, white); box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 10%, transparent); }
+  &.me { background: var(--primary-tint); border-color: color-mix(in srgb, var(--primary) 30%, white); }
+}
+.am-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; overflow: hidden; font-size: 15px; font-weight: 600;
+  background: var(--primary); color: #fff;
+  &.large { width: 48px; height: 48px; font-size: 19px; }
+  img { width: 100%; height: 100%; object-fit: cover; }
+}
+.am-name { max-width: 100%; font-size: 13.5px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-role { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding-right: 42px;
+  em { font-style: normal; color: #94a3b8; }
+}
+.am-status {
+  display: inline-flex; align-items: center; font-size: 11.5px; border-radius: 999px; padding: 3px 7px; white-space: nowrap;
+  &.normal { color: #15803d; background: #dcfce7; }
+  &.late, &.leave_pending { color: #b45309; background: #fef3c7; }
+  &.absent { color: #b91c1c; background: #fee2e2; }
+  &.leave, &.waiting, &.can_checkin { color: var(--text-2); background: rgba(148,163,184,.14); }
+}
+.am-dots { display: flex; gap: 4px; flex-wrap: wrap;
+  i { width: 9px; height: 9px; border-radius: 50%; background: #cbd5e1; }
+  i.normal { background: #22c55e; }
+  i.late { background: #f59e0b; }
+  i.absent { background: #ef4444; }
+  i.leave_pending { background: #f59e0b; }
+}
+.am-count { font-size: 11.5px; color: #94a3b8; }
+.am-proxy { position: absolute; right: 10px; bottom: 10px; font-size: 12px; color: var(--primary); cursor: pointer;
+  &:hover { text-decoration: underline; }
+}
+.amd-head { display: flex; align-items: center; gap: 12px; }
+.amd-title { flex: 1; min-width: 0; }
+.amd-name-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; b { font-size: 16px; } }
+.amd-roles { color: var(--text-2); font-size: 12px; margin-top: 5px; }
+.amd-count { font-size: 12.5px; color: #94a3b8; }
+.amd-slots { display: flex; flex-direction: column; gap: 8px; max-height: 48vh; overflow: auto; margin-top: 14px; padding-right: 2px; }
+.amd-slot { border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px; padding: 9px 11px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  &.normal { border-left-color: #22c55e; }
+  &.late { border-left-color: #f59e0b; }
+  &.absent { border-left-color: #ef4444; }
+  &.leave, &.leave_pending { border-left-color: #f59e0b; }
+  .ams-main { display: flex; align-items: center; gap: 8px; min-width: 0; b { font-size: 13.5px; } span { color: var(--text-2); font-size: 12px; } }
+  .ams-meta { flex: 1; min-width: 100px; color: var(--text-2); font-size: 12px; i { font-style: normal; } }
+}
 </style>
