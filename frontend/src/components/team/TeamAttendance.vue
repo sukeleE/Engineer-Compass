@@ -33,7 +33,7 @@ const codes = ref([]);
 const boardDate = ref(todayStr());
 const statsMonth = ref(todayStr().slice(0, 7));
 const myMonth = ref(todayStr().slice(0, 7));
-const statsView = ref('calendar');
+const recordView = ref('daily');
 const codeInput = ref('');
 const leaveDlg = ref(false);
 const proxyDlg = ref(false);
@@ -462,42 +462,44 @@ onMounted(() => loadAll().catch(() => {}));
 
       <el-tab-pane v-if="isManager" label="记录" name="board">
         <div class="att-tools">
-          <el-date-picker v-model="boardDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
-          <span v-if="board && !board.working" class="att-sub">该日不是考勤工作日</span>
+          <el-segmented v-model="recordView" :options="[{ label: '当日统计', value: 'daily' }, { label: '月度统计', value: 'month' }, { label: '月度考勤表', value: 'table' }]" />
         </div>
-        <div v-if="board && board.working" class="att-member-grid">
-  <button v-for="m in board.rows" :key="m.id" type="button" class="att-member-card"
-    :class="{ me: Number(m.id) === Number(props.me.user_id) }" @click="openBoardMember(m)">
-    <span class="am-avatar">
-      <img v-if="m.avatar" :src="m.avatar" alt="" />
-      <template v-else>{{ (m.real_name || m.nickname || '?').charAt(0) }}</template>
-    </span>
-    <b class="am-name">{{ m.real_name || m.nickname }}</b>
-    <span class="am-role">
-      <template v-if="m.is_owner">👑 组长</template>
-      <template v-else-if="m.role_names?.length">{{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em></template>
-      <template v-else>无角色</template>
-    </span>
-    <span class="am-status" :class="boardOverall(m)">{{ statusLabel(boardOverall(m)) }}</span>
-    <span class="am-dots" :title="m.cells.map((c) => `${c.slot_name} ${statusLabel(c.status)}`).join('；')">
-      <i v-for="c in m.cells" :key="c.slot_id" :class="c.status" :title="`${c.slot_name} ${statusLabel(c.status)}`"></i>
-    </span>
-    <span class="am-count">已签 {{ boardDoneCount(m) }}/{{ board.slots.length }}</span>
-    <span v-if="m.cells.some((c) => boardCanProxy(c.status))" class="am-proxy" @click.stop="proxyBoardMember(m, m.cells.find((c) => boardCanProxy(c.status)))">代签</span>
-  </button>
-</div>
-
-
-        <div class="att-section-title">月度统计 {{ statsMonth }}</div>
-        <div class="att-tools">
-          <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px" />
-          <el-segmented v-model="statsView" :options="[{ label: '日历', value: 'calendar' }, { label: '成员表', value: 'table' }]" />
-        </div>
-        <template v-if="statsView === 'calendar'">
+        <template v-if="recordView === 'daily'">
+          <div class="att-tools">
+            <el-date-picker v-model="boardDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
+            <span v-if="board && !board.working" class="att-sub">该日不是考勤工作日</span>
+          </div>
+          <div v-if="board && board.working" class="att-member-grid">
+            <button v-for="m in board.rows" :key="m.id" type="button" class="att-member-card"
+              :class="{ me: Number(m.id) === Number(props.me.user_id) }" @click="openBoardMember(m)">
+              <span class="am-avatar">
+                <img v-if="m.avatar" :src="m.avatar" alt="" />
+                <template v-else>{{ (m.real_name || m.nickname || '?').charAt(0) }}</template>
+              </span>
+              <b class="am-name">{{ m.real_name || m.nickname }}</b>
+              <span class="am-role">
+                <template v-if="m.is_owner">👑 组长</template>
+                <template v-else-if="m.role_names?.length">{{ m.role_names[0] }}<em v-if="m.role_names.length > 1"> +{{ m.role_names.length - 1 }}</em></template>
+                <template v-else>无角色</template>
+              </span>
+              <span class="am-status" :class="boardOverall(m)">{{ statusLabel(boardOverall(m)) }}</span>
+              <span class="am-dots" :title="m.cells.map((c) => `${c.slot_name} ${statusLabel(c.status)}`).join('；')">
+                <i v-for="c in m.cells" :key="c.slot_id" :class="c.status" :title="`${c.slot_name} ${statusLabel(c.status)}`"></i>
+              </span>
+              <span class="am-count">已签 {{ boardDoneCount(m) }}/{{ board.slots.length }}</span>
+              <span v-if="m.cells.some((c) => boardCanProxy(c.status))" class="am-proxy" @click.stop="proxyBoardMember(m, m.cells.find((c) => boardCanProxy(c.status)))">代签</span>
+            </button>
+          </div>
+        </template>
+        <template v-else-if="recordView === 'month'">
+          <div class="att-tools">
+            <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px" />
+          </div>
           <AttendanceCalendar v-if="stats && stats.days" mode="count" :cells="statsCalCells" :today="todayStr()" @pick="openStatsDay" />
         </template>
         <template v-else>
           <div class="att-tools">
+            <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px" />
             <el-button size="small" type="primary" plain @click="exportStatsExcel">导出 Excel</el-button>
           </div>
           <div v-if="stats" class="att-table-wrap">

@@ -22,11 +22,6 @@ function ratePct(info) {
   if (!info || !info.expected) return '-';
   return `${Math.round((info.actual / info.expected) * 100)}%`;
 }
-function rateBg(info) {
-  if (!info || !info.expected) return '';
-  const rate = Math.min(1, Math.max(0, info.actual / info.expected));
-  return `background: hsl(${35 + 105 * rate} 72% 44%)`;
-}
 </script>
 
 <template>
@@ -38,7 +33,6 @@ function rateBg(info) {
       <div v-for="(cell, i) in cells" :key="i" class="ac-slot">
         <button v-if="cell" type="button" class="ac-cell"
           :class="[cell.info.status !== 'off' ? `st-${cell.info.status}` : 'off', { today: cell.date === today }]"
-          :style="cell.info.working && mode === 'count' ? rateBg(cell.info) : {}"
           :disabled="!cell.info.working" @click="open(cell)">
           <span class="ac-day">{{ cell.day }}</span>
           <template v-if="cell.info.working">
@@ -93,6 +87,6 @@ function rateBg(info) {
 }
 .ac-status { font-size: 11.5px; color: var(--text-2); line-height: 1.2; margin-top: auto; }
 .ac-off { font-size: 11.5px; color: #94a3b8; margin-top: auto; }
-.ac-count { font-size: 19px; font-weight: 700; line-height: 1.1; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.18); }
-.ac-rate { font-size: 11px; color: rgba(255,255,255,.92); margin-top: auto; }
+.ac-count { font-size: 17px; font-weight: 700; line-height: 1.1; color: var(--text-1); }
+.ac-rate { font-size: 11px; color: var(--text-2); margin-top: auto; }
 </style>
