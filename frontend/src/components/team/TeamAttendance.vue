@@ -4,6 +4,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import { displayName } from '../../utils/displayName.js';
+import AttendanceCalendar from './AttendanceCalendar.vue';
 
 const props = defineProps({
   teamId: Number,
@@ -31,6 +32,7 @@ const leaves = ref([]);
 const codes = ref([]);
 const boardDate = ref(todayStr());
 const statsMonth = ref(todayStr().slice(0, 7));
+const myMonth = ref(todayStr().slice(0, 7));
 const codeInput = ref('');
 const leaveDlg = ref(false);
 const proxyDlg = ref(false);
@@ -39,6 +41,8 @@ const generatedCode = ref(null);
 const saving = ref(false);
 const selectedBoardMemberId = ref(null);
 const boardMemberDlg = ref(false);
+const calDlg = ref(false);
+const calDetail = ref(null);
 
 const leaveForm = reactive({ start_date: '', end_date: '', slot_id: '', leave_type: '事假', reason: '' });
 const proxyForm = reactive({ user_id: null, date: boardDate.value, slot_id: '', time: '', note: '' });
@@ -80,7 +84,7 @@ const workdayLabel = computed(() => {
 async function loadAll() {
   loading.value = true;
   try {
-    const [s, m] = await Promise.all([api.attendanceSettings(props.teamId), api.attendanceMy(props.teamId)]);
+    const [s, m] = await Promise.all([api.attendanceSettings(props.teamId), api.attendanceMy(props.teamId, myMonth.value)]);
     policy.value = s.settings;
     isManager.value = s.is_manager || !!props.perms?.attendance || !!props.me?.is_owner;
     my.value = m;
@@ -116,6 +120,11 @@ async function loadStats() {
 }
 watch(boardDate, loadBoard);
 watch(statsMonth, loadStats);
+async function loadMy() {
+  try { my.value = await api.attendanceMy(props.teamId, myMonth.value); }
+  catch (e) { ElMessage.error(e.message); }
+}
+watch(myMonth, () => { if (my.value) loadMy(); });
 
 // —— 本人打卡 / 签到码 ——
 async function selfCheckin(slot) {
@@ -310,6 +319,59 @@ const boardOverall = (m) => {
   return 'waiting';
 };
 const boardCanProxy = (s) => ['absent', 'late', 'can_checkin'].includes(s);
+function dayOverall(cells) { return boardOverall({ cells: cells || [] }); }
+function statsDayStatus(d) {
+  if (!d.working) return 'off';
+  return boardOverall({ cells: (d.rows || []).map((r) => ({ status: dayOverall(r.cells) })) });
+}
+function buildCalGrid(month, infoMap, statusFn) {
+  const [Y, M] = month.split('-').map(Number);
+  const firstDow = (new Date(Date.UTC(Y, M - 1, 1)).getUTCDay() + 6) % 7;
+  const last = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= last; d++) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    const info = infoMap[date] || { date, working: false };
+    cells.push({ date, day: d, info: { ...info, status: statusFn(info) } });
+  }
+  while (cells.length % 7) cells.push(null);
+  return cells;
+}
+const myCalCells = computed(() => {
+  if (!my.value?.month_days) return [];
+  const map = Object.fromEntries((my.value.month_days || []).map((d) => [d.date, d]));
+  return buildCalGrid(myMonth.value, map, (info) => (info.working ? dayOverall(info.cells) : 'off'));
+});
+const statsCalCells = computed(() => {
+  if (!stats.value?.days) return [];
+  const map = Object.fromEntries((stats.value.days || []).map((d) => [d.date, d]));
+  return buildCalGrid(statsMonth.value, map, statsDayStatus);
+});
+function openMyDay(cell) {
+  const d = cell.info;
+  calDetail.value = {
+    title: `${d.date} 我的考勤`,
+    rows: [{
+      user_id: props.me.user_id,
+      name: displayName(props.me),
+      avatar: props.me.avatar,
+      cells: d.cells || [],
+    }],
+  };
+  calDlg.value = true;
+}
+function openStatsDay(cell) {
+  const d = cell.info;
+  calDetail.value = {
+    title: `${d.date} 成员考勤`,
+    rows: (d.rows || []).map((r) => {
+      const m = props.members.find((x) => Number(x.user_id ?? x.id) === Number(r.user_id));
+      return { user_id: r.user_id, name: m ? memberName(m) : `成员 ${r.user_id}`, avatar: m?.avatar, cells: r.cells || [] };
+    }),
+  };
+  calDlg.value = true;
+}
 function openBoardMember(m) { selectedBoardMemberId.value = m.id; boardMemberDlg.value = true; }
 function closeBoardMember() { boardMemberDlg.value = false; selectedBoardMemberId.value = null; }
 function proxyBoardMember(m, s) { openProxy(m, s); }
@@ -352,16 +414,11 @@ onMounted(() => loadAll().catch(() => {}));
             </div>
           </div>
 
-          <div class="att-section-title">最近 14 天</div>
-          <div v-for="d in my.recent" :key="d.date" class="recent-row">
-            <span class="rr-date">{{ d.date }}</span>
-            <template v-if="d.working">
-              <el-tag v-for="c in d.cells" :key="c.slot_id" size="small" :type="statusTag(c.status)" effect="plain">
-                {{ c.slot_name }} {{ statusLabel(c.status) }}
-              </el-tag>
-            </template>
-            <el-tag v-else size="small" type="info" effect="plain">休息</el-tag>
+          <div class="att-section-title">当月月历 {{ myMonth }}</div>
+          <div class="cal-tools">
+            <el-date-picker v-model="myMonth" type="month" value-format="YYYY-MM" style="width:140px" />
           </div>
+          <AttendanceCalendar v-if="my && my.month_days" :cells="myCalCells" :today="todayStr()" @pick="openMyDay" />
         </template>
       </el-tab-pane>
 
@@ -395,6 +452,7 @@ onMounted(() => loadAll().catch(() => {}));
 
         <div class="att-section-title">月度统计 {{ statsMonth }}</div>
         <el-date-picker v-model="statsMonth" type="month" value-format="YYYY-MM" style="width:140px; margin-bottom:8px" />
+        <AttendanceCalendar v-if="stats && stats.days" :cells="statsCalCells" :today="todayStr()" @pick="openStatsDay" />
         <div v-if="stats" class="att-table-wrap">
           <el-table :data="stats.rows" size="small" border>
             <el-table-column label="成员" min-width="120">
@@ -622,6 +680,40 @@ onMounted(() => loadAll().catch(() => {}));
     </div>
   </div>
 </el-dialog>
+<el-dialog v-model="calDlg" :title="calDetail?.title" width="560px" top="9vh" append-to-body>
+  <div v-if="calDetail" class="cal-detail">
+    <div v-for="row in calDetail.rows" :key="row.user_id" class="cal-member">
+      <div class="amd-head">
+        <span class="am-avatar large">
+          <img v-if="row.avatar" :src="row.avatar" alt="" />
+          <template v-else>{{ (row.name || '?').charAt(0) }}</template>
+        </span>
+        <div class="amd-title">
+          <div class="amd-name-line">
+            <b>{{ row.name }}</b>
+            <el-tag size="small" :type="statusTag(dayOverall(row.cells))">{{ statusLabel(dayOverall(row.cells)) }}</el-tag>
+          </div>
+          <div class="amd-roles">{{ row.role_text || '考勤范围内' }}</div>
+        </div>
+        <span class="amd-count">已签 {{ boardDoneCount(row) }}/{{ row.cells.length }}</span>
+      </div>
+      <div class="amd-slots">
+        <div v-for="s in row.cells" :key="s.slot_id" class="amd-slot" :class="s.status">
+          <div class="ams-main">
+            <b>{{ s.slot_name }}</b>
+            <el-tag size="small" :type="statusTag(s.status)">{{ statusLabel(s.status) }}</el-tag>
+          </div>
+          <div class="ams-meta">
+            <span v-if="s.record">打卡 {{ fmtTime(s.record.checkin_time) }}<i v-if="s.record.source === 'proxy'">（代签）</i></span>
+            <span v-else-if="s.leave">请假 · {{ s.leave.leave_type }}<i v-if="s.leave.status === 'pending'">（待批）</i></span>
+            <span v-else>未打卡</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="!calDetail.rows.length" class="att-empty">暂无考勤记录</div>
+  </div>
+</el-dialog>
 <el-dialog v-model="codeDlg" title="发布签到码" width="420px">
       <el-form label-position="top">
         <el-form-item label="考勤时段">
@@ -653,8 +745,10 @@ onMounted(() => loadAll().catch(() => {}));
 .today-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .tc-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tc-time { color: var(--text-2); font-size: 12px; margin-bottom: 8px; }
-.recent-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--border); }
-.rr-date { min-width: 92px; font-size: 13px; color: var(--text-1); }
+.cal-tools { margin-bottom: 8px; }
+.cal-detail { max-height: 62vh; overflow: auto; padding-right: 2px; }
+.cal-member + .cal-member { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.cal-member .amd-slots { max-height: none; margin-top: 10px; }
 .att-table-wrap { overflow-x: auto; }
 .cell-roles { color: var(--text-2); font-size: 12px; }
 .board-cell { display: flex; align-items: center; gap: 4px; }

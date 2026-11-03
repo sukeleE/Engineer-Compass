@@ -173,7 +173,7 @@ export const api = {
   // 小组考勤：规则/打卡/签到码/请假/看板统计
   attendanceSettings: (id) => req(`/team/${id}/attendance/settings`),
   attendanceSaveSettings: (id, b) => req(`/team/${id}/attendance/settings`, { method: 'PUT', body: JSON.stringify(b) }),
-  attendanceMy: (id) => req(`/team/${id}/attendance/my`),
+  attendanceMy: (id, month) => req(`/team/${id}/attendance/my${month ? `?month=${month}` : ''}`),
   attendanceCheckin: (id, b) => req(`/team/${id}/attendance/checkin`, { method: 'POST', body: JSON.stringify(b) }),
   attendanceProxy: (id, b) => req(`/team/${id}/attendance/checkin/proxy`, { method: 'POST', body: JSON.stringify(b) }),
   attendanceCodes: (id) => req(`/team/${id}/attendance/codes`),

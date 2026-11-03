@@ -268,6 +268,24 @@ r.get('/:id/attendance/my', (req, res) => {
   const today = cnDateStr();
   const now = Date.now();
   const inScope = membersInScope(ctx.team.id, p).includes(req.user.id);
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : null;
+  const monthDays = [];
+  if (month) {
+    const [mY, mM] = month.split('-').map(Number);
+    const mLast = new Date(Date.UTC(mY, mM, 0)).getUTCDate();
+    for (let md = 1; md <= mLast; md++) {
+      const d = `${month}-${String(md).padStart(2, '0')}`;
+      if (!isWorkingDate(p, d)) { monthDays.push({ date: d, working: false }); continue; }
+      const dRecords = db.prepare(
+        'SELECT * FROM attendance_record WHERE team_id = ? AND user_id = ? AND date = ?'
+      ).all(ctx.team.id, req.user.id, d);
+      const dLeaves = db.prepare(
+        `SELECT * FROM attendance_leave WHERE team_id = ? AND user_id = ? AND status IN ('approved','pending')
+           AND start_date <= ? AND end_date >= ?`
+      ).all(ctx.team.id, req.user.id, d, d);
+      monthDays.push({ date: d, working: true, cells: currentCells(p, d, req.user.id, dRecords, dLeaves, now) });
+    }
+  }
   const workingToday = isWorkingDate(p, today);
   const todayRecords = db.prepare(
     'SELECT * FROM attendance_record WHERE team_id = ? AND user_id = ? AND date = ?'
@@ -306,6 +324,7 @@ r.get('/:id/attendance/my', (req, res) => {
     today_working: workingToday,
     today: workingToday ? currentCells(p, today, req.user.id, todayRecords, todayLeaves, now) : [],
     recent,
+    ...(month ? { month, month_days: monthDays } : {}),
     leaves: myLeaves,
   });
 });
@@ -618,18 +637,28 @@ r.get('/:id/attendance/stats', (req, res) => {
   const deny = managerDeny(ctx, p, req, res);
   if (deny) return deny;
   const today = cnDateStr();
+  const now = Date.now();
   const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today.slice(0, 7);
   const [Y, M] = month.split('-').map(Number);
   const last = new Date(Date.UTC(Y, M, 0)).getUTCDate();
   const scope = membersInScope(ctx.team.id, p);
   const rows = scope.map((uid) => ({ user_id: uid, normal: 0, late: 0, leave: 0, leave_pending: 0, absent: 0, total: 0 }));
+  const days = [];
   for (let day = 1; day <= last; day++) {
     const d = `${month}-${String(day).padStart(2, '0')}`;
-    if (!isWorkingDate(p, d)) continue;
+    if (!isWorkingDate(p, d)) { days.push({ date: d, working: false, rows: [] }); continue; }
     const records = db.prepare('SELECT * FROM attendance_record WHERE team_id = ? AND date = ?').all(ctx.team.id, d);
     const leaves = db.prepare(
       `SELECT * FROM attendance_leave WHERE team_id = ? AND status IN ('approved','pending') AND start_date <= ? AND end_date >= ?`
     ).all(ctx.team.id, d, d);
+    days.push({
+      date: d,
+      working: true,
+      rows: scope.map((uid) => ({
+        user_id: uid,
+        cells: currentCells(p, d, uid, records.filter((x) => x.user_id === uid), leaves.filter((x) => x.user_id === uid), now),
+      })),
+    });
     for (const row of rows) {
       const recs = records.filter((x) => x.user_id === row.user_id);
       const ls = leaves.filter((x) => x.user_id === row.user_id);
@@ -651,6 +680,7 @@ r.get('/:id/attendance/stats', (req, res) => {
   const memberMapRows = memberMap(ctx.team.id, rows.map((x) => x.user_id));
   res.json({
     month,
+    days,
     rows: rows.map((x) => ({ ...x, nickname: memberMapRows[x.user_id]?.nickname || '', real_name: memberMapRows[x.user_id]?.real_name || '' })),
   });
 });

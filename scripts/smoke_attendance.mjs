@@ -31,6 +31,7 @@ const exp = async (p, st, o = {}) => { const { res, data } = await jreq(p, o); r
 const tz = { timeZone: 'Asia/Shanghai' };
 const cn = new Intl.DateTimeFormat('en-CA', { ...tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format;
 const today = cn(new Date());
+const monthLast = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate();
 const hmFmt = new Intl.DateTimeFormat('en-GB', { ...tz, hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' });
 const hm = (d) => {
   const p = Object.fromEntries(hmFmt.formatToParts(d).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
@@ -100,6 +101,12 @@ try {
   ok('普通成员可看自己的今日考勤', mine.today_working === true && mine.today.length === 2 && mine.is_manager === false && mine.recent.length === 14, {
     w: mine.today_working, cells: mine.today.length, mgr: mine.is_manager, recent: mine.recent.length,
   });
+  const mineMonth = await api(`/team/${TID}/attendance/my?month=${today.slice(0, 7)}`, { token: tC });
+  const todayMine = mineMonth.month_days?.find((x) => x.date === today);
+  ok('自然月接口返回当月每日明细', mineMonth.month === today.slice(0, 7) && mineMonth.month_days.length === monthLast && mineMonth.recent.length === 14, {
+    month: mineMonth.month, days: mineMonth.month_days?.length, recent: mineMonth.recent?.length,
+  });
+  ok('自然月今日明细正确', todayMine?.working === true && todayMine.cells.length === 2 && todayMine.cells.every((c) => c.status === 'can_checkin'), todayMine);
 
   g = await exp(`/team/${TID}/attendance/leaves`, 400, { method: 'POST', token: tA, body: { end_date: today, slot_id: 's2', reason: '有事' } });
   ok('请假缺开始日期 400', g.ok, g);
@@ -140,6 +147,12 @@ try {
   const stats = await api(`/team/${TID}/attendance/stats?month=${today.slice(0, 7)}`, { token: tO });
   const sRow = stats.rows.find((x) => x.user_id === rA.user.id);
   ok('月统计：正常1 迟到0 请假1', sRow.normal === 1 && sRow.late === 0 && sRow.leave === 1 && sRow.total >= 2, sRow);
+  const todayStats = stats.days?.find((x) => x.date === today);
+  const aDay = todayStats?.rows?.find((x) => x.user_id === rA.user.id);
+  ok('月统计带每日成员明细', stats.days.length === monthLast && todayStats?.rows?.length === 3, {
+    days: stats.days?.length, todayRows: todayStats?.rows?.length,
+  });
+  ok('自然月日明细状态正确', aDay?.cells.map((c) => c.status).join(',') === 'normal,leave', aDay?.cells);
 
   // ---------- 5. 需审批模式 ----------
   await api(`/team/${TID}/attendance/settings`, { method: 'PUT', token: tO, body: {

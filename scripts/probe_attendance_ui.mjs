@@ -122,6 +122,22 @@ try {
   ok('详情弹窗时段状态正确', JSON.stringify(slotStatuses) === JSON.stringify(['缺勤', '请假']), slotStatuses);
   const detailText = await page.locator('.amd-slot').allTextContents();
   ok('详情显示请假类型', detailText.some((x) => x.includes('病假')), detailText);
+  await page.keyboard.press('Escape');
+  const calendars = await page.locator('.att-calendar').count();
+  ok('我的与月度统计渲染月历', calendars === 2, calendars);
+  ok('不再显示最近 14 天列表', (await page.locator('text=最近 14 天').count()) === 0, await page.locator('text=最近 14 天').count());
+  await page.locator('.att-calendar').nth(0).locator('.ac-cell.today').click();
+  await page.waitForSelector('.el-dialog .cal-member', { timeout: 10000 });
+  ok('我的月历点击查看当日详情', (await page.locator('.cal-member').count()) === 1 && (await page.locator('.cal-member .amd-slot').count()) === 2, {
+    members: await page.locator('.cal-member').count(), slots: await page.locator('.cal-member .amd-slot').count(),
+  });
+  await page.keyboard.press('Escape');
+  await page.locator('.att-calendar').nth(1).locator('.ac-cell.today').click();
+  await page.waitForSelector('.el-dialog .cal-member', { timeout: 10000 });
+  ok('月度统计月历点击查看成员当日详情', (await page.locator('.cal-member').count()) === 3 && (await page.locator('.cal-member .amd-slot').count()) === 6, {
+    members: await page.locator('.cal-member').count(), slots: await page.locator('.cal-member .amd-slot').count(),
+  });
+  await page.keyboard.press('Escape');
   await page.screenshot({ path: path.join(ROOT, 'scripts', '.probe_attendance_cards.png'), fullPage: false });
   ok('无页面 JS 错误', pageErrors.length === 0, pageErrors);
   ok('无意外 4xx/5xx', badResp.length === 0, badResp);
