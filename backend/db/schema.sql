@@ -903,6 +903,8 @@ CREATE TABLE IF NOT EXISTS attendance_policy (
   scope_json      TEXT NOT NULL DEFAULT '[]',               -- 角色 id 或成员 id
   managers_json   TEXT NOT NULL DEFAULT '[]',               -- 显式考勤负责人（组长+attendance权限恒为负责人）
   leave_mode      TEXT NOT NULL DEFAULT 'approval',         -- approval 需审批 / register 仅登记
+  allow_makeup    INTEGER NOT NULL DEFAULT 0,               -- 是否允许请假补签
+  makeup_minutes  INTEGER NOT NULL DEFAULT 60,              -- 补签要求时长（分钟）
   start_date      TEXT,                                     -- 生效起 YYYY-MM-DD（空=不限）
   end_date        TEXT,                                     -- 生效止（空=不限）
   exceptions_json TEXT NOT NULL DEFAULT '[]',               -- [{date,type:'off'|'work',name}]
@@ -968,3 +970,19 @@ CREATE TABLE IF NOT EXISTS attendance_leave (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_att_leave_team ON attendance_leave(team_id, status);
+
+-- 请假补签：成员请假时可选设置补签时间，按时签到/签退，满足负责人设定的时长即完成
+CREATE TABLE IF NOT EXISTS attendance_makeup (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id          INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  user_id          INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  leave_id         INTEGER NOT NULL REFERENCES attendance_leave(id) ON DELETE CASCADE UNIQUE,
+  planned_at       TEXT NOT NULL,                           -- 计划补签时间 YYYY-MM-DD HH:mm
+  checkin_time     TEXT,                                    -- 实际签到时间
+  checkout_time    TEXT,                                    -- 实际签退时间
+  minutes_required INTEGER NOT NULL DEFAULT 60,             -- 创建请假时的补签时长要求
+  status           TEXT NOT NULL DEFAULT 'pending',         -- pending 待签到 / checkin 已签到 / completed 已完成
+  create_time      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_att_makeup_team_user ON attendance_makeup(team_id, user_id, status);

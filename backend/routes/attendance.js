@@ -132,6 +132,14 @@ function slotById(p, slotId) {
 function recordStatus(slot, date, hhmm) {
   return slotMs(date, hhmm) > slotMs(date, slot.late) ? 'late' : 'normal';
 }
+const makeupAtMs = (s) => Date.parse(`${String(s).trim().replace(' ', 'T')}+08:00`);
+const cnDateTimeStr = (d = new Date()) => `${cnDateStr(d)} ${nowHm(d)}:00`;
+function normalizeMakeup(m) {
+  if (m && (m.makeup_status || m.status) === 'pending' && (m.makeup_at || m.planned_at) && cnDateStr() > String(m.makeup_at || m.planned_at).slice(0, 10)) {
+    if (m.makeup_status) m.makeup_status = 'missed'; else m.status = 'missed';
+  }
+  return m;
+}
 
 const MEMBER_SQL = `
   SELECT u.id, COALESCE(u.nickname, u.username) AS nickname, u.real_name, u.avatar
@@ -215,6 +223,9 @@ r.put('/:id/attendance/settings', (req, res) => {
 
     const leaveMode = String(b.leave_mode ?? (p.leave_mode || 'approval'));
     if (!['approval', 'register'].includes(leaveMode)) throw bad('请假模式错误');
+    const allowMakeup = int01(b.allow_makeup ?? p.allow_makeup);
+    const makeupMinutes = Math.trunc(Number(b.makeup_minutes ?? p.makeup_minutes ?? 60));
+    if (!Number.isFinite(makeupMinutes) || makeupMinutes < 1 || makeupMinutes > 480) throw bad('补签时长需在 1-480 分钟之间');
 
     const startDate = String(b.start_date ?? (p.start_date || '')).trim();
     const endDate = String(b.end_date ?? (p.end_date || '')).trim();
@@ -236,14 +247,14 @@ r.put('/:id/attendance/settings', (req, res) => {
 
     db.prepare(
       `UPDATE attendance_policy SET name=?, workdays=?, slots=?, scope_type=?, scope_json=?, managers_json=?,
-         leave_mode=?, start_date=?, end_date=?, exceptions_json=?, active=?,
+         leave_mode=?, allow_makeup=?, makeup_minutes=?, start_date=?, end_date=?, exceptions_json=?, active=?,
          update_time=datetime('now','localtime') WHERE team_id=?`
     ).run(
       name, JSON.stringify(workdays), JSON.stringify(slots), scopeType, JSON.stringify(scope),
-      JSON.stringify(managers), leaveMode, startDate || null, endDate || null,
+      JSON.stringify(managers), leaveMode, allowMakeup, makeupMinutes, startDate || null, endDate || null,
       JSON.stringify(exceptions), active, ctx.team.id
     );
-    logAudit(req, 'attendance-settings', ctx.team.name, { slots: slots.length, scope: scopeType, leave_mode: leaveMode });
+    logAudit(req, 'attendance-settings', ctx.team.name, { slots: slots.length, scope: scopeType, leave_mode: leaveMode, allow_makeup: allowMakeup, makeup_minutes: makeupMinutes });
     res.json({ message: '考勤规则已保存' });
   } catch (e) { return handle(res, e); }
 });
@@ -310,9 +321,18 @@ r.get('/:id/attendance/my', (req, res) => {
   }
 
   const myLeaves = db.prepare(
-    `SELECT l.*, u.nickname, u.real_name FROM attendance_leave l JOIN user u ON u.id = l.user_id
+    `SELECT l.*, u.nickname, u.real_name,
+            m.id AS makeup_id, m.planned_at AS makeup_at, m.status AS makeup_status,
+            m.minutes_required AS makeup_minutes, m.checkin_time AS makeup_checkin, m.checkout_time AS makeup_checkout
+     FROM attendance_leave l JOIN user u ON u.id = l.user_id
+     LEFT JOIN attendance_makeup m ON m.leave_id = l.id
      WHERE l.team_id = ? AND l.user_id = ? ORDER BY l.create_time DESC LIMIT 30`
-  ).all(ctx.team.id, req.user.id);
+  ).all(ctx.team.id, req.user.id).map(normalizeMakeup);
+  const myMakeups = db.prepare(
+    `SELECT m.*, l.start_date, l.end_date, l.leave_type, l.status AS leave_status
+     FROM attendance_makeup m JOIN attendance_leave l ON l.id = m.leave_id
+     WHERE m.team_id = ? AND m.user_id = ? ORDER BY m.planned_at DESC LIMIT 20`
+  ).all(ctx.team.id, req.user.id).map(normalizeMakeup);
   res.json({
     policy: {
       name: p.name, active: p.active, workdays: p.workdays, slots: p.slots,
@@ -326,6 +346,7 @@ r.get('/:id/attendance/my', (req, res) => {
     recent,
     ...(month ? { month, month_days: monthDays } : {}),
     leaves: myLeaves,
+    makeups: myMakeups,
   });
 });
 
@@ -504,13 +525,16 @@ r.get('/:id/attendance/leaves', (req, res) => {
   if (['pending', 'approved', 'rejected'].includes(status)) { where += ' AND l.status = ?'; params.push(status); }
   const rows = db.prepare(
     `SELECT l.*, COALESCE(u.nickname, u.username) AS nickname, u.real_name,
-            COALESCE(rv.nickname, rv.username) AS reviewer_name
+            COALESCE(rv.nickname, rv.username) AS reviewer_name,
+            m.id AS makeup_id, m.planned_at AS makeup_at, m.status AS makeup_status,
+            m.minutes_required AS makeup_minutes, m.checkin_time AS makeup_checkin, m.checkout_time AS makeup_checkout
      FROM attendance_leave l
      JOIN user u ON u.id = l.user_id
+     LEFT JOIN attendance_makeup m ON m.leave_id = l.id
      LEFT JOIN user rv ON rv.id = l.reviewer_id
      WHERE ${where} ORDER BY l.create_time DESC LIMIT 100`
   ).all(...params);
-  res.json({ leaves: rows, is_manager: mgr });
+  res.json({ leaves: rows.map(normalizeMakeup), is_manager: mgr });
 });
 
 r.post('/:id/attendance/leaves', (req, res) => {
@@ -530,6 +554,13 @@ r.post('/:id/attendance/leaves', (req, res) => {
     if (!leaveType) throw bad('请选择请假类型');
     const reason = String(b.reason || '').trim();
     if (!reason || reason.length > 200) throw bad('请假原因需 1-200 字');
+    const makeupAt = String(b.makeup_at || '').trim();
+    if (makeupAt) {
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(makeupAt)) throw bad('补签时间格式错误（YYYY-MM-DD HH:mm）');
+      if (!int01(p.allow_makeup)) throw bad('当前考勤未开启补签');
+      if (makeupAtMs(makeupAt) <= Date.now()) throw bad('补签时间需晚于当前时间');
+      if (makeupAt.slice(0, 10) < end) throw bad('补签时间不能早于请假结束日期');
+    }
 
     const overlap = db.prepare(
       `SELECT 1 FROM attendance_leave WHERE team_id = ? AND user_id = ?
@@ -549,6 +580,11 @@ r.post('/:id/attendance/leaves', (req, res) => {
       register ? '仅登记' : ''
     );
     const lid = Number(rr.lastInsertRowid);
+    if (makeupAt) {
+      db.prepare(
+        'INSERT INTO attendance_makeup (team_id, user_id, leave_id, planned_at, minutes_required) VALUES (?,?,?,?,?)'
+      ).run(ctx.team.id, req.user.id, lid, makeupAt, p.makeup_minutes || 60);
+    }
     if (!register) {
       const me = db.prepare('SELECT nickname, real_name FROM user WHERE id = ?').get(req.user.id);
       const range = start === end ? start : `${start} 至 ${end}`;
@@ -573,6 +609,7 @@ r.put('/:id/attendance/leaves/:lid/status', (req, res) => {
     const status = String((req.body || {}).status || '');
     if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: '审批状态错误' });
     const note = String((req.body || {}).review_note || '').trim().slice(0, 100);
+    if (status === 'rejected') db.prepare('DELETE FROM attendance_makeup WHERE leave_id = ?').run(l.id);
     db.prepare(
       `UPDATE attendance_leave SET status = ?, reviewer_id = ?, review_note = ?, review_time = datetime('now','localtime') WHERE id = ?`
     ).run(status, req.user.id, note, l.id);
@@ -596,6 +633,55 @@ r.delete('/:id/attendance/leaves/:lid', (req, res) => {
   if (l.status === 'approved') return res.status(400).json({ error: '已批准的请假不能删除' });
   db.prepare('DELETE FROM attendance_leave WHERE id = ?').run(l.id);
   res.json({ message: '请假单已删除' });
+});
+
+// ============ 请假补签 ============
+r.post('/:id/attendance/makeup/:mid/checkin', (req, res) => {
+  try {
+    const ctx = teamCtx(Number(req.params.id), req.user.id);
+    if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+    const p = ensurePolicy(ctx.team.id, req.user.id);
+    if (!int01(p.allow_makeup)) throw bad('当前考勤未开启补签');
+    const m = db.prepare('SELECT * FROM attendance_makeup WHERE id = ? AND team_id = ?').get(Number(req.params.mid), ctx.team.id);
+    if (!m) throw bad('补签任务不存在');
+    if (m.user_id !== req.user.id) throw bad('只能操作自己的补签');
+    if (m.status !== 'pending') return res.status(409).json({ error: '该补签已经签到' });
+    const leave = db.prepare('SELECT * FROM attendance_leave WHERE id = ?').get(m.leave_id);
+    if (!leave || leave.status !== 'approved') throw bad('请假未批准，暂不能补签');
+    const today = cnDateStr();
+    if (m.planned_at.slice(0, 10) !== today) {
+      if (m.planned_at.slice(0, 10) < today) return res.status(400).json({ error: '补签时间已过，请联系负责人' });
+      throw bad('未到补签日期');
+    }
+    if (Date.now() < makeupAtMs(m.planned_at)) throw bad('未到补签时间');
+    db.prepare(
+      `UPDATE attendance_makeup SET status = ?, checkin_time = ?, update_time = datetime('now','localtime') WHERE id = ?`
+    ).run('checkin', cnDateTimeStr(), m.id);
+    logAudit(req, 'attendance-makeup-checkin', ctx.team.name, { user_id: req.user.id, makeup_id: m.id });
+    res.status(201).json({ message: '补签签到成功', status: 'checkin' });
+  } catch (e) { return handle(res, e); }
+});
+
+r.post('/:id/attendance/makeup/:mid/checkout', (req, res) => {
+  try {
+    const ctx = teamCtx(Number(req.params.id), req.user.id);
+    if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+    const p = ensurePolicy(ctx.team.id, req.user.id);
+    if (!int01(p.allow_makeup)) throw bad('当前考勤未开启补签');
+    const m = db.prepare('SELECT * FROM attendance_makeup WHERE id = ? AND team_id = ?').get(Number(req.params.mid), ctx.team.id);
+    if (!m) throw bad('补签任务不存在');
+    if (m.user_id !== req.user.id) throw bad('只能操作自己的补签');
+    if (m.status !== 'checkin') return res.status(409).json({ error: '尚未补签签到' });
+    const checkinMs = Date.parse(`${m.checkin_time.replace(' ', 'T')}+08:00`);
+    const needMs = (m.minutes_required || 60) * 60000;
+    const elapsedMs = Date.now() - checkinMs;
+    if (elapsedMs < needMs) throw bad(`未达到补签时长，还需 ${Math.ceil((needMs - elapsedMs) / 60000)} 分钟`);
+    db.prepare(
+      `UPDATE attendance_makeup SET status = ?, checkout_time = ?, update_time = datetime('now','localtime') WHERE id = ?`
+    ).run('completed', cnDateTimeStr(), m.id);
+    logAudit(req, 'attendance-makeup-checkout', ctx.team.name, { user_id: req.user.id, makeup_id: m.id });
+    res.json({ message: '补签完成', status: 'completed' });
+  } catch (e) { return handle(res, e); }
 });
 
 // ============ 看板与统计 ============

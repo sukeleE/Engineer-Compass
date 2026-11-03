@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 3115, VITE = 5202;
@@ -33,6 +34,7 @@ const api = async (p, o = {}) => { const { res, data } = await jreq(p, o); if (!
 const tz = { timeZone: 'Asia/Shanghai' };
 const cn = new Intl.DateTimeFormat('en-CA', { ...tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format;
 const today = cn(new Date());
+const tomorrow = cn(new Date(Date.now() + 864e5));
 const dowMap = { Sun: 7, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 const dow = dowMap[new Intl.DateTimeFormat('en-US', { ...tz, weekday: 'short' }).format(new Date())];
 const children = [];
@@ -163,6 +165,82 @@ try {
   await exportBtn.click();
   const dl = await dlPromise;
   ok('导出 Excel 触发下载', dl.suggestedFilename().endsWith('.xlsx'), dl.suggestedFilename());
+
+  // ---------- 请假补签 UI ----------
+  await api(`/team/${TID}/attendance/settings`, { method: 'PUT', token: A.token, body: {
+    name: '竞赛考勤', active: 1, workdays: [dow], slots: [s1, s2],
+    scope_type: 'all', scope_json: [], managers: [B.user.id], leave_mode: 'register',
+    allow_makeup: 1, makeup_minutes: 1, start_date: '', end_date: '', exceptions: [],
+  } });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const st = document.createElement('style');
+    st.textContent = '#pane-attendance, #pane-board, .el-tabs__content > .el-tab-pane { display: block !important; }';
+    document.head.appendChild(st);
+  });
+  await page.waitForSelector('.att-head', { timeout: 10000 });
+  await page.getByText('考勤设置', { exact: true }).click();
+  await page.waitForSelector('.att-form', { timeout: 10000 });
+  const mkFormItem = page.locator('.att-form .el-form-item', { hasText: '请假补签' });
+  const mkSwitchCls = await mkFormItem.locator('.el-switch').getAttribute('class') || '';
+  ok('设置页显示请假补签开关且已开启', mkSwitchCls.includes('is-checked'), mkSwitchCls);
+  const mkMinutesVal = await mkFormItem.locator('.el-input__inner').inputValue();
+  ok('设置页显示补签时长 1 分钟', mkMinutesVal === '1', mkMinutesVal);
+
+  const mkLv = await api(`/team/${TID}/attendance/leaves`, { method: 'POST', token: C.token, body: {
+    start_date: tomorrow, end_date: tomorrow, slot_id: '', leave_type: '事假', reason: '外出补签', makeup_at: `${tomorrow} 10:00`,
+  } });
+  const myC0 = await api(`/team/${TID}/attendance/my`, { token: C.token });
+  const mkC = myC0.makeups.find((x) => x.leave_id === mkLv.id);
+  ok('成员请假可设置补签时间', mkC && mkC.status === 'pending' && mkC.planned_at === `${tomorrow} 10:00`, mkC);
+  const hmNowParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    ...tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23',
+  }).formatToParts(new Date()).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+  const plannedNow = `${hmNowParts.year}-${hmNowParts.month}-${hmNowParts.day} ${hmNowParts.hour}:${hmNowParts.minute}`;
+  const dbUi = new DatabaseSync(env.DB_PATH);
+  dbUi.prepare('UPDATE attendance_makeup SET planned_at = ? WHERE id = ?').run(plannedNow, mkC.id);
+  dbUi.close();
+  await page.evaluate(([t, u]) => {
+    localStorage.setItem('ec_token', t);
+    localStorage.setItem('ec_user', JSON.stringify(u));
+  }, [C.token, C.user]);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const st = document.createElement('style');
+    st.textContent = '#pane-attendance, #pane-board, .el-tabs__content > .el-tab-pane { display: block !important; }';
+    document.head.appendChild(st);
+  });
+  await page.waitForSelector('.makeup-row', { timeout: 10000 });
+  const secTitles = await page.locator('.att-section-title').allTextContents();
+  ok('我的页显示我的补签区块', secTitles.some((x) => x.includes('我的补签')), secTitles);
+  const mkRowText = await page.locator('.makeup-row').textContent();
+  ok('补签行显示待补签与计划时间', mkRowText.includes('待补签') && mkRowText.includes('计划') && mkRowText.includes('1 分钟'), mkRowText);
+  const signInBtn = page.locator('.makeup-row .mk-actions button', { hasText: '签到' });
+  ok('到点后补签签到按钮可用', (await signInBtn.count()) === 1 && !(await signInBtn.isDisabled()), await signInBtn.count());
+  await signInBtn.click();
+  await page.waitForSelector('.makeup-row.checkin', { timeout: 10000 });
+  ok('点击签到后进入补签中', (await page.locator('.makeup-row.checkin').textContent()).includes('补签中'), await page.locator('.makeup-row.checkin').textContent());
+  const pastParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    ...tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, hourCycle: 'h23',
+  }).formatToParts(new Date(Date.now() - 120000)).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+  const dbUi2 = new DatabaseSync(env.DB_PATH);
+  dbUi2.prepare('UPDATE attendance_makeup SET checkin_time = ? WHERE id = ?').run(
+    `${pastParts.year}-${pastParts.month}-${pastParts.day} ${pastParts.hour}:${pastParts.minute}:${pastParts.second}`, mkC.id);
+  dbUi2.close();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    const st = document.createElement('style');
+    st.textContent = '#pane-attendance, #pane-board, .el-tabs__content > .el-tab-pane { display: block !important; }';
+    document.head.appendChild(st);
+  });
+  await page.waitForSelector('.makeup-row.checkin', { timeout: 10000 });
+  const signOutBtn = page.locator('.makeup-row.checkin .mk-actions button', { hasText: '签退' });
+  ok('满足补签时长后签退按钮可用', (await signOutBtn.count()) === 1 && !(await signOutBtn.isDisabled()), await signOutBtn.count());
+  await signOutBtn.click();
+  await page.waitForSelector('.makeup-row.completed', { timeout: 10000 });
+  ok('签退后补签完成', (await page.locator('.makeup-row.completed').textContent()).includes('补签完成'), await page.locator('.makeup-row.completed').textContent());
   ok('无页面 JS 错误', pageErrors.length === 0, pageErrors);
   ok('无意外 4xx/5xx', badResp.length === 0, badResp);
   console.log(`—— 探针完成 ${pass} 通过 / ${fail} 失败 ——`);

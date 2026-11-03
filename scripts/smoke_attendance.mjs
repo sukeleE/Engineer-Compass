@@ -6,6 +6,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const PORT = 3112;
 const BASE = `http://127.0.0.1:${PORT}/api`;
@@ -175,6 +176,65 @@ try {
   await api(`/team/${TID}/attendance/codes/${code.id}`, { method: 'DELETE', token: tO });
   g = await exp(`/team/${TID}/attendance/codes/${code.code}/redeem`, 400, { method: 'POST', token: tA });
   ok('停用后签到码不可用', g.ok && g.got === 400, g.data);
+
+  // ---------- 7. 请假补签 ----------
+  const dayAfter2 = addDays(today, 2);
+  const dayAfter3 = addDays(today, 3);
+  g = await exp(`/team/${TID}/attendance/leaves`, 400, { method: 'POST', token: tA, body: {
+    start_date: dayAfter2, end_date: dayAfter2, slot_id: '', leave_type: '事假', reason: '未开启补签', makeup_at: `${dayAfter2} 09:00`,
+  } });
+  ok('未开启补签时不能提交补签时间', g.ok && g.got === 400, g.data);
+  await api(`/team/${TID}/attendance/settings`, { method: 'PUT', token: tO, body: {
+    name: '竞赛考勤', active: 1, workdays: [dow], slots: [s1, s2],
+    scope_type: 'all', scope_json: [], managers: [rA.user.id],
+    leave_mode: 'approval', allow_makeup: 1, makeup_minutes: 1,
+    start_date: '', end_date: '', exceptions: [],
+  } });
+  const stMk = await api(`/team/${TID}/attendance/settings`, { token: tO });
+  ok('负责人可设置允许补签与补签时长', stMk.settings.allow_makeup === 1 && stMk.settings.makeup_minutes === 1, stMk.settings);
+  const mkLv = await api(`/team/${TID}/attendance/leaves`, { method: 'POST', token: tA, body: {
+    start_date: dayAfter2, end_date: dayAfter2, slot_id: '', leave_type: '事假', reason: '需要补签', makeup_at: `${dayAfter2} 10:00`,
+  } });
+  await api(`/team/${TID}/attendance/leaves/${mkLv.id}/status`, { method: 'PUT', token: tO, body: { status: 'approved', review_note: '批准补签' } });
+  const mkList0 = await api(`/team/${TID}/attendance/my`, { token: tA });
+  const mk0 = mkList0.makeups.find((x) => x.leave_id === mkLv.id);
+  ok('请假带补签时间后我的补签出现', mk0 && mk0.status === 'pending' && mk0.minutes_required === 1 && mk0.planned_at === `${dayAfter2} 10:00`, mk0);
+  const lvListMk = await api(`/team/${TID}/attendance/leaves`, { token: tO });
+  const lvMk = lvListMk.leaves.find((x) => x.id === mkLv.id);
+  ok('请假列表带补签摘要字段', lvMk.makeup_id === mk0.id && lvMk.makeup_status === 'pending' && lvMk.makeup_minutes === 1, lvMk);
+  const lvMineMk = mkList0.leaves.find((x) => x.id === mkLv.id);
+  ok('我的请假列表也带补签摘要', lvMineMk.makeup_id === mk0.id && lvMineMk.makeup_at === `${dayAfter2} 10:00`, lvMineMk);
+
+  const dbMk = new DatabaseSync(env.DB_PATH);
+  const setMk = (sql, ...args) => dbMk.prepare(sql).run(...args);
+  g = await exp(`/team/${TID}/attendance/makeup/${mk0.id}/checkin`, 400, { method: 'POST', token: tA });
+  ok('未到补签时间签到 400', g.ok && g.got === 400, g.data);
+  g = await exp(`/team/${TID}/attendance/makeup/${mk0.id}/checkout`, 409, { method: 'POST', token: tA });
+  ok('未签到先签退 409', g.ok && g.got === 409, g.data);
+  setMk('UPDATE attendance_makeup SET planned_at = ? WHERE id = ?', `${today} 00:00`, mk0.id);
+  const mkIn = await api(`/team/${TID}/attendance/makeup/${mk0.id}/checkin`, { method: 'POST', token: tA });
+  ok('到点补签签到成功', mkIn.status === 'checkin', mkIn);
+  g = await exp(`/team/${TID}/attendance/makeup/${mk0.id}/checkout`, 400, { method: 'POST', token: tA });
+  ok('补签时长未满签退 400', g.ok && g.got === 400 && /未达到补签时长/.test(g.data.error || ''), g.data);
+  const past2 = new Date(Date.now() - 120000);
+  const past2Parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    ...tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, hourCycle: 'h23',
+  }).formatToParts(past2).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+  setMk('UPDATE attendance_makeup SET checkin_time = ? WHERE id = ?',
+    `${past2Parts.year}-${past2Parts.month}-${past2Parts.day} ${past2Parts.hour}:${past2Parts.minute}:${past2Parts.second}`, mk0.id);
+  const mkOut = await api(`/team/${TID}/attendance/makeup/${mk0.id}/checkout`, { method: 'POST', token: tA });
+  ok('满足补签时长签退完成', mkOut.status === 'completed', mkOut);
+  const mkList1 = await api(`/team/${TID}/attendance/my`, { token: tA });
+  const mk1 = mkList1.makeups.find((x) => x.id === mk0.id);
+  ok('我的补签显示已完成', mk1.status === 'completed' && mk1.checkin_time && mk1.checkout_time, mk1);
+  const mkRejLv = await api(`/team/${TID}/attendance/leaves`, { method: 'POST', token: tA, body: {
+    start_date: dayAfter3, end_date: dayAfter3, slot_id: '', leave_type: '事假', reason: '驳回补签', makeup_at: `${dayAfter3} 14:00`,
+  } });
+  await api(`/team/${TID}/attendance/leaves/${mkRejLv.id}/status`, { method: 'PUT', token: tO, body: { status: 'rejected', review_note: '不批' } });
+  const afterRej = await api(`/team/${TID}/attendance/my`, { token: tA });
+  ok('驳回请假同步删除补签任务', !afterRej.makeups.some((x) => x.leave_id === mkRejLv.id), afterRej.makeups);
+  dbMk.close();
 } catch (e) {
   console.error('冒烟异常:', e);
   fail++;

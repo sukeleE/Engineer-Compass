@@ -1,6 +1,6 @@
 <script setup>
 // 小组考勤：我的考勤/记录看板/请假/签到码/考勤设置（负责人=组长+考勤管理权限+显式指定）
-import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
 import { displayName } from '../../utils/displayName.js';
@@ -45,7 +45,7 @@ const boardMemberDlg = ref(false);
 const calDlg = ref(false);
 const calDetail = ref(null);
 
-const leaveForm = reactive({ start_date: '', end_date: '', slot_id: '', leave_type: '事假', reason: '' });
+const leaveForm = reactive({ start_date: '', end_date: '', slot_id: '', leave_type: '事假', reason: '', makeup_at: '' });
 const proxyForm = reactive({ user_id: null, date: boardDate.value, slot_id: '', time: '', note: '' });
 const codeForm = reactive({ date: todayStr(), slot_id: '', max_uses: 0 });
 
@@ -205,7 +205,7 @@ async function copyCode(code) {
 
 // —— 请假 ——
 function openLeave() {
-  Object.assign(leaveForm, { start_date: todayStr(), end_date: todayStr(), slot_id: '', leave_type: '事假', reason: '' });
+  Object.assign(leaveForm, { start_date: todayStr(), end_date: todayStr(), slot_id: '', leave_type: '事假', reason: '', makeup_at: '' });
   leaveDlg.value = true;
 }
 async function submitLeave() {
@@ -217,6 +217,7 @@ async function submitLeave() {
     const r = await api.attendanceLeaveCreate(props.teamId, {
       start_date: leaveForm.start_date, end_date: leaveForm.end_date,
       slot_id: leaveForm.slot_id || null, leave_type: leaveForm.leave_type, reason: leaveForm.reason.trim(),
+      makeup_at: leaveForm.makeup_at || '',
     });
     ElMessage.success(r.message);
     leaveDlg.value = false;
@@ -240,11 +241,62 @@ async function removeLeave(l) {
   } catch (e) { ElMessage.error(e.message); }
 }
 
+// —— 请假补签 ——
+const nowTick = ref(Date.now());
+let makeupTimer = null;
+onMounted(() => { makeupTimer = setInterval(() => { nowTick.value = Date.now(); }, 30000); });
+onUnmounted(() => { if (makeupTimer) clearInterval(makeupTimer); });
+const cnNowStr = () => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23',
+  }).formatToParts(new Date()).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+};
+const MAKEUP_STATUS = {
+  pending: { label: '待补签', tag: 'warning' },
+  checkin: { label: '补签中', tag: 'primary' },
+  completed: { label: '补签完成', tag: 'success' },
+  missed: { label: '已错过', tag: 'danger' },
+};
+const makeupStatusLabel = (mk) => MAKEUP_STATUS[mk.status]?.label || mk.status || '-';
+const makeupStatusTag = (mk) => MAKEUP_STATUS[mk.status]?.tag || 'info';
+function makeupRemainMin(mk) {
+  if (mk.status !== 'checkin' || !mk.checkin_time) return 0;
+  const start = Date.parse(`${mk.checkin_time.replace(' ', 'T')}+08:00`);
+  const need = (mk.minutes_required || 60) * 60000;
+  return Math.max(0, Math.ceil((need - (nowTick.value - start)) / 60000));
+}
+function canMakeupCheckin(mk) {
+  if (mk.status !== 'pending') return false;
+  const now = cnNowStr();
+  return mk.planned_at.slice(0, 10) === todayStr() && mk.planned_at <= now;
+}
+function canMakeupCheckout(mk) {
+  if (mk.status !== 'checkin' || !mk.checkin_time) return false;
+  const start = Date.parse(`${mk.checkin_time.replace(' ', 'T')}+08:00`);
+  return nowTick.value - start >= (mk.minutes_required || 60) * 60000;
+}
+async function makeupCheckin(mk) {
+  try {
+    const r = await api.attendanceMakeupCheckin(props.teamId, mk.id);
+    ElMessage.success(r.message);
+    await loadAll();
+  } catch (e) { ElMessage.error(e.message); }
+}
+async function makeupCheckout(mk) {
+  try {
+    const r = await api.attendanceMakeupCheckout(props.teamId, mk.id);
+    ElMessage.success(r.message);
+    await loadAll();
+  } catch (e) { ElMessage.error(e.message); }
+}
+
 // —— 考勤设置 ——
 const sf = reactive({
   name: '', active: true, workdays: [], slots: [],
   scope_type: 'all', scope_json: [], managers: [], leave_mode: 'approval',
-  start_date: '', end_date: '', exceptions: [],
+  allow_makeup: false, makeup_minutes: 60, start_date: '', end_date: '', exceptions: [],
 });
 function openSettings() {
   const p = policy.value || {};
@@ -254,6 +306,8 @@ function openSettings() {
     slots: (p.slots || []).map((s) => ({ ...s })),
     scope_type: p.scope_type || 'all', scope_json: [...(p.scope_json || [])],
     managers: [...(p.managers_json || [])], leave_mode: p.leave_mode || 'approval',
+    allow_makeup: p.allow_makeup === 1 || p.allow_makeup === true,
+    makeup_minutes: Number(p.makeup_minutes) || 60,
     start_date: p.start_date || '', end_date: p.end_date || '',
     exceptions: (p.exceptions || []).map((x) => ({ ...x })),
   });
@@ -278,6 +332,7 @@ async function saveSettings() {
       name: sf.name.trim(), active: sf.active ? 1 : 0, workdays: sf.workdays,
       slots: sf.slots, scope_type: sf.scope_type, scope_json: sf.scope_json,
       managers: sf.managers, leave_mode: sf.leave_mode,
+      allow_makeup: sf.allow_makeup ? 1 : 0, makeup_minutes: sf.makeup_minutes,
       start_date: sf.start_date || '', end_date: sf.end_date || '', exceptions: sf.exceptions,
     });
     ElMessage.success('考勤规则已保存');
@@ -452,6 +507,23 @@ onMounted(() => loadAll().catch(() => {}));
             </div>
           </div>
 
+          <template v-if="my.makeups?.length">
+            <div class="att-section-title">我的补签</div>
+            <div v-for="mk in my.makeups" :key="mk.id" class="makeup-row" :class="mk.status">
+              <div class="mk-main">
+                <b>{{ mk.leave_type }}补签</b>
+                <span>{{ mk.start_date }}{{ mk.end_date !== mk.start_date ? ' 至 ' + mk.end_date : '' }} · 计划 {{ mk.planned_at }} · 需 {{ mk.minutes_required }} 分钟</span>
+                <span v-if="mk.status === 'checkin'" class="mk-tip">已签到，还差 {{ makeupRemainMin(mk) }} 分钟</span>
+                <span v-else-if="mk.status === 'completed'" class="mk-tip">签到 {{ mk.checkin_time }} · 签退 {{ mk.checkout_time }}</span>
+              </div>
+              <div class="mk-actions">
+                <el-tag size="small" :type="makeupStatusTag(mk)">{{ makeupStatusLabel(mk) }}</el-tag>
+                <el-button v-if="mk.status === 'pending'" size="small" type="primary" :disabled="!canMakeupCheckin(mk)" @click="makeupCheckin(mk)">签到</el-button>
+                <el-button v-if="mk.status === 'checkin'" size="small" type="success" :disabled="!canMakeupCheckout(mk)" @click="makeupCheckout(mk)">签退</el-button>
+              </div>
+            </div>
+          </template>
+
           <div class="att-section-title">当月月历 {{ myMonth }}</div>
           <div class="cal-tools">
             <el-date-picker v-model="myMonth" type="month" value-format="YYYY-MM" style="width:140px" />
@@ -532,6 +604,7 @@ onMounted(() => loadAll().catch(() => {}));
             <b>{{ memberName(l) }}</b>
             <span>{{ l.start_date }}{{ l.end_date !== l.start_date ? ' 至 ' + l.end_date : '' }} · {{ l.leave_type }}</span>
             <span class="lr-reason">{{ l.reason }}</span>
+            <span v-if="l.makeup_at" class="lr-makeup">补签 {{ l.makeup_at }} · {{ makeupStatusLabel({ status: l.makeup_status }) }}</span>
             <el-tag size="small" :type="l.status === 'approved' ? 'success' : l.status === 'rejected' ? 'danger' : 'warning'">
               {{ l.status === 'approved' ? '已批准' : l.status === 'rejected' ? '已驳回' : '待审批' }}
             </el-tag>
@@ -613,6 +686,14 @@ onMounted(() => loadAll().catch(() => {}));
               <el-radio value="register">仅登记</el-radio>
             </el-radio-group>
           </el-form-item>
+          <el-form-item label="请假补签">
+            <el-switch v-model="sf.allow_makeup" />
+            <template v-if="sf.allow_makeup">
+              <span class="mk-setting">补签时长</span>
+              <el-input-number v-model="sf.makeup_minutes" :min="1" :max="480" style="width:140px; margin-left:6px" />
+              <span class="mk-setting">分钟</span>
+            </template>
+          </el-form-item>
           <el-form-item label="生效日期（留空不限）">
             <div class="date-pair">
               <el-date-picker v-model="sf.start_date" type="date" value-format="YYYY-MM-DD" placeholder="开始" style="flex:1" />
@@ -663,6 +744,9 @@ onMounted(() => loadAll().catch(() => {}));
         </el-form-item>
         <el-form-item label="原因">
           <el-input v-model="leaveForm.reason" type="textarea" :rows="3" maxlength="200" show-word-limit />
+        </el-form-item>
+        <el-form-item v-if="policy && (policy.allow_makeup === 1 || policy.allow_makeup === true)" label="补签时间（可选）">
+          <el-date-picker v-model="leaveForm.makeup_at" type="datetime" value-format="YYYY-MM-DD HH:mm" placeholder="选择补签签到时间" style="width:100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -814,6 +898,17 @@ onMounted(() => loadAll().catch(() => {}));
 .leave-row { display: flex; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .lr-main { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .lr-reason { color: var(--text-2); }
+.lr-makeup { color: var(--primary); font-size: 12px; }
+.makeup-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; flex-wrap: wrap;
+  &.pending { border-left-color: #f59e0b; }
+  &.checkin { border-left-color: #38bdf8; }
+  &.completed { border-left-color: #22c55e; }
+  &.missed { border-left-color: #ef4444; }
+}
+.mk-main { display: flex; flex-direction: column; gap: 3px; font-size: 13px; min-width: 200px; }
+.mk-tip { color: var(--text-2); font-size: 12px; }
+.mk-actions { display: flex; align-items: center; gap: 8px; }
+.mk-setting { color: var(--text-2); font-size: 13px; margin-left: 12px; }
 .lr-actions { display: flex; align-items: center; gap: 6px; }
 .code-issued { border: 1px dashed var(--primary); border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: center; }
 .ci-label { color: var(--text-2); font-size: 13px; margin-bottom: 6px; }

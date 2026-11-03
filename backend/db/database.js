@@ -36,6 +36,8 @@ migCol('progress_log', 'reviewer_id', 'ALTER TABLE progress_log ADD COLUMN revie
 migCol('progress_log', 'featured', 'ALTER TABLE progress_log ADD COLUMN featured INTEGER NOT NULL DEFAULT 0');
 migCol('progress_log', 'is_late', 'ALTER TABLE progress_log ADD COLUMN is_late INTEGER NOT NULL DEFAULT 0');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_log_checkin ON progress_log(schedule_id, user_id, period_key) WHERE schedule_id IS NOT NULL');
+migCol('attendance_policy', 'allow_makeup', 'ALTER TABLE attendance_policy ADD COLUMN allow_makeup INTEGER NOT NULL DEFAULT 0');
+migCol('attendance_policy', 'makeup_minutes', 'ALTER TABLE attendance_policy ADD COLUMN makeup_minutes INTEGER NOT NULL DEFAULT 60');
 migCol('team_message', 'attachments', "ALTER TABLE team_message ADD COLUMN attachments TEXT DEFAULT '[]'");
 migCol('user_study', 'user_id', 'ALTER TABLE user_study ADD COLUMN user_id INTEGER');
 migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不支持 ADD COLUMN UNIQUE，唯一性用索引保证

@@ -184,6 +184,8 @@ export const api = {
   attendanceLeaveCreate: (id, b) => req(`/team/${id}/attendance/leaves`, { method: 'POST', body: JSON.stringify(b) }),
   attendanceLeaveStatus: (id, lid, b) => req(`/team/${id}/attendance/leaves/${lid}/status`, { method: 'PUT', body: JSON.stringify(b) }),
   attendanceLeaveDelete: (id, lid) => req(`/team/${id}/attendance/leaves/${lid}`, { method: 'DELETE' }),
+  attendanceMakeupCheckin: (id, mid) => req(`/team/${id}/attendance/makeup/${mid}/checkin`, { method: 'POST' }),
+  attendanceMakeupCheckout: (id, mid) => req(`/team/${id}/attendance/makeup/${mid}/checkout`, { method: 'POST' }),
   attendanceBoard: (id, date) => req(`/team/${id}/attendance/board${date ? `?date=${date}` : ''}`),
   attendanceStats: (id, month) => req(`/team/${id}/attendance/stats?month=${month || ''}`),
   // 讨论
