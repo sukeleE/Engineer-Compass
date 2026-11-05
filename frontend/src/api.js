@@ -166,6 +166,24 @@ export const api = {
   teamCheckinSubmit: (id, b) => req(`/team/${id}/checkin/submit`, { method: 'POST', body: JSON.stringify(b) }),
   teamCheckinBoard: (id, sid, roleId) =>
     req(`/team/${id}/checkin/schedules/${sid}/board${roleId || roleId === 0 ? `?role_id=${roleId}` : ''}`),
+  // 看板成员详情：按 log id 批量取完整汇报（正文/附件/评论）
+  teamCheckinLogsByIds: (id, ids) => req(`/team/${id}/checkin/logs/by-ids?ids=${(ids || []).join(',')}`),
+  // 看板导出 ZIP：按当前角色筛选同口径打包，token 只进请求头
+  teamCheckinExportZip: async (id, sid, roleId) => {
+    const token = localStorage.getItem('ec_token');
+    const res = await fetch(`${BASE}/team/${id}/checkin/schedules/${sid}/export.zip${roleId || roleId === 0 ? `?role_id=${roleId}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `导出失败（${res.status}）`);
+    }
+    let name = `打卡汇报_${new Date().toISOString().slice(0, 10)}.zip`;
+    const cd = res.headers.get('content-disposition') || '';
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+    if (star) { try { name = decodeURIComponent(star[1]); } catch { /* 用默认名 */ } }
+    return { blob: await res.blob(), name };
+  },
   teamCheckinReview: (id, lid, b) => req(`/team/${id}/checkin/logs/${lid}/review`, { method: 'POST', body: JSON.stringify(b) }),
   teamCheckinLeaderboard: (id, range, sid) =>
     req(`/team/${id}/checkin/leaderboard?range=${range || 'month'}${sid ? `&schedule_id=${sid}` : ''}`),

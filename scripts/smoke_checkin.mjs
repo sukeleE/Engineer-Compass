@@ -1,10 +1,12 @@
 // 周期打卡冒烟：自起临时后端(:3111)+临时库，覆盖
 //   任务 CRUD 权限 / 每日·每周·定时 / 提交·重复提交=更新 / 必填自评 / 坏周期 400 / 不可补交 400·补交迟交 /
-//   看板状态 / 评分自动优秀·手动取消 / 优秀墙 / 排行榜计数排序 / XSS 白名单净化 / 删任务保留历史 / 提醒去重
+//   看板状态 / 成员详情 by-ids（正文·附件·评论）/ 按角色导出 ZIP / 评分自动优秀·手动取消 /
+//   优秀墙 / 排行榜计数排序 / XSS 白名单净化 / 删任务保留历史 / 提醒去重
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runCheckinReminders } from '../backend/lib/checkin.js';
 
@@ -29,6 +31,30 @@ const jreq = async (p, o = {}) => {
 const api = async (p, o = {}) => { const { res, data } = await jreq(p, o); if (!res.ok) throw new Error(`${o.method||'GET'} ${p} → ${res.status} ${JSON.stringify(data)}`); return data; };
 const exp = async (p, st, o = {}) => { const { res, data } = await jreq(p, o); return { ok: res.status === st, got: res.status, data }; };
 
+// 读 store-only ZIP：返回 [{name, data}]（EOCD→中央目录→本地头）
+const unzipEntries = (buf) => {
+  const eocd = buf.indexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (eocd < 0) return [];
+  const cdSize = buf.readUInt32LE(eocd + 12);
+  const cdStart = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  let p = cdStart;
+  while (p < cdStart + cdSize && buf.readUInt32LE(p) === 0x02014b50) {
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOff = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8');
+    // 本地头 30 + name + extra + data（STORE，无数据描述符）
+    const lExtra = buf.readUInt16LE(localOff + 28);
+    const dataStart = localOff + 30 + nameLen + lExtra;
+    const size = buf.readUInt32LE(localOff + 22);
+    out.push({ name, data: buf.subarray(dataStart, dataStart + size) });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+};
+
 // 东八区日期/星期
 const tz = { timeZone: 'Asia/Shanghai' };
 const cn = new Intl.DateTimeFormat('en-CA', { ...tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format;
@@ -40,7 +66,10 @@ const tMinus = (min) => { const d = new Date(Date.now() - min * 60000); return h
 
 let server;
 try {
-  server = spawn(process.execPath, [join(process.cwd(), 'backend', 'server.js')], { cwd: work, env, stdio: 'ignore', shell: false });
+  server = spawn(process.execPath, [
+    '--import', pathToFileURL(join(process.cwd(), 'scripts', 'polyfill_dom.mjs')).href,
+    join(process.cwd(), 'backend', 'server.js'),
+  ], { cwd: work, env, stdio: 'ignore', shell: false });
   for (let i = 0; i < 80; i++) {
     try { if ((await fetch(`http://127.0.0.1:${PORT}/api/health`)).ok) break; } catch {}
     await new Promise((r) => setTimeout(r, 250));
@@ -173,6 +202,52 @@ try {
     && roleBoard.members[0].role_names.includes('看板测试角色'), roleBoard.members.map((x) => x.id));
   ok('看板筛选返回 role_filter 与已交格数', String(roleBoard.role_filter) === String(testRole.id)
     && roleBoard.submitted_total >= 1, { rf: roleBoard.role_filter, n: roleBoard.submitted_total });
+
+  // ---------- 4.2 成员汇报详情 by-ids（正文/附件/评论） ----------
+  const ATT = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const lateAtt = await api(`/team/${TID}/checkin/submit`, { method: 'POST', token: tA,
+    body: { schedule_id: SID_LATE, period_key: yesterday, content: '<b>补交含附件</b>',
+      attachments: [{ name: '成果.png', size: 68, mime: 'image/png', data: ATT }] } });
+  const LID_ATT = lateAtt.id;
+  const com = await api(`/team/${TID}/comment/log/${LID_DAILY}`, { method: 'POST', token: tO,
+    body: { content: '看板详情里也能评论' } });
+  ok('看板详情评论可写入', !!com.id, com);
+  const byIds = await api(`/team/${TID}/checkin/logs/by-ids?ids=${LID_DAILY},${LID_ATT},999999`, { token: tA });
+  const byDaily = byIds.find((x) => x.id === LID_DAILY);
+  const byAtt = byIds.find((x) => x.id === LID_ATT);
+  ok('by-ids 返回完整正文（净化后）与周期/评分字段', !!byDaily && /<b>/.test(byDaily.content)
+    && byDaily.period_key === today && byDaily.schedule_title, { pid: byDaily?.period_key, st: byDaily?.schedule_title });
+  ok('by-ids 挂评论（组员可读）', Array.isArray(byDaily?.comments) && byDaily.comments.some((x) => /看板详情/.test(x.content)), byDaily?.comments);
+  ok('by-ids 返回附件 base64', byAtt?.attachments?.length === 1 && byAtt.attachments[0].data === ATT, byAtt?.attachments);
+  g = await exp(`/team/${TID}/checkin/logs/by-ids?ids=`, 400, { token: tA });
+  ok('by-ids 空 id 列表 400', g.ok);
+
+  // ---------- 4.3 按角色导出 ZIP ----------
+  g = await exp(`/team/${TID}/checkin/schedules/${SID_DAILY}/export.zip`, 403, { token: tA });
+  ok('非负责人导出打卡 ZIP 403', g.ok);
+  const zRes = await fetch(`${BASE}/team/${TID}/checkin/schedules/${SID_DAILY}/export.zip?role_id=${testRole.id}`,
+    { headers: { Authorization: `Bearer ${tO}` } });
+  const zBuf = Buffer.from(await zRes.arrayBuffer());
+  const zEntries = unzipEntries(zBuf);
+  ok('导出 ZIP 200 + 容器头 + filename* 中文名', zRes.status === 200 && zBuf.slice(0, 4).toString('latin1') === 'PK\x03\x04'
+    && (zRes.headers.get('content-disposition') || '').includes("filename*=UTF-8''"));
+  const zipNames = zEntries.map((x) => x.name);
+  const hasReport = zipNames.some((n) => /看板测试角色/.test(n) && /打卡组员/.test(n) && /汇报\.txt$/.test(n));
+  ok('ZIP 按角色/成员/期数目录含汇报 txt', hasReport, zipNames.slice(0, 8));
+  const reportEntry = zEntries.find((x) => /汇报\.txt$/.test(x.name));
+  ok('汇报 txt 含周期/正文/评论', reportEntry && /周期：/.test(reportEntry.data.toString('utf8'))
+    && reportEntry.data.includes(Buffer.from('今天完成结构装配'))
+    && reportEntry.data.includes(Buffer.from('看板详情里也能评论')), reportEntry?.data.toString('utf8').slice(0, 160));
+  const lateZipRes = await fetch(`${BASE}/team/${TID}/checkin/schedules/${SID_LATE}/export.zip?role_id=${testRole.id}`,
+    { headers: { Authorization: `Bearer ${tO}` } });
+  const lateZipEntries = unzipEntries(Buffer.from(await lateZipRes.arrayBuffer()));
+  const lateAttEntry = lateZipEntries.find((x) => /成果\.png$/.test(x.name));
+  ok('附件导出字节与提交一致', lateZipRes.status === 200 && lateAttEntry
+    && lateAttEntry.data.equals(Buffer.from(ATT, 'base64')), lateAttEntry?.data.length);
+  const ownerZip = await fetch(`${BASE}/team/${TID}/checkin/schedules/${SID_DAILY}/export.zip?role_id=owner`,
+    { headers: { Authorization: `Bearer ${tO}` } });
+  const ownerNames = unzipEntries(Buffer.from(await ownerZip.arrayBuffer())).map((x) => x.name);
+  ok('owner 导出目录只含组长角色', ownerNames.every((n) => n.startsWith('组长/')) && ownerNames.some((n) => /组长/.test(n)), ownerNames.slice(0, 3));
 
   // ---------- 4.5 邀请链接：peek 预览 / 未入组第三人凭码加入 / 重复加入 409 / 坏码 404 ----------
   const CODE = tg.invite_code || tg.team?.invite_code;

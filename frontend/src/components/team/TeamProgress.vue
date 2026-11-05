@@ -448,6 +448,7 @@ async function reviewScore(l, v) {
   try {
     const r = await api.teamCheckinReview(props.teamId, l.id, { score: v || null });
     l.score = r.score; l.featured = r.featured;
+    syncBoardMemberLog(l);
     ElMessage.success('已评分');
     const ft = await api.teamCheckinFeatured(props.teamId, '');
     featured.value = ft.reports || [];
@@ -457,6 +458,7 @@ async function reviewToggleFeatured(l) {
   try {
     const r = await api.teamCheckinReview(props.teamId, l.id, { featured: l.featured ? 0 : 1 });
     l.featured = r.featured;
+    syncBoardMemberLog(l);
     ElMessage.success(r.featured ? '已选为优秀汇报' : '已取消优秀');
     const ft = await api.teamCheckinFeatured(props.teamId, '');
     featured.value = ft.reports || [];
@@ -471,6 +473,7 @@ async function reviewComment(l) {
     });
     await api.teamCheckinReview(props.teamId, l.id, { review: value || '' });
     l.review = value || '';
+    syncBoardMemberLog(l);
     ElMessage.success('评语已保存');
   } catch (e) {
     if (e !== 'cancel' && e?.message) ElMessage.error(e.message);
@@ -498,15 +501,46 @@ const boardCellText = { on: '✓', late: '迟', miss: '缺', wait: '待' };
 const boardStateName = { on: '准时提交', late: '迟交补交', miss: '逾期未交', wait: '待提交' };
 const selectedBoardMemberId = ref(null);
 const selectedBoardMember = computed(() => board.value?.members?.find((m) => Number(m.id) === Number(selectedBoardMemberId.value)) || null);
+const boardMemberLoading = ref(false);
+const boardMemberLogs = ref(new Map());
+// 看板详情内评分/评语/优秀后同步卡片数据（详情弹窗不依赖全局时间线刷新）
+function syncBoardMemberLog(l) {
+  if (!l || !board.value) return;
+  const m = board.value.members.find((x) => Number(x.id) === Number(l.user_id));
+  if (!m) return;
+  const cell = m.cells.find((c) => c.key === l.period_key);
+  if (!cell) return;
+  cell.score = l.score ?? cell.score;
+  cell.featured = l.featured;
+  cell.review = l.review;
+}
 const boardCurrentCell = (m) => m.cells?.[m.cells.length - 1] || null;
 const boardCount = (m, state) => m.cells?.filter((c) => c.state === state).length || 0;
 const boardSubmittedCount = (m) => boardCount(m, 'on') + boardCount(m, 'late');
 const boardDetailRows = computed(() => {
   const m = selectedBoardMember.value;
   if (!m) return [];
-  return board.value.periods.map((p, i) => ({ ...p, ...m.cells[i] }));
+  return board.value.periods.map((p, i) => {
+    const cell = m.cells[i];
+    const l = cell.log_id ? boardMemberLogs.value.get(Number(cell.log_id)) : null;
+    return { ...p, ...cell, log: l || null };
+  });
 });
-function openBoardMember(m) { selectedBoardMemberId.value = m.id; }
+async function openBoardMember(m) {
+  selectedBoardMemberId.value = m.id;
+  const ids = (m.cells || []).map((c) => c.log_id).filter(Boolean);
+  boardMemberLoading.value = true;
+  try {
+    if (!ids.length) { boardMemberLogs.value = new Map(); return; }
+    const r = await api.teamCheckinLogsByIds(props.teamId, ids);
+    boardMemberLogs.value = new Map((r || []).map((l) => [Number(l.id), l]));
+  } catch (e) {
+    boardMemberLogs.value = new Map();
+    ElMessage.error(e.message);
+  } finally {
+    boardMemberLoading.value = false;
+  }
+}
 function closeBoardMember() { selectedBoardMemberId.value = null; }
 async function openBoardLog(c) {
   if (!c?.log_id) return;
@@ -515,6 +549,26 @@ async function openBoardLog(c) {
   boardDlg.value = false;
   closeBoardMember();
   openReport({ log: l });
+}
+const boardExporting = ref(false);
+async function exportBoardRole() {
+  boardExporting.value = true;
+  try {
+    const { blob, name } = await api.teamCheckinExportZip(props.teamId, boardSched.value.id, boardRole.value);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    ElMessage.success('已导出当前角色打卡汇报 ZIP');
+  } catch (e) {
+    ElMessage.error(e.message);
+  } finally {
+    boardExporting.value = false;
+  }
 }
 const boardRoleFilters = computed(() => {
   const all = props.members || [];
@@ -889,6 +943,9 @@ reload().catch((e) => ElMessage.error(e.message));
               {{ f.label }} <span>{{ f.count }}</span>
             </button>
           </div>
+          <el-button size="small" type="primary" plain :loading="boardExporting" @click="exportBoardRole">
+            ⬇ 导出当前角色 ZIP
+          </el-button>
           <span class="bf-count">已交 {{ board.submitted_total }} 格 / 共 {{ board.members.length * board.periods.length }} 格</span>
         </div>
         <div class="board-scroll board-member-scroll">
@@ -929,7 +986,7 @@ reload().catch((e) => ElMessage.error(e.message));
     </el-dialog>
 
     <!-- 看板成员详情弹窗：成员卡片矩阵的展开视图 -->
-    <el-dialog v-model="selectedBoardMemberId" title="成员汇报详情" width="640px" top="9vh" append-to-body
+    <el-dialog v-model="selectedBoardMemberId" title="成员汇报详情" width="760px" top="9vh" append-to-body
       :close-on-click-modal="false" @update:model-value="(v) => { if (!v) closeBoardMember(); }">
       <div v-if="selectedBoardMember" class="bm-detail">
         <div class="bmd-head">
@@ -958,6 +1015,7 @@ reload().catch((e) => ElMessage.error(e.message));
         </div>
 
         <div class="bmd-periods">
+          <div v-if="boardMemberLoading" class="bmd-loading">加载汇报内容中…</div>
           <div v-for="row in boardDetailRows" :key="row.key" class="bmd-period" :class="row.state">
             <div class="bmd-period-main">
               <b>{{ row.label }}</b>
@@ -973,12 +1031,32 @@ reload().catch((e) => ElMessage.error(e.message));
                 <span v-if="row.self_progress !== null">进度 {{ row.self_progress }}%</span>
                 <span v-if="row.self_rating !== null">自评 {{ row.self_rating }}★</span>
                 <span v-if="row.score">组长评分 {{ row.score }}★</span>
-                <el-button v-if="Number(selectedBoardMember.id) === Number(props.me.user_id) || props.perms.task"
-                  size="small" text type="primary" @click="openBoardLog(row)">查看/修改汇报</el-button>
               </template>
               <span v-else-if="row.state === 'miss'" class="bmd-miss">已逾期，可长期补交</span>
               <span v-else class="bmd-wait">周期内待提交，可提前提交</span>
             </div>
+            <div v-if="row.log" class="bmd-report">
+              <div class="bmd-report-head">
+                <el-tag v-if="row.log.featured" size="small" type="danger" effect="dark">🏅 优秀</el-tag>
+                <el-tag v-if="row.log.feishu_url" size="small" effect="plain">🪶 已关联飞书</el-tag>
+                <el-button v-if="Number(selectedBoardMember.id) === Number(props.me.user_id) || props.perms.task"
+                  size="small" text type="primary" @click="openBoardLog(row)">✏️ 修改汇报</el-button>
+              </div>
+              <div v-if="row.log.content" class="log-rich" v-html="row.log.content" @click="(e) => onRichClick(e, row.log)"></div>
+              <AttachmentList v-if="row.log.attachments?.length" :attachments="row.log.attachments" />
+              <div v-if="row.log.schedule_id" class="ci-review">
+                <template v-if="perms.task">
+                  <el-rate :model-value="row.log.score || 0" :max="5" size="small" @change="(v) => reviewScore(row.log, v)" />
+                  <el-button size="small" text @click="reviewComment(row.log)">💬 评语</el-button>
+                  <el-button size="small" text :type="row.log.featured ? 'danger' : 'default'"
+                    @click="reviewToggleFeatured(row.log)">{{ row.log.featured ? '取消优秀' : '选为优秀' }}</el-button>
+                </template>
+                <span v-if="row.log.score" class="ci-review-show">组长评分 <b>{{ '★'.repeat(row.log.score) }}</b></span>
+                <span v-if="row.log.review" class="ci-review-show">“{{ row.log.review }}”</span>
+              </div>
+              <CommentThread :team-id="teamId" type="log" :target="row.log" :members="members" />
+            </div>
+            <div v-else-if="row.log_id && !boardMemberLoading" class="bmd-log-miss">汇报内容加载失败，请关闭后重试</div>
           </div>
         </div>
       </div>
@@ -1420,6 +1498,15 @@ reload().catch((e) => ElMessage.error(e.message));
 }
 .bmd-miss { color: #b91c1c; }
 .bmd-wait { color: var(--text-2); }
+.bmd-loading { color: var(--text-2); font-size: 12.5px; padding: 14px 0; text-align: center; }
+.bmd-report {
+  margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 8px;
+  .bmd-report-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;
+    .el-button { margin-left: auto; }
+  }
+  .att-list { margin-top: 6px; }
+}
+.bmd-log-miss { color: #b91c1c; font-size: 12px; }
 
 @media (max-width: 768px) {
   .ci-head { .ci-freq { width: 100%; } }

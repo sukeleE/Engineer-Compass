@@ -3,6 +3,8 @@ import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired, teamCtx, requirePerm, hasPerm } from './middleware.js';
 import { sanitizeAttachments } from './teamCollab.js';
+import { buildZip } from '../lib/zipStore.js';
+import { sanitizeName } from '../lib/expenseMeta.js';
 import {
   cnDateStr, parseWeekdays, currentDue, checkOccurrence, boardPeriods,
   periodLabel, streakOf, sanitizeHtml, isWeeklyV2, weeklyShiftOccurrence,
@@ -184,6 +186,7 @@ function clampInt(v, min, max, msg) {
   if (!Number.isFinite(n) || n < min || n > max) { const e = new Error(msg); e.status = 400; throw e; }
   return n;
 }
+function safeParse(s) { try { return JSON.parse(s || '[]'); } catch { return []; } }
 
 // 今日（含最近一期未交）待办：供进度页顶部待办条
 r.get('/:id/checkin/my', (req, res) => {
@@ -221,30 +224,28 @@ r.get('/:id/checkin/my', (req, res) => {
   res.json({ dues: out });
 });
 
-// ============ 看板（谁已交/迟交/缺卡） ============
-r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
-  const ctx = teamCtx(Number(req.params.id), req.user.id);
-  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
-  const sched = scheduleRow(ctx.team.id, req.params.sid);
-  if (!sched) return res.status(404).json({ error: '打卡任务不存在' });
+// 看板数据：与 board 接口同口径（周期列、成员行、角色筛选），供看板/导出复用
+function boardSnapshot(teamId, sid, roleFilter = '') {
+  const sched = scheduleRow(teamId, sid);
+  if (!sched) return null;
   const periods = boardPeriods(sched, new Date());
-  const roles = db.prepare('SELECT id, name, level FROM team_role WHERE team_id = ? ORDER BY level DESC, id').all(ctx.team.id);
+  const roles = db.prepare('SELECT id, name, level FROM team_role WHERE team_id = ? ORDER BY level DESC, id').all(teamId);
+  const ownerId = db.prepare('SELECT owner_id FROM team WHERE id = ?').get(teamId)?.owner_id || 0;
   // 成员 → 角色（含组长标记），与 team.js roleMapOf 同口径
   const roleRows = db.prepare(
     `SELECT tmr.user_id, tr.id AS role_id, tr.name AS role_name
      FROM team_member_role tmr JOIN team_role tr ON tr.id = tmr.role_id
      WHERE tmr.team_id = ? ORDER BY tr.level DESC, tr.id`
-  ).all(ctx.team.id);
+  ).all(teamId);
   const roleMap = {};
   for (const rr of roleRows) (roleMap[rr.user_id] ||= []).push(rr);
-  let members = db.prepare(MEMBER_SQL).all(ctx.team.id).map((m) => ({
+  let members = db.prepare(MEMBER_SQL).all(teamId).map((m) => ({
     ...m,
-    is_owner: m.id === ctx.team.owner_id,
+    is_owner: m.id === ownerId,
     role_ids: (roleMap[m.id] || []).map((x) => x.role_id),
     role_names: (roleMap[m.id] || []).map((x) => x.role_name),
   }));
   // 可选：按角色筛选（role_id=数字 或 owner 仅看组长）
-  const roleFilter = String(req.query.role_id || '');
   if (roleFilter === 'owner') members = members.filter((m) => m.is_owner);
   else if (roleFilter === 'none') members = members.filter((m) => !m.is_owner && !m.role_ids.length);
   else if (/^\d+$/.test(roleFilter)) members = members.filter((m) => m.role_ids.includes(Number(roleFilter)));
@@ -253,7 +254,7 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
       `SELECT id, user_id, period_key, is_late, score, featured, create_time,
               self_progress, self_rating
        FROM progress_log WHERE team_id = ? AND schedule_id = ? AND period_key IN (${periods.map(() => '?').join(',')})`
-    ).all(ctx.team.id, sched.id, ...periods.map((p) => p.key))
+    ).all(teamId, sched.id, ...periods.map((p) => p.key))
     : [];
   const now = Date.now();
   const cells = {};
@@ -273,13 +274,166 @@ r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
       };
     }),
   }));
-  res.json({
+  return {
     schedule: { ...sched, weekdays: parseWeekdays(sched.weekdays) },
     periods: periods.map((p) => ({ ...p, label: periodLabel(sched, p) })),
     members: grid, roles, role_filter: roleFilter,
     // 筛选角色的提交汇总（用于头部小统计）；未筛选时与 grid 同口径
     submitted_total: grid.reduce((n, m) => n + m.cells.filter((c) => c.state === 'on' || c.state === 'late').length, 0),
-  });
+  };
+}
+
+// ============ 看板（谁已交/迟交/缺卡） ============
+r.get('/:id/checkin/schedules/:sid/board', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const board = boardSnapshot(ctx.team.id, req.params.sid, String(req.query.role_id || ''));
+  if (!board) return res.status(404).json({ error: '打卡任务不存在' });
+  res.json(board);
+});
+
+// ============ 成员汇报详情（看板卡片展开用：完整正文/附件/评论） ============
+r.get('/:id/checkin/logs/by-ids', (req, res) => {
+  const ctx = teamCtx(Number(req.params.id), req.user.id);
+  if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const ids = String(req.query.ids || '').split(',').map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0);
+  if (!ids.length || ids.length > 200) return res.status(400).json({ error: '汇报 id 列表为空或过长' });
+  const rows = db.prepare(
+    `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id,
+            COALESCE(u.nickname, u.username) AS nickname, u.avatar,
+            l.schedule_id, l.period_key, l.self_progress, l.self_rating,
+            l.score, l.review, l.featured, l.is_late,
+            cs.title AS schedule_title, cs.freq AS schedule_freq,
+            ru.nickname AS reviewer_name,
+            m.doc_url AS feishu_url
+     FROM progress_log l JOIN user u ON u.id = l.user_id
+     LEFT JOIN user ru ON ru.id = l.reviewer_id
+     LEFT JOIN checkin_schedule cs ON cs.id = l.schedule_id
+     LEFT JOIN feishu_doc_map m ON m.biz_type = 'progress_log' AND m.biz_id = l.id
+     WHERE l.team_id = ? AND l.id IN (${ids.map(() => '?').join(',')})
+     ORDER BY l.create_time DESC`
+  ).all(ctx.team.id, ...ids).map((l) => ({
+    ...l, content: cleanContent(l.content), attachments: safeParse(l.attachments),
+    featured: !!l.featured, is_late: !!l.is_late,
+  }));
+  res.json(attachComments(ctx.team.id, 'log', rows));
+});
+
+function cleanContent(s) { return String(s || '') === '[object Object]' ? '' : String(s || ''); }
+function attachComments(teamId, type, targets) {
+  const ids = targets.map((t) => t.id);
+  if (!ids.length) return targets.map((t) => ({ ...t, comments: [] }));
+  const rows = db.prepare(
+    `SELECT c.id, c.target_id, c.user_id, c.content, c.create_time, COALESCE(u.nickname, u.username) AS nickname
+     FROM comment c JOIN user u ON u.id = c.user_id
+     WHERE c.team_id = ? AND c.target_type = ? AND c.target_id IN (${ids.map(() => '?').join(',')})
+     ORDER BY c.create_time`
+  ).all(teamId, type, ...ids);
+  const byTarget = {};
+  for (const c of rows) (byTarget[c.target_id] ||= []).push(c);
+  return targets.map((t) => ({ ...t, comments: byTarget[t.id] || [] }));
+}
+
+// ============ 按角色导出打卡汇报 ZIP ============
+// 目录结构：角色名/成员名/第N期-周期key-标题/{汇报.txt, 附件/附件名}；role_id 与看板筛选同口径
+r.get('/:id/checkin/schedules/:sid/export.zip', (req, res) => {
+  try {
+    const ctx = teamCtx(Number(req.params.id), req.user.id);
+    const deny = requirePerm(ctx, res, 'task');
+    if (deny) return deny;
+    const roleFilter = String(req.query.role_id || '');
+    const board = boardSnapshot(ctx.team.id, req.params.sid, roleFilter);
+    if (!board) return res.status(404).json({ error: '打卡任务不存在' });
+    const logIds = board.members.flatMap((m) => m.cells.filter((c) => c.log_id).map((c) => c.log_id));
+    const logs = logIds.length ? db.prepare(
+      `SELECT l.id, l.user_id, l.content, l.attachments, l.create_time, l.period_key,
+              l.self_progress, l.self_rating, l.score, l.review, l.featured, l.is_late
+       FROM progress_log l WHERE l.team_id = ? AND l.id IN (${logIds.map(() => '?').join(',')})`
+    ).all(ctx.team.id, ...logIds) : [];
+    const logsById = new Map(logs.map((l) => [l.id, l]));
+    const comments = logIds.length ? db.prepare(
+      `SELECT c.target_id, u.nickname, c.content, c.create_time
+       FROM comment c JOIN user u ON u.id = c.user_id
+       WHERE c.team_id = ? AND c.target_type = 'log' AND c.target_id IN (${logIds.map(() => '?').join(',')})
+       ORDER BY c.create_time`
+    ).all(ctx.team.id, ...logIds) : [];
+    const commentsByLog = {};
+    for (const c of comments) (commentsByLog[c.target_id] ||= []).push(c);
+
+    const roleNameOf = (m) => {
+      if (m.is_owner) return '组长';
+      if (!m.role_names?.length) return '无角色';
+      return m.role_names[0];
+    };
+    const entries = [];
+    let total = 0;
+    const used = new Set();
+    const pushEntry = (name, data) => {
+      const bytes = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+      total += bytes.length;
+      if (total > 400 * 1024 * 1024) throw bad('导出总量超过 400MB，请缩小范围后重试');
+      let final = name;
+      if (used.has(final)) { let n = 2; while (used.has(`${name} (${n})`)) n++; final = `${name} (${n})`; }
+      used.add(final);
+      entries.push({ name: final, data: bytes });
+    };
+    const text = (s) => String(s || '').replace(/<[^>]*>/g, '').trim();
+
+    for (const m of board.members) {
+      const roleFolder = sanitizeName(roleNameOf(m), 40);
+      const memberFolder = sanitizeName(m.real_name || m.name || `成员${m.id}`, 40);
+      board.periods.forEach((p, i) => {
+        const cell = m.cells[i];
+        if (!cell) return;
+        const periodFolder = sanitizeName(`第${i + 1}期-${p.key}-${board.schedule.title}`, 90);
+        const base = `${roleFolder}/${memberFolder}/${periodFolder}`;
+        if (!cell.log_id) {
+          pushEntry(`${base}/未提交说明.txt`, `【${p.label}】${cell.state === 'miss' ? '逾期未交' : '待提交'}，截止 ${cell.due_at}。`);
+          return;
+        }
+        const l = logsById.get(cell.log_id);
+        if (!l) return;
+        const atts = safeParse(l.attachments);
+        const lines = [
+          `任务：${board.schedule.title}`,
+          `周期：${p.label}`,
+          `成员：${m.real_name || m.name}`,
+          `提交时间：${l.create_time}`,
+          `状态：${l.is_late ? '迟交补交' : '准时提交'}`,
+          `自评进度：${l.self_progress == null ? '未填写' : `${l.self_progress}%`}`,
+          `自评效果：${l.self_rating == null ? '未填写' : `${l.self_rating} 星`}`,
+          `组长评分：${l.score ? `${l.score} 星` : '未评分'}`,
+          `评语：${l.review || '无'}`,
+          `优秀：${l.featured ? '是' : '否'}`,
+          '',
+          text(l.content) || '（无文字内容，见附件）',
+        ];
+        const cList = commentsByLog[l.id] || [];
+        if (cList.length) {
+          lines.push('', '—— 评论 ——');
+          for (const c of cList) lines.push(`${c.nickname} ${c.create_time}：${c.content}`);
+        }
+        pushEntry(`${base}/汇报.txt`, lines.join('\n'));
+        atts.forEach((a, ai) => {
+          const attName = sanitizeName(a.name, 90);
+          const attPath = `${base}/附件/${ai + 1}-${attName}`;
+          if (a.data) {
+            pushEntry(attPath, Buffer.from(String(a.data), 'base64'));
+          } else if (a.url) {
+            pushEntry(`${attPath}.链接.txt`, `链接：${a.url}`);
+          }
+        });
+      });
+    }
+    if (!entries.length) return res.status(404).json({ error: '该角色暂无提交记录' });
+    const zip = buildZip(entries);
+    const scope = roleFilter === 'owner' ? '组长' : roleFilter === 'none' ? '无角色'
+      : roleFilter ? (board.roles.find((x) => String(x.id) === String(roleFilter))?.name || '角色') : '全部成员';
+    const fname = sanitizeName(`${board.schedule.title}-${scope}-打卡汇报`, 80) + '.zip';
+    res.set('Content-Type', 'application/zip');
+    res.set('Content-Disposition', `attachment; filename="download.zip"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+    res.send(zip);
+  } catch (e) { return handle(res, e); }
 });
 
 // ============ 组长评分 / 优秀标记 ============
@@ -376,6 +530,5 @@ r.get('/:id/checkin/featured', (req, res) => {
   }));
   res.json({ reports: rows });
 });
-function safeParse(s) { try { return JSON.parse(s || '[]'); } catch { return []; } }
 
 export default r;
