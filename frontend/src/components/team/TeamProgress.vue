@@ -672,6 +672,33 @@ function toggleWeek(key) {
 }
 function weekOpen(g) { return !g.collapsible || expandedWeeks.value.has(g.key); }
 
+// ==================== 优秀汇报墙：当期（最新一周）常显，往期合并折叠 ====================
+function featuredWeekKey(f) {
+  // 周打卡 period_key 为 YYYY-Www；日打卡为 YYYY-MM-DD；异常缺省时回退 create_time
+  const pk = f.period_key || (f.create_time ? String(f.create_time).slice(0, 10) : '');
+  if (!pk) return 'unknown';
+  return /W/.test(pk) ? pk : isoWeekOf(pk).key;
+}
+const featuredGroups = computed(() => {
+  if (!featured.value.length) return { currentKey: '', current: [], past: [] };
+  const map = new Map();
+  for (const f of featured.value) {
+    const key = featuredWeekKey(f);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(f);
+  }
+  const keys = [...map.keys()].filter((k) => k !== 'unknown').sort((a, b) => (a < b ? 1 : -1));
+  const currentKey = keys[0] || 'unknown';
+  // 无法判定周期的异常条目并入当期，保证不丢数据
+  const current = [...(map.get(currentKey) || []), ...(currentKey !== 'unknown' ? (map.get('unknown') || []) : [])];
+  return {
+    currentKey,
+    current,
+    past: keys.slice(1).flatMap((k) => map.get(k)),
+  };
+});
+const pastFtOpen = ref(false);
+
 function canEditTask(t) {
   return t.assignee_id === props.me.user_id || props.perms.task;
 }
@@ -1230,11 +1257,13 @@ reload().catch((e) => ElMessage.error(e.message));
       </div>
     </div>
 
-    <!-- ============ 优秀汇报墙 ============ -->
+    <!-- ============ 优秀汇报墙（当期常显 / 往期折叠） ============ -->
     <div class="ci-sec" v-if="featured.length">
-      <div class="tp-tools"><h4>🏅 优秀汇报（{{ featured.length }}）</h4></div>
-      <div class="ft-grid">
-        <div v-for="f in featured" :key="f.id" class="ft-card">
+      <div class="tp-tools">
+        <h4>🏅 当期优秀汇报<template v-if="featuredGroups.currentKey !== 'unknown'"> · {{ weekRangeLabel(featuredGroups.currentKey) }}</template>（{{ featuredGroups.current.length }}）</h4>
+      </div>
+      <div class="ft-grid" v-if="featuredGroups.current.length">
+        <div v-for="f in featuredGroups.current" :key="f.id" class="ft-card">
           <div class="ft-head">
             <span class="lb-avatar" v-if="f.avatar"><img :src="f.avatar" alt="" /></span>
             <span class="lb-avatar no-img" v-else>{{ (memberName(f) || '?').slice(0, 1) }}</span>
@@ -1251,6 +1280,31 @@ reload().catch((e) => ElMessage.error(e.message));
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
         </div>
       </div>
+      <template v-if="featuredGroups.past.length">
+        <div class="ft-collapse-head" @click="pastFtOpen = !pastFtOpen">
+          <span class="ft-arrow" :class="{ open: pastFtOpen }">▾</span>
+          <b>📚 往期优秀汇报（{{ featuredGroups.past.length }}）</b>
+          <span class="ft-collapse-hint">{{ pastFtOpen ? '收起' : '展开' }}</span>
+        </div>
+        <div class="ft-grid ft-past" v-if="pastFtOpen">
+        <div v-for="f in featuredGroups.past" :key="f.id" class="ft-card">
+          <div class="ft-head">
+            <span class="lb-avatar" v-if="f.avatar"><img :src="f.avatar" alt="" /></span>
+            <span class="lb-avatar no-img" v-else>{{ (memberName(f) || '?').slice(0, 1) }}</span>
+            <b class="u-link" @click="toProfile(f)">{{ memberName(f) }}</b>
+            <el-tag size="small" type="warning" effect="dark">⭐ {{ f.score || '—' }}</el-tag>
+            <el-tag size="small" effect="plain" v-if="f.schedule_title">{{ f.schedule_title }}</el-tag>
+            <span class="ft-date">{{ fmtShort(f.create_time) }}</span>
+          </div>
+          <div class="ft-body log-rich" :class="{ clamp: !expandedFt.has(f.id) }" v-html="f.content"
+            @click="(e) => onRichClick(e, f)"></div>
+          <AttachmentList v-if="f.attachments?.length" :attachments="f.attachments" />
+          <div v-if="f.review" class="ft-review">组长评语：{{ f.review }}</div>
+          <el-button v-if="(f.content || '').replace(/<[^>]*>/g, '').length > 120" link size="small"
+            @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
+        </div>
+        </div>
+      </template>
     </div>
 
     <!-- 进度汇报时间线 -->
@@ -1505,6 +1559,18 @@ reload().catch((e) => ElMessage.error(e.message));
   &.no-img { font-weight: 600; }
 }
 
+// 优秀墙往期折叠头
+.ft-collapse-head {
+  display: flex; align-items: center; gap: 8px; margin-top: 14px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 6%, white);
+  cursor: pointer; user-select: none;
+  b { font-size: 13.5px; }
+  .ft-arrow { display: inline-flex; font-size: 12px; color: var(--text-2); transition: transform .2s ease; transform: rotate(-90deg); }
+  .ft-arrow.open { transform: none; }
+  .ft-collapse-hint { margin-left: auto; font-size: 12px; color: var(--text-2); }
+}
+.ft-past { margin-top: 12px; }
 // 优秀墙
 .ft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .ft-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--card-bg);

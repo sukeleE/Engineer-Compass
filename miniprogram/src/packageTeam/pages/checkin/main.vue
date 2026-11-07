@@ -126,9 +126,9 @@
         </view>
       </view>
 
-      <view class="section-title">优秀汇报墙</view>
+      <view class="section-title">当期优秀汇报</view>
       <EmptyState v-if="!featuredList.length" icon="⭐" text="还没有精选汇报" />
-      <view v-for="r in featuredList" :key="r.id" class="card ft-card" @click="openLog(r.id)">
+      <view v-for="r in featuredGroups.current" :key="r.id" class="card ft-card" @click="openLog(r.id)">
         <view class="ft-head">
           <text class="ft-name">{{ logAuthorName(r) }}</text>
           <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
@@ -136,6 +136,23 @@
         <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
         <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
       </view>
+      <template v-if="featuredGroups.past.length">
+        <view class="ft-past-head" @click="pastFtOpen = !pastFtOpen">
+          <text class="ft-arrow" :class="{ open: pastFtOpen }">▸</text>
+          <text class="ft-past-title">往期优秀汇报（{{ featuredGroups.past.length }}）</text>
+          <text class="ft-past-hint">{{ pastFtOpen ? '收起' : '展开' }}</text>
+        </view>
+        <view v-if="pastFtOpen">
+          <view v-for="r in featuredGroups.past" :key="r.id" class="card ft-card" @click="openLog(r.id)">
+        <view class="ft-head">
+          <text class="ft-name">{{ logAuthorName(r) }}</text>
+          <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
+        </view>
+        <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
+        <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
+          </view>
+        </view>
+      </template>
     </view>
 
     <!-- ============ 打卡提交弹窗 ============ -->
@@ -650,6 +667,43 @@ async function loadRank() {
   featuredList.value = ft.reports || [];
 }
 
+// ---------- 优秀墙：当期（最新一周）常显，往期合并折叠 ----------
+function isoWeekOf(dateStr) {
+  const [Y, M, D] = String(dateStr).split('-').map(Number);
+  const d = new Date(Date.UTC(Y, M - 1, D));
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - day + 3); // 本周四
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+  const week = 1 + Math.round((d - firstThu) / (7 * 864e5));
+  return { year: d.getUTCFullYear(), week, key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}` };
+}
+function featuredWeekKey(r) {
+  // 周打卡 period_key 为 YYYY-Www；日打卡为 YYYY-MM-DD；异常缺省时回退 create_time
+  const pk = r.period_key || (r.create_time ? String(r.create_time).slice(0, 10) : '');
+  if (!pk) return 'unknown';
+  return /W/.test(pk) ? pk : isoWeekOf(pk).key;
+}
+const featuredGroups = computed(() => {
+  if (!featuredList.value.length) return { currentKey: '', current: [], past: [] };
+  const map = new Map();
+  for (const r of featuredList.value) {
+    const key = featuredWeekKey(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  const keys = [...map.keys()].filter((k) => k !== 'unknown').sort((a, b) => (a < b ? 1 : -1));
+  const currentKey = keys[0] || 'unknown';
+  // 无法判定周期的异常条目并入当期，保证不丢数据
+  const current = [...(map.get(currentKey) || []), ...(currentKey !== 'unknown' ? (map.get('unknown') || []) : [])];
+  return {
+    currentKey,
+    current,
+    past: keys.slice(1).flatMap((k) => map.get(k)),
+  };
+});
+const pastFtOpen = ref(false);
+
 onLoad((o) => {
   id.value = Number(o.id);
   loadAll();
@@ -703,6 +757,11 @@ onShow(() => {
 .ft-name { font-weight: 700; color: #1e293b; font-size: 27rpx; }
 .ft-content { font-size: 26rpx; color: #475569; margin-top: 12rpx; line-height: 1.6; white-space: pre-wrap; }
 .ft-meta { font-size: 21rpx; color: #94a3b8; margin-top: 10rpx; }
+.ft-past-head { display: flex; align-items: center; gap: 10rpx; background: #eff6ff; border: 1rpx solid #dbeafe; border-radius: 14rpx; padding: 16rpx 22rpx; margin-top: 18rpx; }
+.ft-arrow { font-size: 26rpx; color: #64748b; transition: transform .2s; }
+.ft-arrow.open { transform: rotate(90deg); }
+.ft-past-title { font-size: 27rpx; font-weight: 700; color: #1e293b; }
+.ft-past-hint { margin-left: auto; font-size: 23rpx; color: #64748b; }
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { width: 660rpx; background: #fff; border-radius: 24rpx; padding: 32rpx; }
 .modal-lg { max-height: 82vh; display: flex; flex-direction: column; }
