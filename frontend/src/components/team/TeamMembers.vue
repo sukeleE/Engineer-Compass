@@ -1,5 +1,5 @@
 <script setup>
-// 成员与角色：成员/角色均使用紧凑小方块；点击后在页内展开详情，管理操作集中在详情区。
+// 成员与角色：成员/角色均使用紧凑小方块；点击卡片弹出详情，管理操作集中在详情弹窗。
 import { ref, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -19,6 +19,8 @@ const inviteCode = ref('');
 const activeRoleFilter = ref('all');
 const expandedMemberId = ref(null);
 const expandedRoleId = ref(null);
+const memberDlg = ref(false);
+const roleViewDlg = ref(false);
 const membersSecRef = ref(null);
 
 const memberName = (m) => displayName(m || {});
@@ -49,24 +51,28 @@ const selectedRoleMembers = computed(() => selectedRole.value
   : []);
 
 function toggleMember(m) {
-  expandedMemberId.value = Number(expandedMemberId.value) === Number(m.id) ? null : m.id;
+  // 弹窗化：点同一人则关闭，换人则切换目标并打开
+  if (memberDlg.value && Number(expandedMemberId.value) === Number(m.id)) { memberDlg.value = false; expandedMemberId.value = null; return; }
+  expandedMemberId.value = m.id;
+  memberDlg.value = true;
 }
 function toggleRole(r) {
-  expandedRoleId.value = Number(expandedRoleId.value) === Number(r.id) ? null : r.id;
+  if (roleViewDlg.value && Number(expandedRoleId.value) === Number(r.id)) { roleViewDlg.value = false; expandedRoleId.value = null; return; }
+  expandedRoleId.value = r.id;
+  roleViewDlg.value = true;
 }
-async function openMemberFromRole(m) {
-  activeRoleFilter.value = 'all';
+function openMemberFromRole(m) {
+  // 角色弹窗内点成员：关角色弹窗、开成员弹窗
+  roleViewDlg.value = false;
   expandedMemberId.value = m.id;
+  memberDlg.value = true;
+}
+async function filterByRole(role) {
+  // 角色弹窗内「查看这些成员」：应用筛选、关弹窗并滚动到成员区
+  activeRoleFilter.value = `role-${role.id}`;
+  roleViewDlg.value = false;
   await nextTick();
   membersSecRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-}
-async function filterByRole(role, scroll = true) {
-  activeRoleFilter.value = `role-${role.id}`;
-  expandedRoleId.value = role.id;
-  if (scroll) {
-    await nextTick();
-    membersSecRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  }
 }
 function goProfile(m) {
   router.push(m.id === auth.user?.id ? '/me' : `/user/${m.id}`);
@@ -170,6 +176,8 @@ async function reload() {
   roles.value = d.roles;
   if (expandedMemberId.value && !members.value.some((m) => Number(m.id) === Number(expandedMemberId.value))) expandedMemberId.value = null;
   if (expandedRoleId.value && !roles.value.some((r) => Number(r.id) === Number(expandedRoleId.value))) expandedRoleId.value = null;
+  if (memberDlg.value && !selectedMember.value) memberDlg.value = false;
+  if (roleViewDlg.value && !selectedRole.value) roleViewDlg.value = false;
   if (activeRoleFilter.value.startsWith('role-')) {
     const rid = Number(activeRoleFilter.value.slice(5));
     if (!roles.value.some((r) => Number(r.id) === rid)) activeRoleFilter.value = 'all';
@@ -202,15 +210,17 @@ async function copyInviteCode() {
 }
 
 // —— 自定义角色：新建/编辑使用弹窗，列表用小方块 ——
-const roleDlg = ref(false);
+const roleFormDlg = ref(false);
 const roleForm = ref({ id: null, name: '', level: 0, permissions: [] });
 function editRole(role) {
+  roleViewDlg.value = false;
   roleForm.value = { id: role.id, name: role.name, level: role.level, permissions: rolePerms(role) };
-  roleDlg.value = true;
+  roleFormDlg.value = true;
 }
 function newRole() {
+  roleViewDlg.value = false;
   roleForm.value = { id: null, name: '', level: 1, permissions: ['progress', 'message', 'file_upload'] };
-  roleDlg.value = true;
+  roleFormDlg.value = true;
 }
 async function saveRole() {
   const f = roleForm.value;
@@ -218,7 +228,7 @@ async function saveRole() {
   try {
     await api.teamRoleSave(props.teamId, f);
     ElMessage.success(f.id ? '角色已更新' : `角色「${f.name}」已创建`);
-    roleDlg.value = false;
+    roleFormDlg.value = false;
     await reload();
   } catch (e) { ElMessage.error(e.message); }
 }
@@ -229,6 +239,8 @@ async function removeRole(role) {
   try {
     await api.teamRoleDelete(props.teamId, role.id);
     if (Number(expandedRoleId.value) === Number(role.id)) expandedRoleId.value = null;
+    roleViewDlg.value = false;
+    roleFormDlg.value = false;
     await reload();
     ElMessage.success('角色已删除');
   } catch (e) { ElMessage.error(e.message); }
@@ -266,6 +278,7 @@ async function removeMember(m) {
   try {
     await api.teamMemberRemove(props.teamId, m.id);
     expandedMemberId.value = null;
+    memberDlg.value = false;
     await reload();
     ElMessage.success('已移除');
   } catch (e) { ElMessage.error(e.message); }
@@ -351,9 +364,10 @@ loadLeaderboard('month');
       <div v-if="!filteredMembers.length" class="tm-empty">该角色下暂无成员</div>
 
       <!-- 成员详情 -->
+      <el-dialog v-model="memberDlg" title="成员详情" width="480px" top="16vh" class="tm-dlg member-dlg" @closed="expandedMemberId = null">
       <div v-if="selectedMember" class="detail-panel member-detail">
         <div class="detail-head">
-          <span class="detail-avatar">
+          <span class="detail-avatar u-link" title="查看TA的主页" @click="goProfile(selectedMember)">
             <img v-if="selectedMember.avatar" :src="selectedMember.avatar" alt="" />
             <template v-else>{{ memberName(selectedMember).charAt(0) || '?' }}</template>
           </span>
@@ -391,6 +405,7 @@ loadLeaderboard('month');
           <span class="tm-tip">组长可以之后调整你的角色</span>
         </div>
       </div>
+      </el-dialog>
     </div>
 
     <!-- 自定义角色小方块 -->
@@ -416,6 +431,7 @@ loadLeaderboard('month');
       </div>
       <div v-if="!roles.length" class="tm-empty">暂无自定义角色</div>
 
+      <el-dialog v-model="roleViewDlg" title="角色详情" width="560px" top="14vh" class="tm-dlg role-dlg" @closed="expandedRoleId = null">
       <div v-if="selectedRole" class="detail-panel role-detail">
         <div class="detail-head">
           <div class="detail-title">
@@ -441,6 +457,7 @@ loadLeaderboard('month');
           <span v-if="!selectedRoleMembers.length" class="tm-tip">暂无成员</span>
         </div>
       </div>
+      </el-dialog>
     </div>
 
     <!-- 成员自选角色弹窗（≤3） -->
@@ -457,7 +474,7 @@ loadLeaderboard('month');
     </el-dialog>
 
     <!-- 角色新建/编辑弹窗 -->
-    <el-dialog v-model="roleDlg" :title="roleForm.id ? '编辑角色' : '新建角色'" width="560px" top="14vh">
+    <el-dialog v-model="roleFormDlg" :title="roleForm.id ? '编辑角色' : '新建角色'" width="560px" top="14vh">
       <div class="role-dialog-form">
         <div class="rf-row">
           <el-input v-model="roleForm.name" placeholder="角色名（如：机械组组长）" style="flex:1.5" />
@@ -471,7 +488,7 @@ loadLeaderboard('month');
         </div>
       </div>
       <template #footer>
-        <el-button @click="roleDlg = false">取消</el-button>
+        <el-button @click="roleFormDlg = false">取消</el-button>
         <el-button type="primary" @click="saveRole">保存</el-button>
       </template>
     </el-dialog>
@@ -608,6 +625,8 @@ loadLeaderboard('month');
   font-size: 14px; font-weight: 600;
 }
 
+:deep(.tm-dlg .detail-panel) { margin-top: 0; }
+.detail-avatar.u-link { cursor: pointer; }
 .detail-panel {
   margin-top: 12px; border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border));
   background: color-mix(in srgb, var(--primary) 4%, var(--card-bg)); border-radius: 14px; padding: 14px;

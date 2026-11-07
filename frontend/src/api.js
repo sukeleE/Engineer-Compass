@@ -100,7 +100,17 @@ export const api = {
   emailLogin: (email, code) => req('/auth/email-login', { method: 'POST', body: JSON.stringify({ email, code }) }),
   me: () => req('/auth/me'),
   updateProfile: (card) => req('/auth/profile', { method: 'PUT', body: JSON.stringify(card) }),
-  bindEmail: (card) => req('/auth/email', { method: 'PUT', body: JSON.stringify(card) }),
+  // 个性化主题：配色预设/自定义色/壁纸（与后端 routes/auth.js 主题路由对应）
+  themePresets: () => req('/auth/theme/presets'),
+  themeSave: (card) => req('/auth/theme', { method: 'PUT', body: JSON.stringify(card) }),
+  wallpaperRemove: () => req('/auth/wallpaper', { method: 'DELETE' }),
+  // 壁纸 multipart：不能手设 Content-Type（浏览器补 boundary），认领头显式带（同 adminHonorImageSet）
+  wallpaperUpload: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const token = localStorage.getItem('ec_token');
+    return req('/auth/wallpaper', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} }, 60000);
+  },  bindEmail: (card) => req('/auth/email', { method: 'PUT', body: JSON.stringify(card) }),
   // 账号安全：改密（验证码 code 或旧密码二选一）/ 忘记密码（公开）/ 手机号绑定解绑
   changePassword: (card) => req('/auth/change-password', { method: 'POST', body: JSON.stringify(card) }),
   resetPassword: (card) => req('/auth/reset-password', { method: 'POST', body: JSON.stringify(card) }),
@@ -111,6 +121,10 @@ export const api = {
   feedback: (card) => req('/feedback', { method: 'POST', body: JSON.stringify(card) }),
   // 公开主页（只读）：基本资料 + 竞赛计划 + 学习日程 + 参加的小组
   userPublic: (id) => req(`/users/${id}/public`),
+  // 用户主页评论（profile_comment 表，独立于小组/帖子评论）
+  profileComments: (id) => req(`/users/${id}/comments`),
+  profileCommentCreate: (id, content) => req(`/users/${id}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
+  profileCommentDelete: (id, cid) => req(`/users/${id}/comments/${cid}`, { method: 'DELETE' }),
   // 项目小组
   teamCreate: (card) => req('/team', { method: 'POST', body: JSON.stringify(card) }),
   teamJoin: (inviteCode) => req('/team/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }),
@@ -213,6 +227,23 @@ export const api = {
   teamMessageDelete: (id, mid) => req(`/team/${id}/message/${mid}`, { method: 'DELETE' }),
   teamLogComment: (id, lid, content) => req(`/team/${id}/comment/log/${lid}`, { method: 'POST', body: JSON.stringify({ content }) }),
   teamMessageComment: (id, mid, content) => req(`/team/${id}/comment/message/${mid}`, { method: 'POST', body: JSON.stringify({ content }) }),
+
+  // 小组多群聊
+  chatGroups: (id) => req(`/team/${id}/chat-groups`),
+  chatGroupCreate: (id, card) => req(`/team/${id}/chat-groups`, { method: 'POST', body: JSON.stringify(card) }),
+  chatGroupDetail: (gid) => req(`/team/chat-group/${gid}`),
+  chatGroupJoin: (gid) => req(`/team/chat-group/${gid}/join`, { method: 'POST' }),
+  chatGroupLeave: (gid) => req(`/team/chat-group/${gid}/leave`, { method: 'POST' }),
+  chatGroupMessages: (gid, before) => req(`/team/chat-group/${gid}/messages${before ? `?before=${before}` : ''}`),
+  chatGroupSend: (gid, card) => req(`/team/chat-group/${gid}/message`, { method: 'POST', body: JSON.stringify(card) }),
+  chatGroupMessageDelete: (gid, mid) => req(`/team/chat-group/${gid}/message/${mid}`, { method: 'DELETE' }),
+  chatGroupMembersAdd: (gid, userIds) => req(`/team/chat-group/${gid}/members`, { method: 'POST', body: JSON.stringify({ user_ids: userIds }) }),
+  chatGroupMemberRemove: (gid, uid) => req(`/team/chat-group/${gid}/members/${uid}`, { method: 'DELETE' }),
+  chatInviteCreate: (gid, userId) => req(`/team/chat-group/${gid}/invites`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+  chatInvites: () => req('/team/chat-invites'),
+  chatInviteAccept: (gid, iid) => req(`/team/chat-group/${gid}/invites/${iid}/accept`, { method: 'POST' }),
+  chatInviteReject: (gid, iid) => req(`/team/chat-group/${gid}/invites/${iid}/reject`, { method: 'POST' }),
+  chatInviteCancel: (gid, iid) => req(`/team/chat-group/${gid}/invites/${iid}/cancel`, { method: 'POST' }),
   teamCommentDelete: (id, cid) => req(`/team/${id}/comment/${cid}`, { method: 'DELETE' }),
   // 资料
   teamFiles: (id) => req(`/team/${id}/files`),

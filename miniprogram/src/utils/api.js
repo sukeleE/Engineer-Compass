@@ -173,7 +173,7 @@ export const api = {
   friends: () => request('/friends'),
   friendRequests: () => request('/friends/requests'),
   friendSearch: (q) => request('/friends/search' + qs({ q })),
-  friendRequest: (uid) => request('/friends/request', { method: 'POST', data: { to_user_id: uid } }),
+  friendRequest: (uid) => request('/friends/request', { method: 'POST', data: { to_id: uid } }),
   friendAccept: (id) => request('/friends/request/' + id + '/accept', { method: 'POST' }),
   friendReject: (id) => request('/friends/request/' + id + '/reject', { method: 'POST' }),
   friendRemove: (fid) => request('/friends/' + fid, { method: 'DELETE' }),
@@ -182,6 +182,9 @@ export const api = {
   dmRead: (uid) => request('/friends/dm/' + uid + '/read', { method: 'POST' }),
   feedback: (card) => request('/feedback', { method: 'POST', data: card }),
   userPublic: (id) => request('/users/' + id + '/public'),
+  profileComments: (id) => request('/users/' + id + '/comments'),
+  profileCommentAdd: (id, content) => request('/users/' + id + '/comments', { method: 'POST', data: { content } }),
+  profileCommentDelete: (id, cid) => request('/users/' + id + '/comments/' + cid, { method: 'DELETE' }),
 
   // ============ 资源分享 ============
   sharePosts: (p) => request('/share/posts' + qs(p)),

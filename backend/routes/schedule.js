@@ -169,7 +169,7 @@ r.get('/list', authRequired, (req, res) => {
   const rows = db.prepare(
     `SELECT s.id, s.comp_id, s.is_custom, s.plan_json, s.create_time, c.name AS comp_name, c.short_name
      FROM user_schedule s LEFT JOIN competition c ON c.id = s.comp_id
-     WHERE s.user_id = ? ORDER BY s.create_time DESC`
+     WHERE CAST(s.user_id AS INTEGER) = ? ORDER BY s.create_time DESC`
   ).all(req.user.id);
   res.json(rows.map((row) => ({ ...row, plan: normalizePlan(JSON.parse(row.plan_json || '{}')) })));
 });
@@ -251,7 +251,7 @@ r.get('/calendar', authRequired, (req, res) => {
   // 竞赛日程（仅本人）
   const compRows = db.prepare(
     `SELECT s.id, s.plan_json, c.name AS comp_name FROM user_schedule s
-     LEFT JOIN competition c ON c.id = s.comp_id WHERE s.user_id = ?`
+     LEFT JOIN competition c ON c.id = s.comp_id WHERE CAST(s.user_id AS INTEGER) = ?`
   ).all(req.user.id);
   const comp = compRows.flatMap((row) => collect(normalizePlan(JSON.parse(row.plan_json || '{}')), row.comp_name || '我的日程'));
 

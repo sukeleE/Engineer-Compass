@@ -628,3 +628,37 @@ YOLOv8 训练识别 16 类物品：青椒、白菜、黄瓜、豆腐、茄子、
 - **图片方案**：飞书 docx 图片块 token 通过 `/open-apis/drive/v1/medias/:token/download` 下载；17 张图的真实文档测试均 200。转换时把 `blocksToMarkdown` 的图片占位替换为 `data:image/...;base64,...`，再经 `mdToHtml` 包成 HTML。图片总量限 18MB、最终 HTML 限 20MB，超限则回退飞书链接；文件附件占位仍提示到飞书查看。
 - **预览与安全**：新增成员鉴权的 `GET /api/team/file/:fid/text`，仅允许站内 text/html、text/markdown、text/plain；小组资料列表对 HTML/MD 显示“预览”，Element Plus 弹窗内用 `<iframe sandbox="allow-popups allow-forms allow-downloads">` + `srcdoc` 展示，不加 `allow-same-origin`，文档脚本不能访问本站账号/localStorage。生成 HTML 前再次限制链接协议，只允许内嵌 data:image。
 - **验证**：WSL Vite production build 通过；`node --check`、`git diff --check` 通过；临时 DB + mock OpenAPI 冒烟覆盖 docx HTML 内嵌图、普通文件复制、sheet 链接兜底、非成员 403、text 预览，结果 `TEAM_FEISHU_IMPORT_SMOKE_OK`。
+
+## 2026-11-07 🎨 个性化主题（H5 + 小程序双端，账号云同步）
+
+- **需求**：网页与小程序都支持个性化主题：9 套预设配色、自选主色、上传图片做壁纸背景；两端共存同一账号体系，主题跟随账号。
+- **后端**：`user` 表新增 `theme TEXT DEFAULT ''`（database.js migCol + schema.sql 双轨），存 JSON `{preset,primary,wallpaper,opacity}`；新增 `backend/lib/themes.js`（9 预设 key 三端一致：ocean/forest/teal/indigo/violet/sunset/rose/crimson/dark；derivePalette 混色规则 dark=混黑18%、tint=混白92%、soft=混白58%；parseTheme 坏 JSON 安全回退）与 `lib/themeFiles.js`（壁纸落盘 `uploads/wallpapers/<uid>_<ts>_<rand>.ext`，≤6MB，jpg/png/webp，文件名前缀做归属校验）。路由挂 auth.js（/api/auth 前缀）：`GET /theme/presets`、`PUT /theme`（省略 wallpaper 字段时保留旧值）、`POST /wallpaper`（multer memory，超限 413）、`GET /wallpaper/:name`（支持 ?token= 直连）、`DELETE /wallpaper`；middleware USER_COLS 与两处 req.user 映射带 theme，userCard 输出 parseTheme 后的对象。
+- **H5**：`utils/theme.js`（data-theme 属性驱动 main.scss 预设块；custom 才用 documentElement 内联变量；dark 预设走独立 `html[data-theme=dark]` 蓝灰暗色块，**不复用 ghost-mode**——幽灵模式 class 由 App.vue 独占，SCSS 源序上幽灵块在主题块之后保证覆盖）；`#theme-wallpaper` 固定层 z-0 + `#app` z-1，`html.has-wallpaper` 让 html/body 底色透明露壁纸；游客存 localStorage `ec_theme_local`（壁纸压缩为 dataURL，≤1.8MB）；入口在 App 头部 🎨 按钮（游客可用）与 MyView 个人中心，组件 `components/ThemeDialog.vue`（canvas 压缩 ≤5.5MB、el-color-picker、浓度 slider 5%-60%、实时预览、取消回滚）。
+- **小程序**：`utils/theme.js` 响应式 `themeState`（vars/wallpaper/opacity）；App.vue 全局高频类 `.btn-primary/.btn-ghost/.btn-outline/.tag-blue/.section-title::before` 改 `var(--theme-primary, 原色兜底)`；5 个 tab 页根视图绑 `:style="themeState.vars"`（CSS 变量经继承穿透子组件），新增 `components/ThemeLayer.vue` fixed 壁纸层（z-index:-1 在内容下、page 底色上；.page-wrap 建层叠上下文 z:1）；设置页 `pages/me/theme`（预设网格、RGB 三 slider 代替无原生取色器、chooseMedia+compressImage、游客走 uni.saveFile 本地持久化、onUnload 回滚预览并清孤儿文件）；wechat.js 登录/退出钩子调 syncTheme。分包页面保持原色兜底（平台限制，tabBar 也无法动态变色）。
+- **验证**：后端 e2e 31/31 通过（预设/自定义/坏色400/opacity 归一/壁纸 CRUD/归属 404/无 token 401/413/mime 校验），测试数据与临时会话零残留；H5 vite build 通过并发布 /var/www/compass；小程序 build+dev 双产物 WXML 扫描 0 issue。线上备份 `backups/compass_pre_theme_20261107_004030.db`。
+
+## 2026-11-07 🪪 小程序实名认证弹窗重做 + 门禁自动拉起
+
+- **问题**：小程序「我的」页实名弹窗过于简陋：姓名/学号均无前端格式校验（后端有 3 条姓名规则、学号须 4-20 位数字），后端 400 只靠一闪而过的全局 toast；姓名先成功、学号后失败时出现半成功状态；输入框无 label、无内行错误提示、无关闭按钮、缺隐私用途说明；其他模块（预约/报销/采购）接口返回 `need_real_name` 时 request.js 只 `switchTab` 到我的页，不自动开弹窗，用户找不到入口。
+- **实现**：`pages/me/main.vue` 实名弹窗整体重写——标题栏加 ✕（保存中禁止关闭）、字段 label、用途说明、输入规范 tip、错误红字行（`realNameErr/studentNoErr`，输入即清错）、`scroll-view` 限高 54vh 防键盘溢出、input 加 `cursor-spacing="24"`、学号改 `type="number"`；`validateRealName` 完整复刻后端 `REALNAME_RE` 与三条规则（2-20 码点/汉字字母间隔号/至少 2 个汉字字母），两项本地校验全过才发请求，学号仅在填写且变化时提交，后端兜底错误按关键词回填到对应字段。
+- **门禁链路**：`utils/request.js` 收到 403 `need_real_name` 确认后写 storage 标志 `ec_pending_realname=1` 再 switchTab（switchTab 不支持传参）；me 页 `onShow` 检测到标志即移除并 `openRealName()` 自动弹窗，取消后不重复弹。小程序无跨页面全局弹窗（组件不能跨 page），这是平台限制下的最优方案。
+- **验证**：校验函数 10 组姓名 + 5 组学号用例与后端口径一致；build/dev 双产物构建通过、WXML 裸换行扫描 0 issue；编译产物确认遮罩 bindtap + 内层 catchtap 冒泡隔离正确。
+
+## 2026-11-07 🪪 站点页脚加挂公安备案号
+
+- **需求**：页面底部公示「浙公网安备33041102000737号」，链接 https://beian.mps.gov.cn/#/query/webSearch?code=33041102000737（rel=noreferrer target=_blank，按用户给定原样）。
+- **实现**：`frontend/src/App.vue` 新增全局 `<footer class="site-footer">`，`v-if="!bare"`（全屏预览页隐藏，登录页也展示以满足公示）；颜色用 `var(--text-3)`、hover 用 `var(--primary)`，主题换肤/暗夜/幽灵模式自动适配；移动端在普通文档流内，固定底栏占位仍由 `.app` padding-bottom 负责。H5 已重新 build 并发布 /var/www/compass（index-DgWjJ-0a.js / index-DQ0A85tm.css），线上验证链接在包内、mps.gov.cn 可达。
+- **ICP 已补**（同日）：页脚改为「赣ICP备2026021386号-1」（链 beian.miit.gov.cn）·「浙公网安备33041102000737号」两项，中间 `·` 分隔；已随 index-BnLgmRuK.js 发布并线上验证。注意 ICP 为赣（江西主体）、公安备为浙（330411 嘉兴），省份不一致是用户提供的原始信息，未改动。小程序备案号仍是独立资质，勿与网站备案混用。公安备链接内挂红盾图标：源文件 `frontend/public/beian-police.png`（36x40，1.4KB，Vite public 原样发布到站点根 /beian-police.png），页脚 `.police-beian` inline-flex 图标 14x16 + 文字；部署根级静态文件需显式 cp（tar 全量解包在 /tmp/compass-dist，assets 之外的 png 不会自动进 /var/www/compass）。
+
+## 2026-11-07 🧹 小程序端下线个性化主题（H5 与后端保留）
+
+- **需求变更**：用户要求去掉小程序的个性化功能。仅移除小程序端，**后端主题接口（/api/auth/theme*、/api/auth/wallpaper*、user.theme 列、uploads/wallpapers）与 H5 整套主题（ThemeDialog、theme.js、data-theme SCSS、壁纸层）全部原样保留**，两端解耦互不影响。
+- **移除清单（miniprogram/src）**：删除 `utils/theme.js`、`components/ThemeLayer.vue`、`pages/me/theme.vue` 三个文件；pages.json 移除 pages/me/theme 注册；App.vue 移除 syncTheme 钩子并把 .btn-primary/.btn-ghost/.btn-outline/.tag-blue/.section-title::before 的 `var(--theme-primary,兜底)` 全部还原为硬编码 #2563eb/#eff6ff，.page-wrap 去掉 position/z-index；5 个 tab 页根视图去掉 `:style="themeState.vars"` 与 `<ThemeLayer />` 及 import；me/main.vue 另移除游客主题按钮、菜单「个性化主题」项与 openTheme；api.js 删 4 个主题封装（uploadFile import 保留，采购/预约仍在用）；wechat.js 删 3 处 syncTheme 调用。
+- **验证**：build/dev 双产物中主题页/组件/utils 均不存在、全产物 grep 主题引用 0 命中、app.wxss 主色还原 #2563eb、app.json 恢复 6 个原始页面；WXML 裸换行扫描 0 issue；实名认证弹窗（rn-modal）等后续功能确认完好。本地 storage 残留 ec_theme_local 为无害死 key，无需迁移。
+
+## 2026-11-07 🐛 修复 H5 自定义主题色保存后变回默认蓝
+
+- **现象**：H5 主题弹窗选自定义主色保存后，页面仍是默认海洋蓝；9 个预设色与壁纸均正常。
+- **根因**：`backend/lib/themes.js` 的 `parseTheme`（所有 userCard 读回主题的必经函数）只认 THEME_PRESETS 表内的 9 个 key：`THEME_PRESETS[o.preset] ? o.preset : 'ocean'`，而 `custom` 不在表内（写入侧 normalizeThemeInput 却允许 custom），导致 DB 里存的 `{preset:'custom'}` 每次读回都被改写成 ocean；前端 applyTheme 仅在 preset==='custom' 时注入内联 CSS 变量，收到 ocean 就移除内联变量回到默认蓝。且原代码在 custom 分支还会因 THEME_PRESETS['custom'] 为 undefined 触发 TypeError，被 try/catch 吞成整体默认主题。首轮 e2e 只断言了 primary 未断言 preset，漏掉此 bug。
+- **修复**：parseTheme 显式放行 `o.preset === 'custom'`，fallbackPrimary 对表外 preset 用 DEFAULT_THEME.primary 防崩；写入侧 normalizeThemeInput 不变。DB 存量数据本就正确存储 custom，修复后无需数据迁移。
+- **验证**：本地 19 项单测（custom 往返/坏色/未知 preset/坏 JSON/9 预设往返）；线上 e2e 9/9（PUT custom 响应与 /auth/me 读回均保留 custom+主色、DB 原始 JSON、预设与 custom 互切、大写归一、非法色 400），测试后账号原 teal+壁纸配置原样回滚。仅部署后端 lib/themes.js + pm2 restart，H5 前端无改动。

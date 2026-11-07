@@ -7,9 +7,16 @@
     <button v-if="data.me.is_owner" class="btn btn-outline btn-block transfer-btn" @click="openTransfer">🔁 转让组长</button>
 
     <view class="section-title">成员（{{ data.members.length }}）</view>
-    <view v-for="m in data.members" :key="m.id" class="card member">
+    <view
+      v-for="m in data.members"
+      :key="m.id"
+      class="card member member-card"
+      :class="{ me: m.is_me }"
+      @click="openMember(m)"
+    >
       <view class="m-head">
-        <view class="avatar">{{ memberName(m).slice(0, 1) }}</view>
+        <image v-if="m.avatar" :src="m.avatar" class="avatar avatar-img" mode="aspectFill" />
+        <view v-else class="avatar">{{ memberName(m).slice(0, 1) }}</view>
         <view class="m-info">
           <view class="m-name">
             {{ memberName(m) }}
@@ -21,12 +28,7 @@
             <text v-if="!(m.role_names || []).length" class="text-small text-muted">未分配角色</text>
           </view>
         </view>
-      </view>
-      <view v-if="canMember && !m.is_owner" class="m-actions">
-        <picker v-if="assignableRoles.length" :range="roleNames" @change="(e) => assign(m, e)">
-          <view class="mini-btn">分配角色</view>
-        </picker>
-        <view class="mini-btn danger" @click="remove(m)">移出</view>
+        <text class="arrow">›</text>
       </view>
     </view>
 
@@ -35,18 +37,85 @@
       <text class="add-link" @click="openRoleCreate">＋ 新建角色</text>
     </view>
     <view v-else class="section-title">角色（{{ data.roles.length }}）</view>
-    <view v-for="r in data.roles" :key="r.id" class="card role-card">
+    <view v-for="r in data.roles" :key="r.id" class="card role-card" @click="openRole(r)">
       <view class="role-head">
         <text class="role-name">{{ r.name }}</text>
         <text class="text-small text-muted">等级 {{ r.level }}</text>
       </view>
-      <view class="perm-list">
-        <text v-for="p in r.permissions" :key="p" class="tag tag-blue">{{ permLabel(p) }}</text>
-        <text v-if="!r.permissions.length" class="text-small text-muted">无权限</text>
+      <view class="role-summary">
+        <text>{{ roleMemberCount(r.id) }} 名成员 · {{ (r.permissions || []).length }} 项权限</text>
+        <text class="arrow">›</text>
       </view>
-      <view v-if="canRole" class="role-actions">
-        <view class="mini-btn" @click="openRoleEdit(r)">编辑</view>
-        <view class="mini-btn danger" @click="removeRole(r)">删除</view>
+    </view>
+
+    <!-- 成员详情弹窗 -->
+    <view v-if="memberDetail" class="modal-mask" @click="memberDetailId = null">
+      <view class="modal detail-modal" @click.stop>
+        <view class="modal-title">成员详情</view>
+        <view class="detail-head">
+          <view class="detail-avatar" @click="goProfile(memberDetail)">
+            <image v-if="memberDetail.avatar" :src="memberDetail.avatar" class="avatar-img" mode="aspectFill" />
+            <text v-else>{{ memberName(memberDetail).slice(0, 1) }}</text>
+          </view>
+          <view class="detail-info">
+            <view class="m-name">
+              {{ memberName(memberDetail) }}
+              <text v-if="memberDetail.is_owner" class="tag tag-amber">组长</text>
+              <text v-if="memberDetail.is_me" class="tag tag-blue">我</text>
+            </view>
+            <text class="text-small text-muted">@{{ memberDetail.username || '未设置' }} · 入组 {{ String(memberDetail.join_time || '').slice(0, 10) }}</text>
+          </view>
+        </view>
+        <view class="detail-roles">
+          <text class="form-label detail-label">角色</text>
+          <view class="m-roles">
+            <text v-for="rn in (memberDetail.role_names || [])" :key="rn" class="tag tag-gray">{{ rn }}</text>
+            <text v-if="!(memberDetail.role_names || []).length" class="text-small text-muted">暂无角色</text>
+          </view>
+        </view>
+        <view class="modal-actions detail-actions">
+          <button class="btn btn-primary modal-btn" @click="goProfile(memberDetail)">查看主页</button>
+          <button v-if="memberDetail.is_me" class="btn btn-ghost modal-btn" @click="openSelfRole">自选角色</button>
+        </view>
+        <view v-if="canMember && !memberDetail.is_owner" class="m-actions modal-actions">
+          <picker v-if="assignableRoles.length" :range="roleNames" @change="(e) => assign(memberDetail, e)">
+            <view class="mini-btn">分配角色</view>
+          </picker>
+          <view class="mini-btn danger" @click="remove(memberDetail)">移出小组</view>
+        </view>
+        <button class="btn btn-ghost btn-block close-btn" @click="memberDetailId = null">关闭</button>
+      </view>
+    </view>
+
+    <!-- 角色详情弹窗 -->
+    <view v-if="roleDetail" class="modal-mask" @click="roleDetailId = null">
+      <view class="modal modal-lg detail-modal" @click.stop>
+        <view class="modal-title">角色详情</view>
+        <scroll-view scroll-y class="detail-scroll">
+          <view class="role-head">
+            <text class="role-name">{{ roleDetail.name }}</text>
+            <text class="text-small text-muted">Lv.{{ roleDetail.level }}</text>
+          </view>
+          <view class="detail-roles">
+            <text class="form-label detail-label">权限</text>
+            <view class="perm-list">
+              <text v-for="p in (roleDetail.permissions || [])" :key="p" class="tag tag-blue">{{ permLabel(p) }}</text>
+              <text v-if="!(roleDetail.permissions || []).length" class="text-small text-muted">无额外权限</text>
+            </view>
+          </view>
+          <view class="detail-roles">
+            <text class="form-label detail-label">成员</text>
+            <view class="member-chip-list">
+              <view v-for="m in roleMembers" :key="m.id" class="member-chip" @click="openMemberFromRole(m)">{{ memberName(m) }}</view>
+              <text v-if="!roleMembers.length" class="text-small text-muted">暂无成员</text>
+            </view>
+          </view>
+        </scroll-view>
+        <view v-if="canRole" class="modal-actions">
+          <button class="btn btn-primary modal-btn" @click="openRoleEdit(roleDetail)">编辑角色</button>
+          <button class="btn btn-ghost modal-btn danger-btn" @click="removeRole(roleDetail)">删除</button>
+        </view>
+        <button class="btn btn-ghost btn-block close-btn" @click="roleDetailId = null">关闭</button>
       </view>
     </view>
 
@@ -135,7 +204,6 @@ import { ref, reactive, computed } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import { api } from '../../../utils/api.js';
 import { confirm, toast } from '../../../utils/guard.js';
-import auth from '../../../utils/auth.js';
 import { displayName } from '../../../utils/displayName.js';
 
 const PERM_LABELS = {
@@ -151,14 +219,34 @@ const searchOpen = ref(false);
 const keyword = ref('');
 const results = ref([]);
 const searched = ref(false);
+const memberDetailId = ref(null);
+const roleDetailId = ref(null);
 
 const canMember = computed(() => data.value?.me.is_owner || data.value?.perms.member);
 const canRole = computed(() => data.value?.me.is_owner || data.value?.perms.role);
 const assignableRoles = computed(() => data.value?.roles || []);
 const roleNames = computed(() => (data.value?.roles || []).map((r) => r.name));
+const memberDetail = computed(() => data.value?.members.find((m) => Number(m.id) === Number(memberDetailId.value)) || null);
+const roleDetail = computed(() => data.value?.roles.find((r) => Number(r.id) === Number(roleDetailId.value)) || null);
+const roleMembers = computed(() => {
+  if (!roleDetail.value) return [];
+  const rid = Number(roleDetail.value.id);
+  return (data.value?.members || []).filter((m) => (m.role_ids || []).map(Number).includes(rid));
+});
 
 function permLabel(p) { return PERM_LABELS[p] || p; }
 function memberName(u) { return displayName(u) || u?.username || '?'; }
+function roleMemberCount(roleId) {
+  const rid = Number(roleId);
+  return (data.value?.members || []).filter((m) => (m.role_ids || []).map(Number).includes(rid)).length;
+}
+function openMember(m) { memberDetailId.value = m.id; roleDetailId.value = null; }
+function openRole(r) { roleDetailId.value = r.id; memberDetailId.value = null; }
+function openMemberFromRole(m) { roleDetailId.value = null; memberDetailId.value = m.id; }
+function goProfile(m) {
+  if (m.is_me) return uni.switchTab({ url: '/pages/me/main' });
+  uni.navigateTo({ url: '/packageShare/pages/user/main?id=' + m.id });
+}
 
 async function load() { data.value = await api.teamDetail(id.value); }
 
@@ -183,6 +271,7 @@ async function assign(m, e) {
 async function remove(m) {
   if (!(await confirm('将「' + memberName(m) + '」移出小组？'))) return;
   await api.teamMemberRemove(id.value, m.id);
+  memberDetailId.value = null;
   toast('已移出', 'success');
   load();
 }
@@ -193,11 +282,13 @@ const roleEditing = ref(null);
 const roleSaving = ref(false);
 const rf = reactive({ name: '', level: 0, permissions: [] });
 function openRoleCreate() {
+  roleDetailId.value = null;
   roleEditing.value = null;
   rf.name = ''; rf.level = 10; rf.permissions = [];
   roleOpen.value = true;
 }
 function openRoleEdit(r) {
+  roleDetailId.value = null;
   roleEditing.value = r;
   rf.name = r.name; rf.level = r.level; rf.permissions = [...(r.permissions || [])];
   roleOpen.value = true;
@@ -229,6 +320,7 @@ async function saveRole() {
 async function removeRole(r) {
   if (!(await confirm('删除角色「' + r.name + '」？引用该角色的成员将变为无角色。'))) return;
   await api.teamRoleDelete(id.value, r.id);
+  roleDetailId.value = null;
   toast('已删除角色', 'success');
   load();
 }
@@ -256,6 +348,7 @@ const selfOpen = ref(false);
 const selfSaving = ref(false);
 const selfPicked = ref([]);
 function openSelfRole() {
+  memberDetailId.value = null;
   const me = data.value?.members.find((m) => m.is_me);
   selfPicked.value = me ? [...(me.role_ids || [])] : [];
   selfOpen.value = true;
@@ -290,25 +383,43 @@ onShow(() => { if (id.value && data.value) load(); });
 .top-actions .btn { flex: 1; }
 .transfer-btn { margin: 18rpx 0 8rpx; height: 78rpx; font-size: 27rpx; }
 .member { padding: 24rpx 28rpx; }
-.m-head { display: flex; gap: 18rpx; }
-.avatar { width: 80rpx; height: 80rpx; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #60a5fa); color: #fff; text-align: center; line-height: 80rpx; font-size: 32rpx; font-weight: 700; flex-shrink: 0; }
+.member-card { position: relative; }
+.member-card.me { border-color: #93c5fd; background: #f8fbff; }
+.m-head { display: flex; gap: 18rpx; align-items: center; }
+.avatar { width: 80rpx; height: 80rpx; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #60a5fa); color: #fff; text-align: center; line-height: 80rpx; font-size: 32rpx; font-weight: 700; flex-shrink: 0; overflow: hidden; }
+.avatar-img { padding: 0; }
 .m-info { flex: 1; min-width: 0; }
-.m-name { font-size: 29rpx; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 10rpx; }
+.m-name { font-size: 29rpx; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap; }
 .m-roles { display: flex; gap: 8rpx; margin-top: 10rpx; flex-wrap: wrap; }
+.arrow { color: #94a3b8; font-size: 42rpx; line-height: 1; align-self: center; }
 .m-actions { display: flex; gap: 16rpx; justify-content: flex-end; margin-top: 16rpx; }
 .mini-btn { background: #eff6ff; color: #2563eb; font-size: 24rpx; border-radius: 26rpx; padding: 10rpx 28rpx; }
 .mini-btn.danger { background: #fee2e2; color: #ef4444; }
 .row-title { justify-content: space-between; }
 .add-link { color: #2563eb; font-size: 25rpx; font-weight: 600; }
 .role-card { padding: 22rpx 28rpx; }
-.role-head { display: flex; justify-content: space-between; }
+.role-head { display: flex; justify-content: space-between; align-items: center; gap: 12rpx; }
 .role-name { font-weight: 700; color: #1e293b; }
+.role-summary { display: flex; justify-content: space-between; align-items: center; margin-top: 12rpx; color: #64748b; font-size: 24rpx; }
 .perm-list { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 12rpx; }
 .role-actions { display: flex; gap: 14rpx; margin-top: 16rpx; }
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { width: 660rpx; background: #fff; border-radius: 24rpx; padding: 32rpx; }
 .modal-lg { max-height: 82vh; display: flex; flex-direction: column; }
+.detail-modal { width: 680rpx; }
+.detail-scroll { max-height: 56vh; }
 .modal-title { font-size: 31rpx; font-weight: 700; margin-bottom: 18rpx; }
+.detail-head { display: flex; gap: 18rpx; align-items: center; margin-bottom: 20rpx; }
+.detail-avatar { width: 92rpx; height: 92rpx; border-radius: 50%; background: #2563eb; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 38rpx; font-weight: 700; overflow: hidden; flex-shrink: 0; }
+.detail-avatar .avatar-img { width: 92rpx; height: 92rpx; }
+.detail-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.detail-roles { margin-top: 18rpx; }
+.detail-label { display: block; margin-bottom: 8rpx; }
+.detail-actions { margin-top: 22rpx; }
+.member-chip-list { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.member-chip { background: #eff6ff; color: #2563eb; border-radius: 999rpx; padding: 10rpx 22rpx; font-size: 24rpx; }
+.close-btn { margin-top: 18rpx; }
+.danger-btn { color: #ef4444; }
 .search-row { display: flex; gap: 14rpx; margin-bottom: 16rpx; }
 .modal-input { flex: 1; height: 80rpx; background: #f8fafc; border: 1rpx solid #e2e8f0; border-radius: 12rpx; padding: 0 20rpx; font-size: 26rpx; }
 .search-btn { width: 150rpx; height: 80rpx; font-size: 25rpx; padding: 0; }

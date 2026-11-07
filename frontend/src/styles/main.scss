@@ -177,6 +177,127 @@ td, th {
   /* 窄屏隐藏 emoji 的规则在 App.vue scoped（.nav a .ic/.nav-admin .ic），此处不写避免特异性混淆 */
 }
 
+// ============ 个性化主题（配色预设 + 壁纸背景；theme.js 驱动 data-theme / 内联变量） ============
+// 壁纸固定层：div#theme-wallpaper 由 theme.js 动态创建，背景图/透明度由 JS 控制
+#theme-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+/* 内容整体抬到壁纸层之上（EP 弹窗默认 z-index 2000+，不受影响） */
+#app { position: relative; z-index: 1; }
+/* 有壁纸时 html/body 底色让位，露出壁纸；卡片自身仍是实心底，可读性不受影响 */
+html.has-wallpaper,
+html.has-wallpaper body { background: transparent; }
+
+// —— 配色预设（ocean 海洋蓝即 :root 默认值，不另写；色值与 lib/themes.js derivePalette 同规则） ——
+html[data-theme='forest'] {
+  --primary: #059669; --primary-dark: #047b56; --primary-tint: #ebf7f3; --primary-soft: #96d3c0;
+}
+html[data-theme='teal'] {
+  --primary: #0d9488; --primary-dark: #0b7970; --primary-tint: #ecf6f5; --primary-soft: #99d2cd;
+}
+html[data-theme='indigo'] {
+  --primary: #4f46e5; --primary-dark: #4139bc; --primary-tint: #f1f0fd; --primary-soft: #b5b1f4;
+}
+html[data-theme='violet'] {
+  --primary: #7c3aed; --primary-dark: #6630c2; --primary-tint: #f5effe; --primary-soft: #c8acf7;
+}
+html[data-theme='sunset'] {
+  --primary: #ea580c; --primary-dark: #c0480a; --primary-tint: #fdf2ec; --primary-soft: #f6b999;
+}
+html[data-theme='rose'] {
+  --primary: #e11d48; --primary-dark: #b9183b; --primary-tint: #fdedf0; --primary-soft: #f2a0b2;
+}
+html[data-theme='crimson'] {
+  --primary: #b91c1c; --primary-dark: #981717; --primary-tint: #f9eded; --primary-soft: #e2a0a0;
+}
+
+// —— 暗夜黑预设：整套深蓝灰暗色 + 亮蓝主色（与幽灵红黑区分；本块在幽灵块之前，幽灵激活时被其覆盖） ——
+html[data-theme='dark'] {
+  --bg: #0b1020;
+  --card-bg: #131a2a;
+  --surface-3: #0f1524;
+  --surface-2: #1b2438;
+  --surface-1: #182032;
+  --border: #28324a;
+  --border-2: #38445e;
+  --text: #e6ebf5;
+  --text-2: #94a0b8;
+  --text-3: #6a7690;
+  --primary: #60a5fa;
+  --primary-dark: #4d84c8;
+  --primary-tint: #16233c;
+  --primary-soft: #2c4162;
+  --badge-fg: #f0b90b;
+  --badge-tint: #2a2410;
+  --badge-border: #3d3418;
+  --ai-fg: #a78bfa;
+  --ai-tint: #221d3a;
+  --success-fg: #4ade80;
+  --success-tint: #12231a;
+  --success-border: #1e3a2a;
+  --danger-tint: #301010;
+  --el-color-warning: #f0b90b;
+  --el-color-warning-light-3: #f3c63c;
+  --el-color-warning-light-5: #f6d468;
+  --el-color-warning-light-7: #f9e294;
+  --el-color-warning-light-8: #fbe9ab;
+  --el-color-warning-light-9: #2a2410;
+  --el-color-warning-dark-2: #c9970a;
+  --el-color-success-light-8: #1e3a2a;
+  --el-color-success-light-9: #12231a;
+  --el-color-danger-light-8: #301a22;
+  --el-color-danger-light-9: #241219;
+  --el-color-info-light-8: #232c40;
+  --el-color-info-light-9: #1a2234;
+  --el-bg-color: #131a2a;
+  --el-bg-color-overlay: #182133;
+  --el-fill-color-blank: #131a2a;
+  --el-fill-color: #1b2438;
+  --el-fill-color-light: #1f2940;
+  --el-fill-color-lighter: #232e47;
+  --el-fill-color-dark: #161e30;
+  --el-fill-color-darker: #141b2b;
+  --el-border-color: #28324a;
+  --el-border-color-light: #242d44;
+  --el-border-color-lighter: #20283c;
+  --el-border-color-extra-light: #1c2436;
+  --el-border-color-dark: #303c56;
+  --el-border-color-darker: #3a4764;
+  --el-text-color-primary: #e6ebf5;
+  --el-text-color-regular: #c2ccdd;
+  --el-text-color-secondary: #94a0b8;
+  --el-text-color-placeholder: #737f98;
+  --el-text-color-disabled: #525d75;
+  --el-mask-color: rgba(0, 0, 0, 0.75);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+  --el-color-primary: #60a5fa;
+  --el-color-primary-light-3: #90c0fc;
+  --el-color-primary-light-5: #b0d2fd;
+  --el-color-primary-light-7: #cfe4fe;
+  --el-color-primary-light-8: #dfedfe;
+  --el-color-primary-light-9: #16233c;
+  --el-color-primary-dark-2: #4d84c8;
+  --el-card-bg-color: #131a2a;
+  --el-card-border-color: #28324a;
+  --el-table-bg-color: #131a2a;
+  --el-table-tr-bg-color: #131a2a;
+  --el-table-header-bg-color: #1b2438;
+  --el-table-border-color: #28324a;
+  --el-table-row-hover-bg-color: #1b2438;
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #33405c; border-radius: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
 // ============ 幽灵模式（秘密通道「水手冰淇淋」）：红黑暗色主题 ============
 // 组件浅色/主蓝字面量已全部变量化（var(--card-bg)/--surface-*/--primary 系列，默认值=原色，
 // 普通模式零变化）。幽灵模式下只需覆盖 CSS 变量即整套换肤；Element Plus 组件（卡片/弹窗/

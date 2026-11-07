@@ -13,6 +13,7 @@ import DmDialog from './DmDialog.vue'; // 公共私聊弹窗（3s 轮询，关�
 import OfficePreview, { officePreviewType } from './common/OfficePreview.vue';
 import { fmtDateTime } from '../utils/time.js';
 import { canAdmin } from '../utils/adminPerms.js';
+import ThemeDialog from './ThemeDialog.vue';
 
 const router = useRouter();
 // 小组角色摘要：组长显示「组长 · 角色」（组长也可多角色），普通成员显示角色名/组员
@@ -103,6 +104,7 @@ async function saveAvatar(dataURL) {
 
 // ---- 昵称编辑 ----
 const nickDlg = ref(false);
+const themeDlg = ref(false); // 个性化主题弹窗（组件实例在本视图内，与 App 头部入口互不干扰）
 const nickVal = ref('');
 function openNick() { nickVal.value = auth.user?.nickname || ''; nickDlg.value = true; }
 async function saveNick() {
@@ -398,6 +400,7 @@ onMounted(() => {
       </div>
       <div class="me-actions">
         <el-button type="primary" plain @click="router.push('/account-security')">🔐 账号安全</el-button>
+        <el-button plain @click="themeDlg = true">🎨 个性化主题</el-button>
         <el-button type="danger" plain @click="logout">退出登录</el-button>
       </div>
     </section>
@@ -410,6 +413,8 @@ onMounted(() => {
         <el-button type="primary" @click="saveNick">保存</el-button>
       </template>
     </el-dialog>
+
+    <ThemeDialog v-model="themeDlg" />
 
     <!-- 邮箱/密码/手机/飞书/GitHub 管理已移至「账号安全」页（与退出登录同级入口） -->
 

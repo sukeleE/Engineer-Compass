@@ -39,6 +39,8 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_log_checkin ON progress_
 migCol('attendance_policy', 'allow_makeup', 'ALTER TABLE attendance_policy ADD COLUMN allow_makeup INTEGER NOT NULL DEFAULT 0');
 migCol('attendance_policy', 'makeup_minutes', 'ALTER TABLE attendance_policy ADD COLUMN makeup_minutes INTEGER NOT NULL DEFAULT 60');
 migCol('team_message', 'attachments', "ALTER TABLE team_message ADD COLUMN attachments TEXT DEFAULT '[]'");
+migCol('team_message', 'chat_group_id', 'ALTER TABLE team_message ADD COLUMN chat_group_id INTEGER'); // 群聊归属（多群聊功能）
+db.exec("CREATE INDEX IF NOT EXISTS idx_message_group ON team_message(chat_group_id, id);"); // 旧库补列后再建索引
 migCol('user_study', 'user_id', 'ALTER TABLE user_study ADD COLUMN user_id INTEGER');
 migCol('user', 'email', 'ALTER TABLE user ADD COLUMN email TEXT'); // SQLite 不支持 ADD COLUMN UNIQUE，唯一性用索引保证
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email)');
@@ -242,5 +244,36 @@ if (attAuto.some((x) => x.origin === 'u')) {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 
-export default db;
-export { DB_PATH };
+// ---- 微信小程序：user 表加 openid 列（新库 schema.sql 已含；部分唯一索引允许多个 NULL）----
+migCol('user', 'wechat_openid', 'ALTER TABLE user ADD COLUMN wechat_openid TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wechat_openid ON user(wechat_openid) WHERE wechat_openid IS NOT NULL;');
+
+// ---- 个性化主题：user.theme 存 JSON（预设/自定义主色/壁纸文件名/壁纸浓度）----
+migCol('user', 'theme', "ALTER TABLE user ADD COLUMN theme TEXT DEFAULT ''");
+
+// ---- 小组多群聊：为存量小组补默认公开群「小组讨论」，全员入群，历史消息回填（幂等；新组由建组事务直接建）----
+for (const t0 of db.prepare('SELECT id, owner_id FROM team').all()) {
+  if (db.prepare('SELECT id FROM team_chat_group WHERE team_id = ? LIMIT 1').get(t0.id)) continue;
+  db.exec('BEGIN');
+  try {
+    const rr = db.prepare("INSERT INTO team_chat_group (team_id, name, owner_id, visibility) VALUES (?, '小组讨论', ?, 'public')")
+      .run(t0.id, t0.owner_id);
+    const gid = Number(rr.lastInsertRowid);
+    db.prepare('INSERT OR IGNORE INTO team_chat_group_member (group_id, user_id) SELECT ?, user_id FROM team_member WHERE team_id = ?')
+      .run(gid, t0.id);
+    db.prepare('UPDATE team_message SET chat_group_id = ? WHERE team_id = ? AND chat_group_id IS NULL').run(gid, t0.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// ---- 用户主页评论：新表（schema.sql 表61 已同步；旧库启动时幂等补建，索引随表一起 IF NOT EXISTS）----
+db.exec(`CREATE TABLE IF NOT EXISTS profile_comment (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id  INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  content     TEXT NOT NULL,
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_profile_comment ON profile_comment(profile_id);');
+
+export default db;export { DB_PATH };

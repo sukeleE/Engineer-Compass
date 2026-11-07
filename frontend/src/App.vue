@@ -4,6 +4,8 @@ import { useRouter, useRoute } from 'vue-router';
 import ToolDock from './components/ToolDock.vue';
 import ImageViewer from './components/ImageViewer.vue';
 import RealNameDialog from './components/account/RealNameDialog.vue';
+import ThemeDialog from './components/ThemeDialog.vue';
+import { syncThemeFromUser } from './utils/theme.js';
 import auth from './auth.js';
 import { api } from './api.js';
 import { realNameGate, closeGate } from './realNameGate.js';
@@ -52,9 +54,18 @@ function goAccountSecurity() { router.push('/account-security'); }
 
 // 幽灵模式（秘密通道「水手冰淇淋」）：is_ghost → html class，全站反色由 main.scss 驱动
 // is_ghost 持久化在 localStorage（ec_user），刷新后挂载即恢复；激活/退出经 patchUser 触发 watch
-const applyGhostClass = (v) => document.documentElement.classList.toggle('ghost-mode', !!v);
+const applyGhostClass = (v) => {
+  document.documentElement.classList.toggle('ghost-mode', !!v);
+  syncThemeFromUser(); // 幽灵态切换后重放主题：激活时移除自定义内联变量，让暗色块独占；退出后恢复
+};
 watch(() => auth.user?.is_ghost, applyGhostClass);
 onMounted(() => applyGhostClass(auth.user?.is_ghost));
+
+// 个性化主题：登录/主题保存/账号切换后 user.theme 变化即重放（patchUser/setAuth 都会触发）
+watch(() => (auth.user ? JSON.stringify(auth.user.theme) : ''), () => syncThemeFromUser());
+
+// 主题弹窗（挂在 App 级，游客在登录页之外也能换肤，配置存本机）
+const themeDlg = ref(false);
 </script>
 
 <template>
@@ -93,6 +104,7 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
       </nav>
       <!-- 用户区：屏幕右上角，与标题同排同高（头像+昵称=我的主页） -->
       <div v-if="!isLogin" class="header-user">
+        <button type="button" class="nav-theme" title="个性化主题" @click="themeDlg = true">🎨<span class="nt-txt">主题</span></button>
         <router-link to="/me" class="nav-me" :class="{ logged: !!auth.token }">
           <span class="me-avatar">
             <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
@@ -103,6 +115,22 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
       </div>
     </header>
     <router-view />
+    <!-- 全局备案页脚（ICP + 公安联网备案；bare 全屏预览页隐藏，其余页面含登录页均展示） -->
+    <footer v-if="!bare" class="site-footer">
+      <a
+        href="https://beian.miit.gov.cn/"
+        rel="noreferrer"
+        target="_blank"
+      >赣ICP备2026021386号-1</a>
+      <span class="footer-sep">·</span>
+      <a
+        class="police-beian"
+        href="https://beian.mps.gov.cn/#/query/webSearch?code=33041102000737"
+        rel="noreferrer"
+        target="_blank"
+      ><img src="/beian-police.png" alt="" class="police-icon" />浙公网安备33041102000737号</a>
+    </footer>
+    <ThemeDialog v-model="themeDlg" />
     <!-- 移动端底部主导航（≤768px 显示；桌面端沿用顶部胶囊导航） -->
     <nav v-if="!bare && !isLogin" class="tabbar">
       <router-link to="/"><span class="ic">🗓️</span><span>竞赛</span></router-link>
@@ -130,6 +158,35 @@ onMounted(() => applyGhostClass(auth.user?.is_ghost));
 </template>
 
 <style scoped>
+/* 备案页脚：中性小字，颜色吃主题变量，暗夜/幽灵模式自动适配 */
+.site-footer {
+  text-align: center;
+  padding: 20px 16px 28px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.site-footer a {
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.site-footer a:hover { color: var(--primary); }
+.site-footer .footer-sep { color: var(--text-3); margin: 0 8px; }
+.site-footer .police-beian {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.site-footer .police-icon {
+  width: 14px;
+  height: 16px;
+  object-fit: contain;
+}
+@media (max-width: 768px) {
+  /* 移动端固定底栏占位已在 .app padding-bottom 处理，页脚保持普通文档流即可 */
+  .site-footer { padding: 12px 16px 20px; }
+}
+
 /* 底部主导航 / 更多面板：桌面端不占位，仅窄屏启用 */
 .tabbar { display: none; }
 .more-mask { display: none; }
@@ -253,6 +310,16 @@ html.ghost-mode .pw-bar {
   .me-name { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 }
 
+/* 个性化主题入口（与 nav-me 同高的胶囊按钮；游客也可见） */
+.nav-theme {
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--card-bg); color: var(--text);
+  padding: 5px 12px; font-size: 14px; cursor: pointer; line-height: 1;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.nav-theme:hover { border-color: var(--primary); color: var(--primary); }
+@media (max-width: 1024px) { .nav-theme .nt-txt { display: none; } }
 /* 用户区：右上角独立块（与标题同排同高）；窄屏用 order 留在第一行（导航排第二行，见 main.scss） */
 .header-user {
   display: flex; align-items: center; gap: 8px;

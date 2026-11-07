@@ -14,6 +14,7 @@ import auth from './routes/auth.js';
 import notes from './routes/notes.js';
 import team from './routes/team.js';
 import teamCollab from './routes/teamCollab.js';
+import teamChat from './routes/teamChat.js';
 import checkin from './routes/checkin.js';
 import attendance from './routes/attendance.js';
 import feedback from './routes/feedback.js';
@@ -28,6 +29,7 @@ import resource, { publicR } from './routes/resource.js';
 import importPlan from './routes/importPlan.js';
 import feishu from './routes/feishu.js';
 import github from './routes/github.js';
+import wechat from './routes/wechat.js';
 import { configured as githubConfigured } from './lib/githubClient.js';
 import expense from './routes/expense.js';
 import purchase from './routes/purchase.js';
@@ -56,7 +58,10 @@ app.use('/api/ai', taskAssist);
 app.use('/api/schedule', schedule);
 app.use('/api/study', study);
 app.use('/api/auth', auth);
+app.use('/api/auth', wechat); // 微信小程序登录/绑定（仅 /wechat-* 路径，与既有 auth 路由不冲突）
 app.use('/api/notes', notes);
+// teamChat 必须挂在 team 之前：/chat-invites 单段路径会被 team 的 GET /:id 抢匹配
+app.use('/api/team', teamChat); // 小组多群聊（/chat-group、/chat-invites、/:id/chat-groups）
 app.use('/api/team', team);
 app.use('/api/team', teamCollab);
 app.use('/api/team', checkin);

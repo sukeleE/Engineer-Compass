@@ -5,6 +5,7 @@ import { authRequired, teamCtx, hasPerm, requirePerm, genInviteCode, PERM_KEYS, 
 import { callDeepSeek } from './ai.js';
 import { findPhases } from './schedule.js';
 import { sanitizeStars, sanitizeLinks, sanitizeTarget, sanitizeCompletions, deriveMultiDone } from './taskMeta.js';
+import { ensureDefaultGroup, addUserToDefaultGroup, removeUserFromTeamGroups } from '../lib/teamChat.js';
 
 const r = Router();
 r.use(authRequired); // 以下接口全部需要登录
@@ -57,6 +58,9 @@ r.post('/', async (req, res) => {
     db.exec('ROLLBACK');
     throw e;
   }
+
+  // 自动创建默认公开群「小组讨论」（失败不阻断建组，启动迁移兜底）
+  try { ensureDefaultGroup(teamId, req.user.id); } catch { /* 迁移兜底 */ }
 
   // —— 部门与计划：对话结果（departments+plan）优先，否则 AI 智能拆解（部门 + 备赛计划）——
   const aiDepts = []; // 新部门角色 [{id, name}]
@@ -152,6 +156,7 @@ r.post('/join', (req, res) => {
     .run(team.id, req.user.id);
   if (defaultRole) db.prepare('INSERT INTO team_member_role (team_id, user_id, role_id) VALUES (?,?,?)')
     .run(team.id, req.user.id, defaultRole.id);
+  addUserToDefaultGroup(team.id, req.user.id);
   logAudit(req, 'team-join', team.name);
   res.status(201).json({ id: team.id, name: team.name, message: `已加入「${team.name}」` });
 });
@@ -421,6 +426,9 @@ r.post('/:id/member/add', (req, res) => {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 
+  // 新成员同步进默认公开群
+  for (const uid of targets) addUserToDefaultGroup(ctx.team.id, uid);
+
   // 入组通知（COMMIT 后发，失败不影响入组）：同一小组的同类未读通知去重，避免反复拉入刷通知
   const actor = displayNameOf(req.user);
   const link = `/team?team=${ctx.team.id}`;
@@ -466,6 +474,7 @@ r.delete('/:id/member/:uid', (req, res) => {
   const r2 = db.prepare('DELETE FROM team_member WHERE team_id = ? AND user_id = ?').run(ctx.team.id, uid);
   if (r2.changes === 0) return res.status(404).json({ error: '成员不存在' });
   db.prepare('DELETE FROM team_member_role WHERE team_id = ? AND user_id = ?').run(ctx.team.id, uid);
+  removeUserFromTeamGroups(ctx.team.id, uid);
   res.json({ message: '已移除成员' });
 });
 

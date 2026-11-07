@@ -1,9 +1,16 @@
 // 认证接口：注册 / 登录 / 当前用户 / 邮箱验证码
 import { Router } from 'express';
+import multer from 'multer';
 import { randomBytes, randomInt } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import db from '../db/database.js';
 import { hashPassword, verifyPassword, authRequired, logAudit, parseAdminPerms } from './middleware.js';
 import sendMail from './mailer.js';
+import { parseTheme, normalizeThemeInput, THEME_PRESETS } from '../lib/themes.js';
+import {
+  WALLPAPER_MAX, storeWallpaperName, wallpaperPath, wallpaperExists,
+  unlinkWallpaperQuiet, belongsToUser, wallpaperMime,
+} from '../lib/themeFiles.js';
 
 const r = Router();
 
@@ -91,6 +98,7 @@ export const userCard = (u) => ({
   email: u.email || '', avatar: u.avatar || null,
   password_set: u.password_set !== 0, phone: u.phone || '', real_name: u.real_name || '',
   student_no: u.student_no || '',
+  theme: parseTheme(u.theme),
 });
 
 // POST /api/auth/send-code — 发送邮箱验证码（注册/登录共用；未注册邮箱登录时自动注册）
@@ -341,6 +349,74 @@ r.put('/profile', authRequired, (req, res) => {
   db.prepare(`UPDATE user SET ${cols.join(', ')} WHERE id = ?`).run(...vals);
   const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
   res.json({ user: userCard(u) });
+});
+
+// ==================== 个性化主题（配色 + 壁纸，三端跟随账号） ====================
+const wallpaperUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: WALLPAPER_MAX, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|png|webp)$/.test(file.mimetype || '')) cb(null, true);
+    else cb(new Error('仅支持 jpg / png / webp 图片'));
+  },
+});
+
+// 预设色板（前端也内置同一份，此接口供动态拉取兜底）
+r.get('/theme/presets', authRequired, (req, res) => {
+  res.json({ presets: THEME_PRESETS });
+});
+
+// 保存主题配置；未显式传 wallpaper 时保留现有壁纸，传空串则清除并删盘
+r.put('/theme', authRequired, (req, res) => {
+  let norm;
+  try { norm = normalizeThemeInput(req.body); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  const row = db.prepare('SELECT theme FROM user WHERE id = ?').get(req.user.id);
+  const cur = parseTheme(row && row.theme);
+  if (req.body.wallpaper === undefined) norm.wallpaper = cur.wallpaper;
+  if (cur.wallpaper && norm.wallpaper !== cur.wallpaper) unlinkWallpaperQuiet(cur.wallpaper);
+  db.prepare('UPDATE user SET theme = ? WHERE id = ?').run(JSON.stringify(norm), req.user.id);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.json({ user: userCard(u), message: '主题已保存' });
+});
+
+// 上传壁纸：内存缓冲落盘，替换旧壁纸，返回最新用户卡
+r.post('/wallpaper', authRequired, wallpaperUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: '未收到图片（multipart 字段名 file）' });
+  const row = db.prepare('SELECT theme FROM user WHERE id = ?').get(req.user.id);
+  const cur = parseTheme(row && row.theme);
+  const store = storeWallpaperName(req.user.id, req.file.originalname);
+  await writeFile(wallpaperPath(store), req.file.buffer);
+  if (cur.wallpaper) unlinkWallpaperQuiet(cur.wallpaper);
+  const next = { ...cur, wallpaper: store };
+  db.prepare('UPDATE user SET theme = ? WHERE id = ?').run(JSON.stringify(next), req.user.id);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.status(201).json({ user: userCard(u), wallpaper: store, message: '壁纸已更新' });
+}, (err, req, res, next) => {
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
+    return res.status(413).json({ error: '壁纸过大（≤6MB），请先压缩或裁剪' });
+  res.status(400).json({ error: err.message || '壁纸上传失败' });
+});
+
+// 读取本人壁纸（authRequired 支持 ?token= 直连，供 <image>/背景图使用）
+r.get('/wallpaper/:name', authRequired, (req, res) => {
+  const name = String(req.params.name || '');
+  if (!belongsToUser(name, req.user.id) || !wallpaperExists(name))
+    return res.status(404).json({ error: '壁纸不存在' });
+  res.set('Cache-Control', 'private, max-age=86400');
+  res.type(wallpaperMime(name));
+  res.sendFile(wallpaperPath(name));
+});
+
+// 移除壁纸（删盘 + 清空配置）
+r.delete('/wallpaper', authRequired, (req, res) => {
+  const row = db.prepare('SELECT theme FROM user WHERE id = ?').get(req.user.id);
+  const cur = parseTheme(row && row.theme);
+  if (cur.wallpaper) unlinkWallpaperQuiet(cur.wallpaper);
+  const next = { ...cur, wallpaper: '' };
+  db.prepare('UPDATE user SET theme = ? WHERE id = ?').run(JSON.stringify(next), req.user.id);
+  const u = db.prepare('SELECT * FROM user WHERE id = ?').get(req.user.id);
+  res.json({ user: userCard(u), message: '壁纸已移除' });
 });
 
 // PUT /api/auth/email — 绑定 / 更换邮箱（新邮箱验证码校验，purpose=bind）

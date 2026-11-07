@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS user (
   phone_verified INTEGER NOT NULL DEFAULT 0,
   real_name     TEXT NOT NULL DEFAULT '',      -- 真实姓名（预约/报销/采购三模块硬门禁；空=未实名）
   student_no    TEXT NOT NULL DEFAULT '',      -- 学号（实验室借用登记用；空=未填写）
+  wechat_openid TEXT,                             -- 微信小程序 openid（微信登录/绑定；部分唯一索引见 database.js 迁移链）
+  theme         TEXT NOT NULL DEFAULT '',          -- 个性化主题 JSON {preset,primary,wallpaper,opacity}（壁纸实体存 uploads/wallpapers）
   create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 -- idx_user_phone 部分唯一索引在 database.js 迁移链创建（老库 phone 列后补，建索引须在 migCol 后）
@@ -203,14 +205,52 @@ CREATE TABLE IF NOT EXISTS progress_log (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 表14 team_message 小组讨论（attachments 图片 JSON 数组）
-CREATE TABLE IF NOT EXISTS team_message (
+-- 表14-1 team_chat_group 小组群聊（每小组最多 10 个；public=全组可见可自由加入 / private=列表可见但仅群成员可看内容）
+CREATE TABLE IF NOT EXISTS team_chat_group (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id        INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  owner_id       INTEGER NOT NULL REFERENCES user(id),
+  visibility     TEXT NOT NULL DEFAULT 'public',   -- public / private
+  avatar_user_id INTEGER REFERENCES user(id),      -- 群头像复用成员头像（JOIN user.avatar，零冗余），NULL=群名首字色块
+  notice         TEXT NOT NULL DEFAULT '',         -- 群公告（预留）
+  create_time    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_chat_group_team ON team_chat_group(team_id);
+
+-- 表14-2 team_chat_group_member 群成员（联合主键防重复入群）
+CREATE TABLE IF NOT EXISTS team_chat_group_member (
+  group_id  INTEGER NOT NULL REFERENCES team_chat_group(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  join_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_group_member_user ON team_chat_group_member(user_id);
+
+-- 表14-3 team_chat_group_invite 私有群邀请（群主可直接加人；普通成员发起邀请，对方确认后入群）
+CREATE TABLE IF NOT EXISTS team_chat_group_invite (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  team_id     INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
-  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-  content     TEXT NOT NULL,
-  attachments TEXT DEFAULT '[]',             -- JSON [{name,mime,data}]
-  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+  group_id    INTEGER NOT NULL REFERENCES team_chat_group(id) ON DELETE CASCADE,
+  inviter_id  INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  invitee_id  INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'pending', -- pending / accepted / rejected / cancelled
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  handle_time DATETIME
+);
+-- 同一群对同一人只允许一条待处理邀请（SQLite 部分唯一索引）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_invite_pending
+  ON team_chat_group_invite(group_id, invitee_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_chat_invite_invitee ON team_chat_group_invite(invitee_id, status);
+
+-- 表14 team_message 小组讨论（attachments 图片 JSON 数组；chat_group_id 归属群聊）
+CREATE TABLE IF NOT EXISTS team_message (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id       INTEGER NOT NULL REFERENCES team(id) ON DELETE CASCADE,
+  chat_group_id INTEGER REFERENCES team_chat_group(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  content       TEXT NOT NULL,
+  attachments   TEXT DEFAULT '[]',             -- JSON [{name,mime,data}]
+  create_time   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 表15 team_file 资料共享（base64 JSON 上传，零额外依赖）
@@ -986,3 +1026,13 @@ CREATE TABLE IF NOT EXISTS attendance_makeup (
   update_time      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_att_makeup_team_user ON attendance_makeup(team_id, user_id, status);
+
+-- 表61 用户主页评论（公开主页评论；独立于小组 comment 与帖子 share_comment，无 team/post 归属）
+CREATE TABLE IF NOT EXISTS profile_comment (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id  INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,  -- 被评论主页的用户
+  user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,  -- 评论者
+  content     TEXT NOT NULL,                 -- 1-500 字纯文本
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_profile_comment ON profile_comment(profile_id);

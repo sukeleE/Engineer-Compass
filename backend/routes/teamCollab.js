@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired, teamCtx, requirePerm, hasPerm, logAudit, mutedGuard } from './middleware.js';
+import { ensureDefaultGroup } from '../lib/teamChat.js';
 import { normalizePlan } from './schedule.js';
 import { ensureShareToken, RESOURCE_DIR } from './resource.js';
 import { existsSync } from 'node:fs';
@@ -44,10 +45,10 @@ export function sanitizeAttachments(attachments) {
 
 const parseAtt = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
 // 旧版前端把 {content, attachments} 整个对象存库串化为 "[object Object]"（文字已不可恢复），读取时清洗为空串
-const cleanContent = (s) => (String(s || '') === '[object Object]' ? '' : String(s || ''));
+export const cleanContent = (s) => (String(s || '') === '[object Object]' ? '' : String(s || ''));
 
 // 批量挂评论：把 type（log/message）目标的评论按 target_id 分组附加
-function attachComments(teamId, type, targets) {
+export function attachComments(teamId, type, targets) {
   const ids = targets.map((t) => t.id);
   if (!ids.length) return targets.map((t) => ({ ...t, comments: [] }));
   const rows = db.prepare(
@@ -275,12 +276,14 @@ r.get('/:id/plans', (req, res) => {
 r.get('/:id/messages', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  // 旧版客户端兜底：消息统一归属默认群「小组讨论」
+  const dg = ensureDefaultGroup(ctx.team.id, ctx.team.owner_id);
   const rows = db.prepare(
     `SELECT m.id, m.content, m.attachments, m.create_time, u.id AS user_id,
             COALESCE(u.nickname, u.username) AS nickname
      FROM team_message m JOIN user u ON u.id = m.user_id
-     WHERE m.team_id = ? ORDER BY m.create_time DESC LIMIT 200`
-  ).all(ctx.team.id).map((m) => ({ ...m, content: cleanContent(m.content), attachments: parseAtt(m.attachments) }));
+     WHERE m.chat_group_id = ? ORDER BY m.create_time DESC LIMIT 200`
+  ).all(dg.id).map((m) => ({ ...m, content: cleanContent(m.content), attachments: parseAtt(m.attachments) }));
   res.json(attachComments(ctx.team.id, 'message', rows));
 });
 
@@ -298,8 +301,9 @@ r.post('/:id/message', mutedGuard, (req, res) => {
   }
   let att = [];
   try { att = sanitizeAttachments(attachments); } catch (e) { return res.status(413).json({ error: e.message }); }
-  const rr = db.prepare('INSERT INTO team_message (team_id, user_id, content, attachments) VALUES (?,?,?,?)')
-    .run(ctx.team.id, req.user.id, String(content || ''), JSON.stringify(att));
+  const dg = ensureDefaultGroup(ctx.team.id, ctx.team.owner_id);
+  const rr = db.prepare('INSERT INTO team_message (team_id, chat_group_id, user_id, content, attachments) VALUES (?,?,?,?,?)')
+    .run(ctx.team.id, dg.id, req.user.id, String(content || ''), JSON.stringify(att));
   res.status(201).json({ id: rr.lastInsertRowid, message: '已发送' });
 });
 
@@ -312,6 +316,7 @@ r.delete('/:id/message/:mid', (req, res) => {
   // 原写法 requirePerm 副作用先发 403 导致本人也删不了；改用 hasPerm 无副作用短路判断
   const canMod = ctx.isOwner || msg.user_id === req.user.id || hasPerm(ctx, 'task');
   if (!canMod) return res.status(403).json({ error: '仅本人或管理员可删除' });
+  db.prepare("DELETE FROM comment WHERE target_type = 'message' AND target_id = ?").run(msg.id);
   db.prepare('DELETE FROM team_message WHERE id = ?').run(msg.id);
   res.json({ message: '已删除' });
 });

@@ -7,6 +7,7 @@
 // 依赖：pdf-parse（已是后端依赖，importPlan.js 在用）—— 它自带 getText() 与 getScreenshot()，
 //   后者内部用其依赖 @napi-rs/canvas + pdfjs-dist 渲染，故本功能零新增依赖。
 // ⚠️ destroy() 必须在 finally 调用：它释放 pdfjs 文档对象，长驻服务里漏调会按请求泄漏。
+import './pdf-dom-shim.js';
 import { PDFParse } from 'pdf-parse';
 // 与 pdf-parse 内部同一条 pdfjs 路径（legacy build：Node 无 DOMMatrix 等浏览器 API）
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';

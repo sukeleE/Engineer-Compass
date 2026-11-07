@@ -5,6 +5,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
+import '../lib/pdf-dom-shim.js';
 import { PDFParse } from 'pdf-parse';
 import * as XLSX from 'xlsx';
 import { authRequired, mutedGuard, logAudit } from './middleware.js';
