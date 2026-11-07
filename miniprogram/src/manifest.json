@@ -1,0 +1,36 @@
+{
+  "name": "工科竞赛助手",
+  "appid": "wxbc15a611e158f1e3",
+  "description": "Engineer-Compass 工科竞赛导航：竞赛、备赛、小组协作、资源分享与运营管理",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3
+  },
+  "mp-weixin": {
+    "appid": "wxbc15a611e158f1e3",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "minified": true,
+      "postcss": true,
+      "ignoreDevUnusedFiles": false,
+      "ignoreUploadUnusedFiles": true
+    },
+    "usingComponents": true,
+    "lazyCodeLoading": "requiredComponents",
+    "optimization": {
+      "subPackages": true
+    }
+  },
+  "h5": {
+    "title": "工科竞赛助手",
+    "router": {
+      "mode": "hash"
+    }
+  },
+  "vueVersion": "3"
+}

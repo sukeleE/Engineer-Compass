@@ -1,0 +1,109 @@
+{
+  "pages": [
+    { "path": "pages/timeline/main", "style": { "navigationBarTitleText": "工科竞赛助手", "enablePullDownRefresh": true } },
+    { "path": "pages/schedule/main", "style": { "navigationBarTitleText": "我的备赛日程", "enablePullDownRefresh": true } },
+    { "path": "pages/team/main", "style": { "navigationBarTitleText": "项目小组", "enablePullDownRefresh": true } },
+    { "path": "pages/resource/main", "style": { "navigationBarTitleText": "资源中心" } },
+    { "path": "pages/me/main", "style": { "navigationBarTitleText": "我的" } },
+    { "path": "pages/login/main", "style": { "navigationBarTitleText": "登录 / 绑定账号" } }
+  ],
+  "subPackages": [
+    {
+      "root": "packageCompetition",
+      "pages": [
+        { "path": "pages/detail/main", "style": { "navigationBarTitleText": "竞赛详情" } },
+        { "path": "pages/chat/main", "style": { "navigationBarTitleText": "AI 竞赛问答" } },
+        { "path": "pages/ingest/main", "style": { "navigationBarTitleText": "收录未知竞赛" } }
+      ]
+    },
+    {
+      "root": "packagePlan",
+      "pages": [
+        { "path": "pages/study/list", "style": { "navigationBarTitleText": "学习日程" } },
+        { "path": "pages/study/detail", "style": { "navigationBarTitleText": "学习计划详情" } },
+        { "path": "pages/study/create", "style": { "navigationBarTitleText": "新建学习计划" } },
+        { "path": "pages/notes/main", "style": { "navigationBarTitleText": "学习笔记" } },
+        { "path": "pages/notes/edit", "style": { "navigationBarTitleText": "当日笔记" } },
+        { "path": "pages/schedule/edit", "style": { "navigationBarTitleText": "自编备赛计划" } },
+        { "path": "pages/planchat/main", "style": { "navigationBarTitleText": "AI 计划对话" } }
+      ]
+    },
+    {
+      "root": "packageTeam",
+      "pages": [
+        { "path": "pages/create/main", "style": { "navigationBarTitleText": "创建小组" } },
+        { "path": "pages/detail/main", "style": { "navigationBarTitleText": "小组详情" } },
+        { "path": "pages/members/main", "style": { "navigationBarTitleText": "成员与角色" } },
+        { "path": "pages/tasks/main", "style": { "navigationBarTitleText": "小组任务" } },
+        { "path": "pages/progress/main", "style": { "navigationBarTitleText": "进度汇报" } },
+        { "path": "pages/chat/list", "style": { "navigationBarTitleText": "群聊" } },
+        { "path": "pages/chat/room", "style": { "navigationBarTitleText": "群聊" } },
+        { "path": "pages/chat/info", "style": { "navigationBarTitleText": "群信息" } },
+        { "path": "pages/files/main", "style": { "navigationBarTitleText": "小组文件" } },
+        { "path": "pages/devices/main", "style": { "navigationBarTitleText": "设备与预约" } },
+        { "path": "pages/attendance/main", "style": { "navigationBarTitleText": "考勤打卡" } },
+        { "path": "pages/checkin/main", "style": { "navigationBarTitleText": "周期打卡" } }
+      ]
+    },
+    {
+      "root": "packageSocial",
+      "pages": [
+        { "path": "pages/notifications/main", "style": { "navigationBarTitleText": "消息通知", "enablePullDownRefresh": true } },
+        { "path": "pages/friends/main", "style": { "navigationBarTitleText": "好友" } },
+        { "path": "pages/dm/main", "style": { "navigationBarTitleText": "私信" } },
+        { "path": "pages/feedback/main", "style": { "navigationBarTitleText": "意见反馈" } }
+      ]
+    },
+    {
+      "root": "packageShare",
+      "pages": [
+        { "path": "pages/posts/main", "style": { "navigationBarTitleText": "资源分享", "enablePullDownRefresh": true } },
+        { "path": "pages/post/detail", "style": { "navigationBarTitleText": "帖子详情" } },
+        { "path": "pages/post/publish", "style": { "navigationBarTitleText": "发布分享" } },
+        { "path": "pages/honor/main", "style": { "navigationBarTitleText": "荣誉墙", "enablePullDownRefresh": true } },
+        { "path": "pages/library/main", "style": { "navigationBarTitleText": "个人资源库" } },
+        { "path": "pages/user/main", "style": { "navigationBarTitleText": "用户主页" } }
+      ]
+    },
+    {
+      "root": "packageOps",
+      "pages": [
+        { "path": "pages/expense/list", "style": { "navigationBarTitleText": "报销整理" } },
+        { "path": "pages/expense/detail", "style": { "navigationBarTitleText": "报销项目" } },
+        { "path": "pages/purchase/list", "style": { "navigationBarTitleText": "物料采购" } },
+        { "path": "pages/purchase/detail", "style": { "navigationBarTitleText": "采购申请详情" } },
+        { "path": "pages/purchase/create", "style": { "navigationBarTitleText": "新建采购申请" } },
+        { "path": "pages/booking/projects", "style": { "navigationBarTitleText": "资源预约" } },
+        { "path": "pages/booking/detail", "style": { "navigationBarTitleText": "预约台账" } },
+        { "path": "pages/booking/mine", "style": { "navigationBarTitleText": "我的预约" } },
+        { "path": "pages/booking/records", "style": { "navigationBarTitleText": "借用记录" } }
+      ]
+    },
+    {
+      "root": "packageAdmin",
+      "pages": [
+        { "path": "pages/review/main", "style": { "navigationBarTitleText": "轻量审核端" } }
+      ]
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "工科竞赛助手",
+    "navigationBarBackgroundColor": "#2563eb",
+    "backgroundColor": "#f8fafc",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#2563eb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/timeline/main", "text": "竞赛" },
+      { "pagePath": "pages/schedule/main", "text": "日程" },
+      { "pagePath": "pages/team/main", "text": "小组" },
+      { "pagePath": "pages/resource/main", "text": "资源" },
+      { "pagePath": "pages/me/main", "text": "我的" }
+    ]
+  }
+}

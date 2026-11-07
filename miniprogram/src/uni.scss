@@ -1,0 +1,23 @@
+// uni-app 全局 SCSS 变量（自动注入各组件 <style lang="scss">）
+// 配色与 H5 版 frontend/src/styles/main.scss 保持一致
+$primary: #2563eb;
+$primary-dark: #1d4ed8;
+$primary-tint: #eff6ff;
+$bg: #f8fafc;
+$card-bg: #ffffff;
+$border: #e2e8f0;
+$text: #1e293b;
+$text-2: #64748b;
+$text-3: #94a3b8;
+$danger: #ef4444;
+$success: #16a34a;
+
+// 赛道主题色
+$c-robot: #3b82f6;   // 电子机器人
+$c-mech: #f59e0b;    // 机械
+$c-mix: #10b981;     // 综合
+$c-math: #8b5cf6;    // 数学基础
+$c-art: #ec4899;     // 设计艺术
+$c-biz: #14b8a6;     // 经管商科
+$c-med: #ef4444;     // 医学技能
+$c-default: #64748b;
