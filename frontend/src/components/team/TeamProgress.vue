@@ -635,7 +635,7 @@ const logGroups = computed(() => {
   const groups = [];
   const free = logs.value.filter((l) => !l.schedule_id);
   if (free.length) {
-    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
+    groups.push({ key: 'free', free: true, collapsible: true, label: '自由汇报', logs: free,
       count: free.length, late: 0, featured: free.filter((l) => l.featured).length, avatars: bucketAvatars(free) });
   }
   const map = new Map();
@@ -657,7 +657,7 @@ const expandedWeeks = ref(new Set());
 let lastLatestWeek = null;
 // 仅在出现新的最新周时自动展开（首次加载/跨周新汇报），不覆盖用户手动收起状态
 function ensureLatestWeek() {
-  const latest = logGroups.value.find((g) => g.collapsible);
+  const latest = logGroups.value.find((g) => !g.free);
   if (!latest || latest.key === lastLatestWeek) return;
   const s = new Set(expandedWeeks.value);
   s.add(latest.key);
@@ -1265,9 +1265,9 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-button size="small" text class="banner-close" @click="lastLog = null">✕</el-button>
       </div>
       <template v-if="logs.length">
-        <div v-for="g in logGroups" :key="g.key" class="week-group" :class="{ open: weekOpen(g), free: g.free }">
-          <div class="week-head" :class="{ static: g.free }" @click="g.collapsible && toggleWeek(g.key)">
-            <span v-if="g.collapsible" class="week-arrow">▾</span>
+        <div v-for="g in logGroups" :key="g.key" class="week-group" :class="{ open: weekOpen(g) }">
+          <div class="week-head" @click="toggleWeek(g.key)">
+            <span class="week-arrow">▾</span>
             <span class="week-title">{{ g.free ? '✍️ 自由汇报' : '📅 ' + g.label }}</span>
             <span class="week-meta">
               <span class="week-count">{{ g.count }} 份汇报</span>
@@ -1407,7 +1407,6 @@ reload().catch((e) => ElMessage.error(e.message));
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 14px; cursor: pointer; user-select: none;
   background: color-mix(in srgb, var(--primary) 6%, white);
-  &.static { cursor: default; }
   .week-arrow { display: inline-flex; font-size: 12px; color: var(--text-2); transition: transform .2s ease; }
   .week-title { font-size: 13.5px; font-weight: 700; }
   .week-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

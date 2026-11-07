@@ -15,8 +15,8 @@
     <EmptyState v-else-if="!logs.length" icon="📈" text="还没有进度汇报" />
     <template v-else>
       <view v-for="g in logGroups" :key="g.key" class="week-group">
-        <view class="week-head" :class="{ static: g.free }" @click="toggleWeek(g)">
-          <text v-if="g.collapsible" class="week-arrow" :class="{ open: weekOpen(g) }">▸</text>
+        <view class="week-head" @click="toggleWeek(g)">
+          <text class="week-arrow" :class="{ open: weekOpen(g) }">▸</text>
           <text class="week-title">{{ g.free ? '✍️ 自由汇报' : '📅 ' + g.label }}</text>
           <text class="week-count">{{ g.count }}份</text>
           <text v-if="g.late" class="tag tag-red">迟交{{ g.late }}</text>
@@ -159,7 +159,7 @@ const logGroups = computed(() => {
   const groups = [];
   const free = logs.value.filter((l) => !l.schedule_id);
   if (free.length) {
-    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
+    groups.push({ key: 'free', free: true, collapsible: true, label: '自由汇报', logs: free,
       count: free.length, late: 0, featured: free.filter((l) => l.featured).length });
   }
   const map = new Map();
@@ -181,7 +181,7 @@ const expandedWeeks = reactive({});
 let lastLatestWeek = null;
 // 仅在出现新的最新周时自动展开（首次加载/跨周新汇报），不覆盖用户手动收起状态
 function ensureLatestWeek() {
-  const latest = logGroups.value.find((g) => g.collapsible);
+  const latest = logGroups.value.find((g) => !g.free);
   if (!latest || latest.key === lastLatestWeek) return;
   expandedWeeks[latest.key] = true;
   lastLatestWeek = latest.key;
@@ -322,7 +322,6 @@ onShow(() => { if (id.value) load(); });
 .modal-btn { flex: 1; height: 80rpx; font-size: 27rpx; }
 .week-group { margin-bottom: 18rpx; }
 .week-head { display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap; background: #eff6ff; border: 1rpx solid #dbeafe; border-radius: 14rpx; padding: 16rpx 22rpx; }
-.week-head.static { background: #f8fafc; border-color: #e2e8f0; }
 .week-arrow { font-size: 26rpx; color: #64748b; transition: transform .2s; }
 .week-arrow.open { transform: rotate(90deg); }
 .week-title { font-size: 27rpx; font-weight: 700; color: #1e293b; }
