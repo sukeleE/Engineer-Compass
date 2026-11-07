@@ -1,7 +1,7 @@
 <script setup>
 // 进度对齐：任务列表（组长建任务/分配负责人/进度跟踪）+ 成员进度汇报时间线（富文本 + 附件 + 评论）
 // 编写汇报独立成弹窗，与时间线浏览区区分
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
@@ -597,6 +597,81 @@ function toggleFt(id) {
   expandedFt.value = s;
 }
 
+// ==================== 汇报按周折叠（历史周期打包，默认只展开最新一周；自由汇报置顶常显） ====================
+// period_key：周打卡为 YYYY-Www（ISO 周键），日打卡/一次性为 YYYY-MM-DD，统一换算成 ISO 周
+function isoWeekOf(dateStr) {
+  const [Y, M, D] = String(dateStr).split('-').map(Number);
+  const d = new Date(Date.UTC(Y, M - 1, D));
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - day + 3); // 本周四
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+  const week = 1 + Math.round((d - firstThu) / (7 * 864e5));
+  return { year: d.getUTCFullYear(), week, key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}` };
+}
+function logWeekKey(l) {
+  return /W/.test(l.period_key) ? l.period_key : isoWeekOf(l.period_key).key;
+}
+function weekMd(d) { return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日`; }
+// ISO 周键 → 「第45周 · 11月2日–11月8日」标签（周一~周日）
+function weekRangeLabel(key) {
+  const [y, w] = key.split('-W').map(Number);
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const jan4Dow = (jan4.getUTCDay() + 6) % 7;
+  const mon = new Date(jan4);
+  mon.setUTCDate(jan4.getUTCDate() - jan4Dow + (w - 1) * 7);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  const endMd = sun.getUTCFullYear() === y ? weekMd(sun) : `${sun.getUTCFullYear()}年${weekMd(sun)}`;
+  return `第${w}周 · ${weekMd(mon)}–${endMd}`;
+}
+function bucketAvatars(arr) {
+  const seen = new Set();
+  for (const l of arr) { if (l.avatar) seen.add(l.avatar); }
+  return [...seen].slice(0, 5);
+}
+// 分组：自由汇报（无 schedule_id）置顶且不可折叠；打卡汇报按 ISO 周打包，周键倒序
+const logGroups = computed(() => {
+  const groups = [];
+  const free = logs.value.filter((l) => !l.schedule_id);
+  if (free.length) {
+    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
+      count: free.length, late: 0, featured: free.filter((l) => l.featured).length, avatars: bucketAvatars(free) });
+  }
+  const map = new Map();
+  for (const l of logs.value) {
+    if (!l.schedule_id) continue;
+    const key = logWeekKey(l);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(l);
+  }
+  for (const key of [...map.keys()].sort((a, b) => (a < b ? 1 : -1))) {
+    const arr = map.get(key);
+    groups.push({ key, free: false, collapsible: true, label: weekRangeLabel(key), logs: arr,
+      count: arr.length, late: arr.filter((l) => l.is_late).length,
+      featured: arr.filter((l) => l.featured).length, avatars: bucketAvatars(arr) });
+  }
+  return groups;
+});
+const expandedWeeks = ref(new Set());
+let lastLatestWeek = null;
+// 仅在出现新的最新周时自动展开（首次加载/跨周新汇报），不覆盖用户手动收起状态
+function ensureLatestWeek() {
+  const latest = logGroups.value.find((g) => g.collapsible);
+  if (!latest || latest.key === lastLatestWeek) return;
+  const s = new Set(expandedWeeks.value);
+  s.add(latest.key);
+  expandedWeeks.value = s;
+  lastLatestWeek = latest.key;
+}
+watch(logGroups, () => ensureLatestWeek(), { immediate: true });
+function toggleWeek(key) {
+  const s = new Set(expandedWeeks.value);
+  s.has(key) ? s.delete(key) : s.add(key);
+  expandedWeeks.value = s;
+}
+function weekOpen(g) { return !g.collapsible || expandedWeeks.value.has(g.key); }
+
 function canEditTask(t) {
   return t.assignee_id === props.me.user_id || props.perms.task;
 }
@@ -1189,51 +1264,67 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-button size="small" @click="impDlg = true">📥 从飞书导入</el-button>
         <el-button size="small" text class="banner-close" @click="lastLog = null">✕</el-button>
       </div>
-      <el-timeline v-if="logs.length">
-        <el-timeline-item v-for="l in logs" :key="l.id" :timestamp="fmtShort(l.create_time)">
-          <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
-          <div class="log-head">
-            <span class="log-avatar u-link" v-if="l.avatar" @click="toProfile(l)"><img :src="l.avatar" alt="" /></span>
-            <span class="log-author u-link" @click="toProfile(l)">{{ memberName(l) || '未知成员' }}</span>
-            <el-tag v-for="rn in roleNamesOf(l.user_id)" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
-            <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
-            <span class="log-actions">
-              <el-button v-if="canEditLog(l)" size="small" text type="primary" @click="editLog(l)">✏️ 修改</el-button>
-              <el-button v-if="canEditLog(l)" size="small" text type="danger" @click="removeLog(l)">↩️ 撤回</el-button>
+      <template v-if="logs.length">
+        <div v-for="g in logGroups" :key="g.key" class="week-group" :class="{ open: weekOpen(g), free: g.free }">
+          <div class="week-head" :class="{ static: g.free }" @click="g.collapsible && toggleWeek(g.key)">
+            <span v-if="g.collapsible" class="week-arrow">▾</span>
+            <span class="week-title">{{ g.free ? '✍️ 自由汇报' : '📅 ' + g.label }}</span>
+            <span class="week-meta">
+              <span class="week-count">{{ g.count }} 份汇报</span>
+              <el-tag v-if="g.late" size="small" type="warning" effect="plain">迟交 {{ g.late }}</el-tag>
+              <el-tag v-if="g.featured" size="small" type="danger" effect="dark">优秀 {{ g.featured }}</el-tag>
+            </span>
+            <span v-if="g.avatars.length" class="week-avatars">
+              <img v-for="(a, i) in g.avatars" :key="i" :src="a" alt="" />
             </span>
           </div>
-          <!-- 嵌入式查看：该汇报已关联飞书文档 → 徽标 + 在飞书打开 -->
-          <div v-if="l.feishu_url" class="rp-feishu-link">
-            🪶 已关联飞书文档 <a :href="l.feishu_url" target="_blank" rel="noopener">📄 在飞书打开 →</a>
-          </div>
-          <!-- 周期打卡条目：任务标签 + 状态 + 优秀徽标 -->
-          <div v-if="l.schedule_id" class="ci-log-tags">
-            <el-tag size="small" type="primary" effect="plain">🗓️ {{ l.schedule_title || '打卡' }} · {{ l.period_key }}</el-tag>
-            <el-tag v-if="l.is_late" size="small" type="warning" effect="plain">迟交</el-tag>
-            <el-tag v-if="l.featured" size="small" type="danger" effect="dark">🏅 优秀</el-tag>
-          </div>
-          <div v-if="l.schedule_id && (l.self_progress != null || l.self_rating != null)" class="ci-self">
-            <span v-if="l.self_progress != null">自评进度 <b>{{ l.self_progress }}%</b></span>
-            <el-progress v-if="l.self_progress != null" :percentage="l.self_progress" :stroke-width="6"
-              :show-text="false" style="width:120px" />
-            <span v-if="l.self_rating != null">自评效果 <b>{{ '★'.repeat(l.self_rating) }}</b></span>
-          </div>
-          <div v-if="l.content" class="log-rich" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
-          <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
-          <!-- 组长评价区：评分 / 评语 / 优秀（task 权限者可操作） -->
-          <div v-if="l.schedule_id" class="ci-review">
-            <template v-if="perms.task">
-              <el-rate :model-value="l.score || 0" :max="5" size="small" @change="(v) => reviewScore(l, v)" />
-              <el-button size="small" text @click="reviewComment(l)">💬 评语</el-button>
-              <el-button size="small" text :type="l.featured ? 'danger' : 'default'"
-                @click="reviewToggleFeatured(l)">{{ l.featured ? '取消优秀' : '选为优秀' }}</el-button>
-            </template>
-            <span v-if="l.score" class="ci-review-show">组长评分 <b>{{ '★'.repeat(l.score) }}</b></span>
-            <span v-if="l.review" class="ci-review-show">“{{ l.review }}”</span>
-          </div>
-          <CommentThread :team-id="teamId" type="log" :target="l" :members="members" />
-        </el-timeline-item>
-      </el-timeline>
+          <el-timeline v-if="weekOpen(g)" class="week-body">
+            <el-timeline-item v-for="l in g.logs" :key="l.id" :timestamp="fmtShort(l.create_time)">
+              <!-- 作者行：汇报者 + 修改/撤回（本人或组长） -->
+              <div class="log-head">
+                <span class="log-avatar u-link" v-if="l.avatar" @click="toProfile(l)"><img :src="l.avatar" alt="" /></span>
+                <span class="log-author u-link" @click="toProfile(l)">{{ memberName(l) || '未知成员' }}</span>
+                <el-tag v-for="rn in roleNamesOf(l.user_id)" :key="rn" size="small" effect="plain">{{ rn }}</el-tag>
+                <el-tag v-if="Number(l.user_id) === Number(me.user_id)" size="small" type="info">我</el-tag>
+                <span class="log-actions">
+                  <el-button v-if="canEditLog(l)" size="small" text type="primary" @click="editLog(l)">✏️ 修改</el-button>
+                  <el-button v-if="canEditLog(l)" size="small" text type="danger" @click="removeLog(l)">↩️ 撤回</el-button>
+                </span>
+              </div>
+              <!-- 嵌入式查看：该汇报已关联飞书文档 → 徽标 + 在飞书打开 -->
+              <div v-if="l.feishu_url" class="rp-feishu-link">
+                🪶 已关联飞书文档 <a :href="l.feishu_url" target="_blank" rel="noopener">📄 在飞书打开 →</a>
+              </div>
+              <!-- 周期打卡条目：任务标签 + 状态 + 优秀徽标 -->
+              <div v-if="l.schedule_id" class="ci-log-tags">
+                <el-tag size="small" type="primary" effect="plain">🗓️ {{ l.schedule_title || '打卡' }} · {{ l.period_key }}</el-tag>
+                <el-tag v-if="l.is_late" size="small" type="warning" effect="plain">迟交</el-tag>
+                <el-tag v-if="l.featured" size="small" type="danger" effect="dark">🏅 优秀</el-tag>
+              </div>
+              <div v-if="l.schedule_id && (l.self_progress != null || l.self_rating != null)" class="ci-self">
+                <span v-if="l.self_progress != null">自评进度 <b>{{ l.self_progress }}%</b></span>
+                <el-progress v-if="l.self_progress != null" :percentage="l.self_progress" :stroke-width="6"
+                  :show-text="false" style="width:120px" />
+                <span v-if="l.self_rating != null">自评效果 <b>{{ '★'.repeat(l.self_rating) }}</b></span>
+              </div>
+              <div v-if="l.content" class="log-rich" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
+              <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
+              <!-- 组长评价区：评分 / 评语 / 优秀（task 权限者可操作） -->
+              <div v-if="l.schedule_id" class="ci-review">
+                <template v-if="perms.task">
+                  <el-rate :model-value="l.score || 0" :max="5" size="small" @change="(v) => reviewScore(l, v)" />
+                  <el-button size="small" text @click="reviewComment(l)">💬 评语</el-button>
+                  <el-button size="small" text :type="l.featured ? 'danger' : 'default'"
+                    @click="reviewToggleFeatured(l)">{{ l.featured ? '取消优秀' : '选为优秀' }}</el-button>
+                </template>
+                <span v-if="l.score" class="ci-review-show">组长评分 <b>{{ '★'.repeat(l.score) }}</b></span>
+                <span v-if="l.review" class="ci-review-show">“{{ l.review }}”</span>
+              </div>
+              <CommentThread :team-id="teamId" type="log" :target="l" :members="members" />
+            </el-timeline-item>
+          </el-timeline>
+        </div>
+      </template>
       <div v-else class="tp-empty">还没有汇报 — 点上方「✍️ 写汇报」记录进展</div>
     </div>
   </div>
@@ -1306,6 +1397,27 @@ reload().catch((e) => ElMessage.error(e.message));
     .tc-progress .el-progress { flex: 1 1 100% !important; } /* 压过内联 style="flex:1" */
   }
 }
+// ==================== 汇报按周折叠 ====================
+.week-group {
+  border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px;
+  background: var(--card-bg, #fff); overflow: hidden;
+  &.open { box-shadow: 0 1px 4px rgba(15, 23, 42, .05); }
+}
+.week-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px; cursor: pointer; user-select: none;
+  background: color-mix(in srgb, var(--primary) 6%, white);
+  &.static { cursor: default; }
+  .week-arrow { display: inline-flex; font-size: 12px; color: var(--text-2); transition: transform .2s ease; }
+  .week-title { font-size: 13.5px; font-weight: 700; }
+  .week-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    .week-count { font-size: 12px; color: var(--text-2); } }
+  .week-avatars { margin-left: auto; display: flex;
+    img { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; object-fit: cover;
+      margin-left: -8px; &:first-child { margin-left: 0; } } }
+}
+.week-group:not(.open) .week-head .week-arrow { transform: rotate(-90deg); }
+.week-body { padding: 12px 14px 4px; margin: 0; }
 .tp-logs { margin-top: 18px; h4 { margin: 0 0 10px; } .tp-empty { color: #94a3b8; font-size: 13px; padding: 14px 0; } }
 .log-head {
   display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
