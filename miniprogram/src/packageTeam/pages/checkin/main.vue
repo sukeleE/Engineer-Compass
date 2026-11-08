@@ -127,7 +127,11 @@
       </view>
 
       <view class="section-title">当期优秀汇报</view>
-      <EmptyState v-if="!featuredList.length" icon="⭐" text="还没有精选汇报" />
+      <EmptyState
+        v-if="!featuredGroups.current.length"
+        icon="⭐"
+        :text="featuredList.length ? '本周暂无优秀汇报' : '还没有精选汇报'"
+      />
       <view v-for="r in featuredGroups.current" :key="r.id" class="card ft-card" @click="openLog(r.id)">
         <view class="ft-head">
           <text class="ft-name">{{ logAuthorName(r) }}</text>
@@ -326,7 +330,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import { api } from '../../../utils/api.js';
 import { confirm, toast } from '../../../utils/guard.js';
@@ -678,6 +682,12 @@ function isoWeekOf(dateStr) {
   const week = 1 + Math.round((d - firstThu) / (7 * 864e5));
   return { year: d.getUTCFullYear(), week, key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}` };
 }
+function currentIsoWeekKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return isoWeekOf(`${y}-${m}-${d}`).key;
+}
 function featuredWeekKey(r) {
   // 周打卡 period_key 为 YYYY-Www；日打卡为 YYYY-MM-DD；异常缺省时回退 create_time
   const pk = r.period_key || (r.create_time ? String(r.create_time).slice(0, 10) : '');
@@ -685,24 +695,17 @@ function featuredWeekKey(r) {
   return /W/.test(pk) ? pk : isoWeekOf(pk).key;
 }
 const featuredGroups = computed(() => {
-  if (!featuredList.value.length) return { currentKey: '', current: [], past: [] };
-  const map = new Map();
-  for (const r of featuredList.value) {
-    const key = featuredWeekKey(r);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(r);
-  }
-  const keys = [...map.keys()].filter((k) => k !== 'unknown').sort((a, b) => (a < b ? 1 : -1));
-  const currentKey = keys[0] || 'unknown';
-  // 无法判定周期的异常条目并入当期，保证不丢数据
-  const current = [...(map.get(currentKey) || []), ...(currentKey !== 'unknown' ? (map.get('unknown') || []) : [])];
+  const currentKey = currentIsoWeekKey();
+  if (!featuredList.value.length) return { currentKey, current: [], past: [] };
   return {
     currentKey,
-    current,
-    past: keys.slice(1).flatMap((k) => map.get(k)),
+    current: featuredList.value.filter((r) => featuredWeekKey(r) === currentKey),
+    // 只有真实当前自然周算当期；历史周和无法判定周期的数据全部收进往期，默认折叠
+    past: featuredList.value.filter((r) => featuredWeekKey(r) !== currentKey),
   };
 });
 const pastFtOpen = ref(false);
+watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; });
 
 onLoad((o) => {
   id.value = Number(o.id);

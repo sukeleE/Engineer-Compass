@@ -609,6 +609,12 @@ function isoWeekOf(dateStr) {
   const week = 1 + Math.round((d - firstThu) / (7 * 864e5));
   return { year: d.getUTCFullYear(), week, key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}` };
 }
+function currentIsoWeekKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return isoWeekOf(`${y}-${m}-${d}`).key;
+}
 function logWeekKey(l) {
   return /W/.test(l.period_key) ? l.period_key : isoWeekOf(l.period_key).key;
 }
@@ -680,24 +686,17 @@ function featuredWeekKey(f) {
   return /W/.test(pk) ? pk : isoWeekOf(pk).key;
 }
 const featuredGroups = computed(() => {
-  if (!featured.value.length) return { currentKey: '', current: [], past: [] };
-  const map = new Map();
-  for (const f of featured.value) {
-    const key = featuredWeekKey(f);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(f);
-  }
-  const keys = [...map.keys()].filter((k) => k !== 'unknown').sort((a, b) => (a < b ? 1 : -1));
-  const currentKey = keys[0] || 'unknown';
-  // 无法判定周期的异常条目并入当期，保证不丢数据
-  const current = [...(map.get(currentKey) || []), ...(currentKey !== 'unknown' ? (map.get('unknown') || []) : [])];
+  const currentKey = currentIsoWeekKey();
+  if (!featured.value.length) return { currentKey, current: [], past: [] };
   return {
     currentKey,
-    current,
-    past: keys.slice(1).flatMap((k) => map.get(k)),
+    current: featured.value.filter((f) => featuredWeekKey(f) === currentKey),
+    // 只有真实当前自然周算当期；历史周和无法判定周期的数据全部收进往期，默认折叠
+    past: featured.value.filter((f) => featuredWeekKey(f) !== currentKey),
   };
 });
 const pastFtOpen = ref(false);
+watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; });
 
 function canEditTask(t) {
   return t.assignee_id === props.me.user_id || props.perms.task;
@@ -1280,6 +1279,7 @@ reload().catch((e) => ElMessage.error(e.message));
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
         </div>
       </div>
+      <div v-else class="tp-empty">本周暂无优秀汇报</div>
       <template v-if="featuredGroups.past.length">
         <div class="ft-collapse-head" @click="pastFtOpen = !pastFtOpen">
           <span class="ft-arrow" :class="{ open: pastFtOpen }">▾</span>
