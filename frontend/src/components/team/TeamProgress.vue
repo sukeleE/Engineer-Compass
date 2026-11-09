@@ -33,27 +33,49 @@ const MAX_ATT_TOTAL = 25 * 1024 * 1024;
 const STATUS = { todo: { label: '待开始', tag: 'info' }, doing: { label: '进行中', tag: 'warning' }, done: { label: '已完成', tag: 'success' } };
 
 async function reload() {
-  tasks.value = (await api.teamDetail(props.teamId)).tasks;
-  logs.value = await api.teamLogs(props.teamId);
+  // 三个数据域独立加载、互不连坐：tasks/logs 失败也不阻断打卡区，失败仍向上抛错供调用方提示
+  const [detailR, logsR] = await Promise.allSettled([
+    api.teamDetail(props.teamId),
+    api.teamLogs(props.teamId),
+  ]);
+  if (detailR.status === 'fulfilled') tasks.value = detailR.value.tasks;
+  if (logsR.status === 'fulfilled') logs.value = logsR.value;
   await loadCheckin();
+  if (detailR.status === 'rejected') throw detailR.reason;
+  if (logsR.status === 'rejected') throw logsR.reason;
 }
 
 // ==================== 周期打卡 / 定时汇报 ====================
 const schedules = ref([]);
 const myDues = ref([]);
 const featured = ref([]);
-
-async function loadCheckin() {
-  try {
-    const [sc, mine, ft] = await Promise.all([
-      api.teamCheckinSchedules(props.teamId),
-      api.teamCheckinMine(props.teamId),
-      api.teamCheckinFeatured(props.teamId, ''),
-    ]);
-    schedules.value = sc.schedules || [];
-    myDues.value = mine.dues || [];
-    featured.value = ft.reports || [];
-  } catch (e) { /* 打卡为增量功能，加载失败不阻断任务看板与时间线 */ }
+// 打卡加载状态 loading/ok/error：加载失败不再伪装成「还没有打卡任务」，支持自动重试一次 + 手动重试
+const checkinStatus = ref('loading');
+async function loadCheckin({ autoRetry = true } = {}) {
+  checkinStatus.value = 'loading';
+  const [scR, mineR, ftR] = await Promise.allSettled([
+    api.teamCheckinSchedules(props.teamId),
+    api.teamCheckinMine(props.teamId),
+    api.teamCheckinFeatured(props.teamId, ''),
+  ]);
+  // 三路独立兜底：单个接口失败不连坐，成功的部分照常渲染（allSettled 不抛错，不阻断 reload）
+  if (scR.status === 'fulfilled') schedules.value = scR.value.schedules || [];
+  if (mineR.status === 'fulfilled') myDues.value = mineR.value.dues || [];
+  if (ftR.status === 'fulfilled') featured.value = ftR.value.reports || [];
+  // 核心打卡任务接口失败且本地无缓存时，延迟自动重试一次，弱网抖动可自愈
+  if (scR.status === 'rejected' && !schedules.value.length) {
+    if (autoRetry) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return loadCheckin({ autoRetry: false });
+    }
+    checkinStatus.value = 'error';
+    return;
+  }
+  checkinStatus.value = 'ok';
+}
+// 错误态手动重试
+async function retryCheckin() {
+  await loadCheckin({ autoRetry: true });
 }
 
 function schedFreqText(s) {
@@ -1236,7 +1258,12 @@ reload().catch((e) => ElMessage.error(e.message));
         <h4>🗓️ 打卡任务（{{ schedules.length }}）</h4>
         <el-button v-if="perms.task" size="small" type="primary" plain @click="openSchedCreate">＋ 新建打卡任务</el-button>
       </div>
-      <div v-if="!schedules.length" class="tp-empty">还没有打卡任务 — 有「任务管理」权限的成员可建每日/每周打卡或定时汇报</div>
+      <div v-if="checkinStatus === 'loading' && !schedules.length" class="tp-empty">打卡任务加载中…</div>
+      <div v-else-if="checkinStatus === 'error' && !schedules.length" class="tp-empty checkin-retry">
+        <span>打卡数据加载失败（网络波动或服务暂不可用），历史打卡不会丢失</span>
+        <el-button link type="primary" size="small" @click="retryCheckin">🔄 点击重试</el-button>
+      </div>
+      <div v-else-if="!schedules.length" class="tp-empty">还没有打卡任务 — 有「任务管理」权限的成员可建每日/每周打卡或定时汇报</div>
       <div v-for="s in schedules" :key="s.id" class="ci-card">
         <div class="ci-head">
           <b>{{ s.title }}</b>
@@ -1508,6 +1535,11 @@ reload().catch((e) => ElMessage.error(e.message));
   .tp-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; h4 { margin: 0; } }
 }
 .tp-empty { color: #94a3b8; font-size: 13px; padding: 12px 0; }
+.tp-empty.checkin-retry {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  color: #b45309;
+  .el-button { margin-left: 2px; }
+}
 .ci-card { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
 .ci-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   b { font-size: 13.5px; } .ci-freq { font-size: 12px; color: var(--text-2); }
