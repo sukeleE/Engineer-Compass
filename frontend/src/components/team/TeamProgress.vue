@@ -104,8 +104,44 @@ function resetSf() {
     allow_late: true, need_self_progress: false, need_self_rating: false, auto_feature: 0,
   });
 }
-function openSchedCreate() { resetSf(); schedEditing.value = null; schedDlg.value = true; }
+const schedTemplated = ref(false);
+// 取该团队最近创建的打卡任务作为新建模板（id 最大即最近一次，不受启用状态影响）
+function latestSchedule() {
+  if (!schedules.value.length) return null;
+  return [...schedules.value].sort((a, b) => b.id - a.id)[0];
+}
+// 沿用上次任务设置：规则开关/频率/时间全沿用，标题清空待填，日期按今天重新起算
+function applySfTemplate(s) {
+  Object.assign(sf, {
+    title: '',
+    kind: s.kind || 'recurring',
+    freq: s.freq || 'daily',
+    weekdays: [...(s.weekdays || [])],
+    due_time: s.due_time || '21:00',
+    start_date: todayStr(),
+    // 历史结束日已过期则不沿用，避免触发「结束不能早于开始」校验
+    end_date: s.end_date && s.end_date >= todayStr() ? s.end_date : '',
+    once_at: s.once_at ? `${todayStr()}T${String(s.once_at).slice(11, 16) || '21:00'}}` : '',
+    allow_late: !!s.allow_late,
+    need_self_progress: !!s.need_self_progress,
+    need_self_rating: !!s.need_self_rating,
+    auto_feature: s.auto_feature || 0,
+  });
+  // 新建任务每周只允许一个截止星期：模板是旧版多选时取第一个，空则兜底周日
+  if (sf.kind === 'recurring' && sf.freq === 'weekly') {
+    sf.weekdays = sf.weekdays.length ? [sf.weekdays[0]] : [7];
+  }
+}
+function openSchedCreate() {
+  resetSf();
+  schedEditing.value = null;
+  const t = latestSchedule();
+  if (t) { applySfTemplate(t); schedTemplated.value = true; }
+  else schedTemplated.value = false;
+  schedDlg.value = true;
+}
 function openSchedEdit(s) {
+  schedTemplated.value = false;
   schedEditing.value = s;
   Object.assign(sf, {
     title: s.title, kind: s.kind, freq: s.freq, weekdays: [...(s.weekdays || [])], due_time: s.due_time,
@@ -1009,6 +1045,7 @@ reload().catch((e) => ElMessage.error(e.message));
     <el-dialog v-model="schedDlg" :title="schedEditing ? '设置打卡任务' : '新建打卡任务'" width="560px" top="6vh"
       append-to-body :close-on-click-modal="false">
       <el-form label-position="top" class="ci-form">
+        <div v-if="schedTemplated" class="ci-hint" style="margin:0 0 12px">已预填该团队最近一次打卡任务的设置，修改任务名称后即可保存</div>
         <el-form-item label="任务名称" required>
           <el-input v-model="sf.title" maxlength="40" show-word-limit placeholder="如：每日训练打卡 / 周报" />
         </el-form-item>

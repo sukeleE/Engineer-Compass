@@ -214,6 +214,7 @@
     <view v-if="schedOpen" class="modal-mask" @click="schedOpen = false">
       <view class="modal modal-lg" @click.stop>
         <view class="modal-title">{{ editing ? '编辑打卡任务' : '新建打卡任务' }}</view>
+        <view v-if="schedTemplated" class="form-tip">已预填最近一次打卡任务的设置，修改标题后即可保存</view>
         <scroll-view scroll-y class="form-scroll">
           <view class="form-label">任务标题（1–40 字）</view>
           <input v-model="sf.title" class="modal-input" placeholder="如：每日学习进展汇报" maxlength="40" />
@@ -519,8 +520,45 @@ function resetSf() {
   });
   legacyMulti.value = false;
 }
-function openSchedCreate() { resetSf(); editing.value = null; schedOpen.value = true; }
+const schedTemplated = ref(false);
+// 取该团队最近创建的打卡任务作为新建模板（id 最大即最近一次，不受启用状态影响）
+function latestSchedule() {
+  if (!schedules.value.length) return null;
+  return [...schedules.value].sort((a, b) => b.id - a.id)[0];
+}
+// 沿用上次任务设置：规则/频率/时间全沿用，标题清空待填，日期按今天重新起算
+function applySfTemplate(s) {
+  Object.assign(sf, {
+    title: '',
+    kind: s.kind || 'recurring',
+    freq: s.freq || 'daily',
+    weekdays: [...(s.weekdays || [])],
+    due_time: s.due_time || '21:00',
+    start_date: todayStr(),
+    // 历史结束日已过期则不沿用，避免「结束早于开始」校验失败
+    end_date: s.end_date && s.end_date >= todayStr() ? s.end_date : '',
+    once_date: todayStr(),
+    once_time: (s.once_at || '').slice(11, 16) || '21:00',
+    allow_late: s.allow_late ? 1 : 0,
+    need_self_progress: s.need_self_progress ? 1 : 0,
+    need_self_rating: s.need_self_rating ? 1 : 0,
+    auto_feature: s.auto_feature || 0,
+  });
+  legacyMulti.value = false; // 新建统一单选截止星期
+  if (sf.kind === 'recurring' && sf.freq === 'weekly') {
+    sf.weekdays = sf.weekdays.length ? [sf.weekdays[0]] : [7];
+  }
+}
+function openSchedCreate() {
+  resetSf();
+  editing.value = null;
+  const t = latestSchedule();
+  if (t) { applySfTemplate(t); schedTemplated.value = true; }
+  else schedTemplated.value = false;
+  schedOpen.value = true;
+}
 function openSchedEdit(s) {
+  schedTemplated.value = false;
   editing.value = s;
   legacyMulti.value = (s.weekdays || []).length > 1;
   Object.assign(sf, {
@@ -807,6 +845,7 @@ onShow(() => {
 .ft-past-period:last-child { margin-top: 0; }
 .ft-period { font-size: 25rpx; font-weight: 700; color: #475569; margin: 18rpx 0 10rpx; padding-left: 14rpx; border-left: 5rpx solid #2563eb; }
 .ft-fallback-tip { font-size: 23rpx; color: #b45309; background: #fef3c7; border: 1rpx solid #fde68a; border-radius: 12rpx; padding: 12rpx 18rpx; margin: 12rpx 0; }
+.form-tip { font-size: 23rpx; color: #1d4ed8; background: #eff6ff; border: 1rpx solid #dbeafe; border-radius: 12rpx; padding: 12rpx 18rpx; margin: 12rpx 0; }
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { width: 660rpx; background: #fff; border-radius: 24rpx; padding: 32rpx; }
 .modal-lg { max-height: 82vh; display: flex; flex-direction: column; }
