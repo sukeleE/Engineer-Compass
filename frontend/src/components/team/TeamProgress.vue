@@ -700,23 +700,40 @@ function toggleWeek(key) {
 }
 function weekOpen(g) { return !g.collapsible || expandedWeeks.value.has(g.key); }
 
-// ==================== 优秀汇报墙：当期（最新一周）常显，往期合并折叠 ====================
+// ==================== 优秀汇报墙：按「期」（ISO 周）分组；当期常显，本期空缺时回退展示最新一期往期 ====================
 function featuredWeekKey(f) {
   // 周打卡 period_key 为 YYYY-Www；日打卡为 YYYY-MM-DD；异常缺省时回退 create_time
   const pk = f.period_key || (f.create_time ? String(f.create_time).slice(0, 10) : '');
   if (!pk) return 'unknown';
   return /W/.test(pk) ? pk : isoWeekOf(pk).key;
 }
+function featuredPeriodLabel(key) { return key === 'unknown' ? '未分期' : weekRangeLabel(key); }
 const featuredGroups = computed(() => {
   const currentKey = currentIsoWeekKey();
-  if (!featured.value.length) return { currentKey, current: [], past: [] };
-  return {
-    currentKey,
-    current: featured.value.filter((f) => featuredWeekKey(f) === currentKey),
-    // 只有真实当前自然周算当期；历史周和无法判定周期的数据全部收进往期，默认折叠
-    past: featured.value.filter((f) => featuredWeekKey(f) !== currentKey),
-  };
+  if (!featured.value.length) return { currentKey, head: null, pastPeriods: [] };
+  // 按期打包，期键倒序（最新在前）；无法判定周期的 unknown 沉底
+  const map = new Map();
+  for (const f of featured.value) {
+    const key = featuredWeekKey(f);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(f);
+  }
+  const keys = [...map.keys()].sort((a, b) => {
+    if (a === 'unknown') return 1;
+    if (b === 'unknown') return -1;
+    return a < b ? 1 : -1;
+  });
+  const periods = keys.map((key) => ({ key, label: featuredPeriodLabel(key), items: map.get(key) }));
+  const currentPeriod = periods.find((p) => p.key === currentKey) || null;
+  if (currentPeriod) {
+    return { currentKey, head: { ...currentPeriod, isFallback: false }, pastPeriods: periods.filter((p) => p.key !== currentKey) };
+  }
+  // 本期还没有优秀汇报：常显最新一期往期，其余期收进折叠区（避免与常显重复）
+  const [latest, ...rest] = periods;
+  return { currentKey, head: latest ? { ...latest, isFallback: true } : null, pastPeriods: rest };
 });
+// 折叠区往期总份数
+const featuredPastCount = computed(() => featuredGroups.value.pastPeriods.reduce((n, p) => n + p.items.length, 0));
 const pastFtOpen = ref(false);
 watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; });
 
@@ -1286,10 +1303,17 @@ reload().catch((e) => ElMessage.error(e.message));
     <!-- ============ 优秀汇报墙（当期常显 / 往期折叠） ============ -->
     <div class="ci-sec" v-if="featured.length">
       <div class="tp-tools">
-        <h4>🏅 当期优秀汇报<template v-if="featuredGroups.currentKey !== 'unknown'"> · {{ weekRangeLabel(featuredGroups.currentKey) }}</template>（{{ featuredGroups.current.length }}）</h4>
+        <h4>
+          <template v-if="featuredGroups.head && !featuredGroups.head.isFallback">
+            🏅 当期优秀汇报<template v-if="featuredGroups.currentKey !== 'unknown'"> · {{ weekRangeLabel(featuredGroups.currentKey) }}</template>（{{ featuredGroups.head.items.length }}）
+          </template>
+          <template v-else-if="featuredGroups.head">🏅 最新优秀汇报 · {{ featuredGroups.head.label }}（{{ featuredGroups.head.items.length }}）</template>
+        </h4>
       </div>
-      <div class="ft-grid" v-if="featuredGroups.current.length">
-        <div v-for="f in featuredGroups.current" :key="f.id" class="ft-card">
+      <!-- 本期暂无优秀：回退常显最新一期往期，并明确标注来源期，避免误认为本期 -->
+      <div v-if="featuredGroups.head?.isFallback" class="ft-fallback-tip">本期暂无优秀汇报，先展示最近一期（{{ featuredGroups.head.label }}）</div>
+      <div class="ft-grid" v-if="featuredGroups.head">
+        <div v-for="f in featuredGroups.head.items" :key="f.id" class="ft-card">
           <div class="ft-head">
             <span class="lb-avatar" v-if="f.avatar"><img :src="f.avatar" alt="" /></span>
             <span class="lb-avatar no-img" v-else>{{ (memberName(f) || '?').slice(0, 1) }}</span>
@@ -1306,15 +1330,18 @@ reload().catch((e) => ElMessage.error(e.message));
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
         </div>
       </div>
-      <div v-else class="tp-empty">本周暂无优秀汇报</div>
-      <template v-if="featuredGroups.past.length">
+      <div v-else class="tp-empty">暂无优秀汇报</div>
+      <template v-if="featuredGroups.pastPeriods.length">
         <div class="ft-collapse-head" @click="pastFtOpen = !pastFtOpen">
           <span class="ft-arrow" :class="{ open: pastFtOpen }">▾</span>
-          <b>📚 往期优秀汇报（{{ featuredGroups.past.length }}）</b>
+          <b>📚 往期优秀汇报（{{ featuredGroups.pastPeriods.length }} 期 · {{ featuredPastCount }} 份）</b>
           <span class="ft-collapse-hint">{{ pastFtOpen ? '收起' : '展开' }}</span>
         </div>
-        <div class="ft-grid ft-past" v-if="pastFtOpen">
-        <div v-for="f in featuredGroups.past" :key="f.id" class="ft-card">
+        <div class="ft-past" v-if="pastFtOpen">
+          <div v-for="p in featuredGroups.pastPeriods" :key="p.key" class="ft-past-period">
+            <div class="ft-period">📅 {{ p.label }}<span class="ft-period-count">（{{ p.items.length }} 份）</span></div>
+            <div class="ft-grid">
+              <div v-for="f in p.items" :key="f.id" class="ft-card">
           <div class="ft-head">
             <span class="lb-avatar" v-if="f.avatar"><img :src="f.avatar" alt="" /></span>
             <span class="lb-avatar no-img" v-else>{{ (memberName(f) || '?').slice(0, 1) }}</span>
@@ -1329,7 +1356,9 @@ reload().catch((e) => ElMessage.error(e.message));
           <div v-if="f.review" class="ft-review">组长评语：{{ f.review }}</div>
           <el-button v-if="(f.content || '').replace(/<[^>]*>/g, '').length > 120" link size="small"
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
-        </div>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
     </div>
@@ -1603,6 +1632,21 @@ reload().catch((e) => ElMessage.error(e.message));
   .ft-collapse-hint { margin-left: auto; font-size: 12px; color: var(--text-2); }
 }
 .ft-past { margin-top: 12px; }
+.ft-past-period { margin-bottom: 14px; }
+.ft-past-period:last-child { margin-bottom: 0; }
+// 往期分期小标题（第几期/周范围）
+.ft-period {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 13px; font-weight: 700; color: var(--text-2);
+  margin: 12px 0 8px; padding-left: 9px; border-left: 3px solid var(--primary);
+}
+.ft-period-count { font-weight: 400; color: #94a3b8; font-size: 12px; }
+// 本期空缺回退提示
+.ft-fallback-tip {
+  font-size: 12.5px; color: #b45309; background: #fef3c7;
+  border: 1px solid #fde68a; border-radius: 8px; padding: 7px 12px; margin-bottom: 10px;
+}
+html.ghost-mode .ft-fallback-tip { background: #422006; color: #fcd34d; border-color: #78350f; }
 // 优秀墙
 .ft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .ft-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--card-bg);

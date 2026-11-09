@@ -126,34 +126,44 @@
         </view>
       </view>
 
-      <view class="section-title">当期优秀汇报</view>
-      <EmptyState
-        v-if="!featuredGroups.current.length"
-        icon="⭐"
-        :text="featuredList.length ? '本周暂无优秀汇报' : '还没有精选汇报'"
-      />
-      <view v-for="r in featuredGroups.current" :key="r.id" class="card ft-card" @click="openLog(r.id)">
-        <view class="ft-head">
-          <text class="ft-name">{{ logAuthorName(r) }}</text>
-          <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
-        </view>
-        <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
-        <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
+      <view class="section-title">
+        <text v-if="featuredGroups.head && !featuredGroups.head.isFallback">当期优秀汇报<text v-if="featuredGroups.currentKey !== 'unknown'"> · {{ weekRangeLabel(featuredGroups.currentKey) }}</text>（{{ featuredGroups.head.items.length }}）</text>
+        <text v-else-if="featuredGroups.head">最新优秀汇报 · {{ featuredGroups.head.label }}（{{ featuredGroups.head.items.length }}）</text>
+        <text v-else>优秀汇报</text>
       </view>
-      <template v-if="featuredGroups.past.length">
+      <EmptyState
+        v-if="!featuredGroups.head"
+        icon="⭐"
+        text="还没有精选汇报"
+      />
+      <view v-if="featuredGroups.head && featuredGroups.head.isFallback" class="ft-fallback-tip">本期暂无优秀汇报，先展示最近一期（{{ featuredGroups.head.label }}）</view>
+      <view v-if="featuredGroups.head">
+        <view v-for="r in featuredGroups.head.items" :key="r.id" class="card ft-card" @click="openLog(r.id)">
+          <view class="ft-head">
+            <text class="ft-name">{{ logAuthorName(r) }}</text>
+            <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
+          </view>
+          <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
+          <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
+        </view>
+      </view>
+      <template v-if="featuredGroups.pastPeriods.length">
         <view class="ft-past-head" @click="pastFtOpen = !pastFtOpen">
           <text class="ft-arrow" :class="{ open: pastFtOpen }">▸</text>
-          <text class="ft-past-title">往期优秀汇报（{{ featuredGroups.past.length }}）</text>
+          <text class="ft-past-title">往期优秀汇报（{{ featuredGroups.pastPeriods.length }} 期 · {{ featuredPastCount }} 份）</text>
           <text class="ft-past-hint">{{ pastFtOpen ? '收起' : '展开' }}</text>
         </view>
         <view v-if="pastFtOpen">
-          <view v-for="r in featuredGroups.past" :key="r.id" class="card ft-card" @click="openLog(r.id)">
-        <view class="ft-head">
-          <text class="ft-name">{{ logAuthorName(r) }}</text>
-          <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
-        </view>
-        <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
-        <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
+          <view v-for="pp in featuredGroups.pastPeriods" :key="pp.key" class="ft-past-period">
+            <view class="ft-period">📅 {{ pp.label }}（{{ pp.items.length }} 份）</view>
+            <view v-for="r in pp.items" :key="r.id" class="card ft-card" @click="openLog(r.id)">
+          <view class="ft-head">
+            <text class="ft-name">{{ logAuthorName(r) }}</text>
+            <text class="tag tag-amber">精选{{ r.score ? ' · ' + r.score + '分' : '' }}</text>
+          </view>
+          <view class="ft-content ellipsis-2">{{ stripHtml(r.content) || '（附图汇报）' }}</view>
+          <view class="ft-meta">{{ r.schedule_title }} · {{ r.create_time }}</view>
+            </view>
           </view>
         </view>
       </template>
@@ -694,16 +704,44 @@ function featuredWeekKey(r) {
   if (!pk) return 'unknown';
   return /W/.test(pk) ? pk : isoWeekOf(pk).key;
 }
+function weekMd(d) { return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日`; }
+// ISO 周键 → 「第45周 · 11月2日–11月8日」标签（周一~周日）
+function weekRangeLabel(key) {
+  const [y, w] = key.split('-W').map(Number);
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const jan4Dow = (jan4.getUTCDay() + 6) % 7;
+  const mon = new Date(jan4);
+  mon.setUTCDate(jan4.getUTCDate() - jan4Dow + (w - 1) * 7);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  const endMd = sun.getUTCFullYear() === y ? weekMd(sun) : `${sun.getUTCFullYear()}年${weekMd(sun)}`;
+  return `第${w}周 · ${weekMd(mon)}–${endMd}`;
+}
+function featuredPeriodLabel(key) { return key === 'unknown' ? '未分期' : weekRangeLabel(key); }
+// 优秀墙：按「期」（ISO 周）分组；当期常显，本期空缺时回退展示最新一期往期
 const featuredGroups = computed(() => {
   const currentKey = currentIsoWeekKey();
-  if (!featuredList.value.length) return { currentKey, current: [], past: [] };
-  return {
-    currentKey,
-    current: featuredList.value.filter((r) => featuredWeekKey(r) === currentKey),
-    // 只有真实当前自然周算当期；历史周和无法判定周期的数据全部收进往期，默认折叠
-    past: featuredList.value.filter((r) => featuredWeekKey(r) !== currentKey),
-  };
+  if (!featuredList.value.length) return { currentKey, head: null, pastPeriods: [] };
+  const map = new Map();
+  for (const r of featuredList.value) {
+    const key = featuredWeekKey(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  const keys = [...map.keys()].sort((a, b) => {
+    if (a === 'unknown') return 1;
+    if (b === 'unknown') return -1;
+    return a < b ? 1 : -1;
+  });
+  const periods = keys.map((key) => ({ key, label: featuredPeriodLabel(key), items: map.get(key) }));
+  const currentPeriod = periods.find((pp) => pp.key === currentKey) || null;
+  if (currentPeriod) {
+    return { currentKey, head: { ...currentPeriod, isFallback: false }, pastPeriods: periods.filter((pp) => pp.key !== currentKey) };
+  }
+  const [latest, ...rest] = periods;
+  return { currentKey, head: latest ? { ...latest, isFallback: true } : null, pastPeriods: rest };
 });
+const featuredPastCount = computed(() => featuredGroups.value.pastPeriods.reduce((n, pp) => n + pp.items.length, 0));
 const pastFtOpen = ref(false);
 watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; });
 
@@ -765,6 +803,10 @@ onShow(() => {
 .ft-arrow.open { transform: rotate(90deg); }
 .ft-past-title { font-size: 27rpx; font-weight: 700; color: #1e293b; }
 .ft-past-hint { margin-left: auto; font-size: 23rpx; color: #64748b; }
+.ft-past-period { margin-top: 18rpx; }
+.ft-past-period:last-child { margin-top: 0; }
+.ft-period { font-size: 25rpx; font-weight: 700; color: #475569; margin: 18rpx 0 10rpx; padding-left: 14rpx; border-left: 5rpx solid #2563eb; }
+.ft-fallback-tip { font-size: 23rpx; color: #b45309; background: #fef3c7; border: 1rpx solid #fde68a; border-radius: 12rpx; padding: 12rpx 18rpx; margin: 12rpx 0; }
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { width: 660rpx; background: #fff; border-radius: 24rpx; padding: 32rpx; }
 .modal-lg { max-height: 82vh; display: flex; flex-direction: column; }
