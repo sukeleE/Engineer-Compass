@@ -474,6 +474,7 @@ CREATE TABLE IF NOT EXISTS announcement (
   title       TEXT NOT NULL,
   content     TEXT DEFAULT '',
   pinned      INTEGER DEFAULT 0,                -- 置顶优先展示
+  popup       INTEGER NOT NULL DEFAULT 0,    -- 弹窗强提醒：1=全站进入时模态弹窗（按公告id记忆确认，更新/维护通告用）
   admin_id    INTEGER,                          -- 发布管理员
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );

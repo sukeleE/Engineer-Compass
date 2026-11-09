@@ -143,9 +143,10 @@ r.post('/announcements', ap('announce'), (req, res) => {
   if (!title || title.length > 60) return res.status(400).json({ error: '公告标题必填（≤60 字）' });
   if (!content) return res.status(400).json({ error: '公告内容必填' });
   const pinned = req.body?.pinned ? 1 : 0;
-  const info = db.prepare('INSERT INTO announcement (title, content, pinned, admin_id) VALUES (?,?,?,?)')
-    .run(title, content, pinned, req.user.id);
-  logAudit(req, 'announce-create', title, { id: Number(info.lastInsertRowid), pinned });
+  const popup = req.body?.popup ? 1 : 0;
+  const info = db.prepare('INSERT INTO announcement (title, content, pinned, popup, admin_id) VALUES (?,?,?,?,?)')
+    .run(title, content, pinned, popup, req.user.id);
+  logAudit(req, 'announce-create', title, { id: Number(info.lastInsertRowid), pinned, popup });
   res.status(201).json({ id: Number(info.lastInsertRowid), message: '公告已发布' });
 });
 
@@ -156,10 +157,11 @@ r.put('/announcements/:id', ap('announce'), (req, res) => {
   const title = req.body?.title !== undefined ? String(req.body.title).trim() : a.title;
   const content = req.body?.content !== undefined ? String(req.body.content).trim() : a.content;
   const pinned = req.body?.pinned !== undefined ? (req.body.pinned ? 1 : 0) : a.pinned;
+  const popup = req.body?.popup !== undefined ? (req.body.popup ? 1 : 0) : a.popup;
   if (!title) return res.status(400).json({ error: '公告标题不能为空' });
-  db.prepare('UPDATE announcement SET title = ?, content = ?, pinned = ? WHERE id = ?')
-    .run(title, content, pinned, id);
-  logAudit(req, 'announce-update', title, { id, pinned });
+  db.prepare('UPDATE announcement SET title = ?, content = ?, pinned = ?, popup = ? WHERE id = ?')
+    .run(title, content, pinned, popup, id);
+  logAudit(req, 'announce-update', title, { id, pinned, popup });
   res.json({ message: '公告已更新' });
 });
 

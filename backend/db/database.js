@@ -75,6 +75,7 @@ migCol('booking', 'item_thumb', "ALTER TABLE booking ADD COLUMN item_thumb TEXT 
 migCol('booking', 'item_kind', "ALTER TABLE booking ADD COLUMN item_kind TEXT DEFAULT ''");   // 借用登记类型：device / room
 migCol('booking_resource', 'is_carrier', "ALTER TABLE booking_resource ADD COLUMN is_carrier INTEGER NOT NULL DEFAULT 0"); // 借用登记占位资源
 db.exec("UPDATE booking_resource SET is_carrier = 1 WHERE name = '借用登记' AND is_carrier = 0"); // 老库按名占位资源一次性回填
+migCol('announcement', 'popup', 'ALTER TABLE announcement ADD COLUMN popup INTEGER NOT NULL DEFAULT 0'); // 公告弹窗强提醒（更新/维护通告）
 
 // ---- user_version 闸门：只对「升级前的老库」执行一次的存量数据回填 ----
 // 新库（schema 直接建成新结构、零行）同样过一遍但 0 行受影响，随即落版本号。

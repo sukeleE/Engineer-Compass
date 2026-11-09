@@ -321,12 +321,13 @@ async function loadAnns() {
 }
 
 const annDlg = ref(false);
-const annForm = reactive({ id: null, title: '', content: '', pinned: false });
+const annForm = reactive({ id: null, title: '', content: '', pinned: false, popup: false });
 function openAnnDlg(a) {
   annForm.id = a?.id ?? null;
   annForm.title = a?.title || '';
   annForm.content = a?.content || '';
   annForm.pinned = !!a?.pinned;
+  annForm.popup = !!a?.popup;
   annDlg.value = true;
 }
 async function saveAnn() {
@@ -334,11 +335,11 @@ async function saveAnn() {
   if (!annForm.content.trim()) return ElMessage.warning('内容不能为空');
   try {
     if (annForm.id) {
-      await api.adminAnnouncementUpdate(annForm.id, { title: annForm.title, content: annForm.content, pinned: annForm.pinned });
+      await api.adminAnnouncementUpdate(annForm.id, { title: annForm.title, content: annForm.content, pinned: annForm.pinned, popup: annForm.popup });
       ElMessage.success('公告已更新');
     } else {
-      await api.adminAnnouncementCreate({ title: annForm.title, content: annForm.content, pinned: annForm.pinned });
-      ElMessage.success('公告已发布，全站顶部横幅将展示');
+      await api.adminAnnouncementCreate({ title: annForm.title, content: annForm.content, pinned: annForm.pinned, popup: annForm.popup });
+      ElMessage.success(annForm.popup ? '公告已发布，全站将弹窗强提醒' : '公告已发布，全站顶部横幅将展示');
     }
     annDlg.value = false;
     loadAnns();
@@ -868,13 +869,19 @@ onMounted(() => {
       <el-tab-pane v-if="canAdmin('announce')" label="📢 公告管理" name="anns">
         <div class="toolbar">
           <el-button type="primary" size="small" @click="openAnnDlg(null)">＋ 发布公告</el-button>
-          <span class="tip">置顶公告显示在全站顶部横幅</span>
+          <span class="tip">置顶显示在全站顶部横幅；开启弹窗后用户进入站点会模态强提醒（同一公告确认后不再弹出）</span>
         </div>
         <el-table :data="anns" v-loading="annLoading" stripe>
           <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
           <el-table-column label="置顶" width="80">
             <template #default="{ row }">
               <el-tag v-if="row.pinned" size="small" type="danger">📌 置顶</el-tag>
+              <span v-else class="cell-sub">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="弹窗" width="80">
+            <template #default="{ row }">
+              <el-tag v-if="row.popup" size="small" type="warning">🔔 弹窗</el-tag>
               <span v-else class="cell-sub">—</span>
             </template>
           </el-table-column>
@@ -1105,6 +1112,9 @@ onMounted(() => {
         <el-form-item label="标题"><el-input v-model="annForm.title" maxlength="60" show-word-limit placeholder="公告标题（≤60 字）" /></el-form-item>
         <el-form-item label="内容"><el-input v-model="annForm.content" type="textarea" :rows="6" maxlength="2000" show-word-limit placeholder="公告正文（显示在全站顶部）" /></el-form-item>
         <el-form-item label="置顶"><el-switch v-model="annForm.pinned" active-text="顶部横幅优先展示" /></el-form-item>
+        <el-form-item label="弹窗提醒">
+          <el-switch v-model="annForm.popup" active-text="全站弹窗强提醒（更新/维护通告用，用户确认一次后不再弹出）" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="annDlg = false">取消</el-button>

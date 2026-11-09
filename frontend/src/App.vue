@@ -44,8 +44,23 @@ function onRealNameDone() {
 // 全局公告横幅：最新置顶公告（公开接口，无需登录；关闭仅本次会话记忆）
 const announce = ref(null);
 const announceHidden = ref(false);
+// 更新/维护通告弹窗：popup=1 的公告进入站点即模态强提醒，按公告 id 记忆，同一条只弹一次
+const announcePopup = ref(false);
+const popupAckKey = (id) => `ec_announce_popup_ack_${id}`;
+function popupAcked(id) {
+  try { return !!localStorage.getItem(popupAckKey(id)); } catch { return false; } // 隐私模式等存储不可用：按未确认处理
+}
+function ackAnnouncePopup() {
+  try { if (announce.value?.id) localStorage.setItem(popupAckKey(announce.value.id), "1"); } catch { /* 存储不可用也要保证弹窗能关闭 */ }
+  announcePopup.value = false;
+}
 onMounted(async () => {
-  try { announce.value = await api.announcementLatest(); } catch { /* 横幅拉取失败不影响页面 */ }
+  try {
+    announce.value = await api.announcementLatest();
+    if (announce.value?.popup && !popupAcked(announce.value.id)) {
+      announcePopup.value = true;
+    }
+  } catch { /* 横幅/弹窗拉取失败不影响页面 */ }
 });
 
 // 初始密码个人提醒：password_set===0 时显示（软提示口径，不阻断使用）；✕ 仅本会话关闭
@@ -77,6 +92,26 @@ const themeDlg = ref(false);
       <span class="ann-content">{{ announce.content }}</span>
       <button class="ann-close" aria-label="关闭公告" @click="announceHidden = true">✕</button>
     </div>
+    <!-- 更新/维护通告弹窗：后台发布 popup=1 公告后全站模态强提醒（确认后按公告 id 记忆，同一条不再弹） -->
+    <el-dialog
+      v-model="announcePopup"
+      class="announce-popup-dlg"
+      width="440px"
+      align-center
+      :close-on-click-modal="false"
+      @close="ackAnnouncePopup"
+    >
+      <template #header>
+        <div class="ap-head">
+          <span class="ap-icon">🛠️</span>
+          <span class="ap-title">{{ announce?.title }}</span>
+        </div>
+      </template>
+      <div class="ap-body">{{ announce?.content }}</div>
+      <template #footer>
+        <el-button type="warning" class="ap-btn" @click="ackAnnouncePopup">我知道了</el-button>
+      </template>
+    </el-dialog>
     <!-- 初始密码个人提醒（仅本账号可见；改密后 password_set 翻 1 自动消失） -->
     <div v-if="auth.token && auth.user?.password_set === false && !pwHidden" class="pw-bar">
       <span class="ann-icon">⚠️</span>
@@ -346,4 +381,28 @@ html.ghost-mode .pw-bar {
 .editor-dlg .el-dialog__body > .el-select { flex-shrink: 0; }
 .editor-dlg .rich-editor { flex: 1; min-height: 0; }
 .editor-dlg .el-dialog__footer { flex-shrink: 0; }
+/* 更新/维护通告弹窗（el-dialog teleport 到 body，必须写在非 scoped 块） */
+.announce-popup-dlg { border-radius: 14px; overflow: hidden; max-width: 92vw; }
+.announce-popup-dlg .el-dialog__header {
+  margin: 0; padding: 16px 20px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+.announce-popup-dlg .el-dialog__headerbtn { top: 16px; right: 18px; z-index: 2; }
+.announce-popup-dlg .el-dialog__headerbtn .el-dialog__close { color: #fff; font-size: 18px; }
+.announce-popup-dlg .ap-head { display: flex; align-items: center; gap: 8px; padding-right: 24px; }
+.announce-popup-dlg .ap-icon { font-size: 20px; }
+.announce-popup-dlg .ap-title { color: #fff; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.announce-popup-dlg .el-dialog__body { padding: 18px 20px 4px; }
+.announce-popup-dlg .ap-body {
+  font-size: 14.5px; line-height: 1.75; color: #334155;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 50vh; overflow-y: auto;
+}
+.announce-popup-dlg .el-dialog__footer { padding: 14px 20px 20px; text-align: center; }
+.announce-popup-dlg .ap-btn { width: 100%; }
+@media (max-width: 768px) {
+  .announce-popup-dlg { width: 92vw !important; }
+  .announce-popup-dlg .ap-body { font-size: 14px; }
+}
+html.ghost-mode .announce-popup-dlg .ap-body { color: #e2e8f0; }
 </style>
