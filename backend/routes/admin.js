@@ -412,8 +412,8 @@ r.delete('/feedback/:id', ap('feedback:delete'), (req, res) => {
 
 export default r;
 
-// ---- 前台公告（public，挂 /api/announcements）：App.vue 全局顶部横幅用 ----
+// ---- 前台公告（public，挂 /api/announcements）：仅下发置顶/弹窗公告；普通历史公告不在前台横幅/弹窗展示，后台仍可管理 ----
 export const publicAnnounce = Router();
 publicAnnounce.get('/latest', (req, res) => {
-  res.json(db.prepare('SELECT * FROM announcement ORDER BY pinned DESC, id DESC LIMIT 1').get() || null);
+  res.json(db.prepare('SELECT * FROM announcement WHERE pinned = 1 OR popup = 1 ORDER BY pinned DESC, id DESC LIMIT 1').get() || null);
 });
