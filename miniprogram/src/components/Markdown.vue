@@ -1,10 +1,22 @@
 <template>
-  <rich-text class="md" :nodes="html"></rich-text>
+  <view class="md-wrap">
+    <view class="md-clamp" :style="clamp && long && !expanded ? 'max-height:' + clampHeight : ''">
+      <rich-text class="md" :nodes="html"></rich-text>
+    </view>
+    <view v-if="clamp && long" class="md-toggle" @click="expanded = !expanded">{{ expanded ? '收起' : '展开全文' }}</view>
+  </view>
 </template>
 
 <script setup>
-import { computed } from 'vue';
-const props = defineProps({ content: { type: String, default: '' } });
+import { computed, ref } from 'vue';
+const props = defineProps({
+  content: { type: String, default: '' },
+  // clamp=true 时超长内容默认只显示前几行，提供「展开全文/收起」
+  clamp: { type: Boolean, default: false },
+});
+const expanded = ref(false);
+const clampHeight = '200rpx'; // 约 4 行（27rpx 字号 / 1.7 行高）
+const long = computed(() => String(props.content || '').replace(/\s+/g, '').length > 120);
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -46,5 +58,8 @@ const html = computed(() => mdToHtml(props.content));
 </script>
 
 <style lang="scss" scoped>
+.md-wrap { width: 100%; }
+.md-clamp { overflow: hidden; }
 .md { font-size: 27rpx; color: #334155; word-break: break-word; }
+.md-toggle { color: #2563eb; font-size: 24rpx; margin-top: 8rpx; }
 </style>

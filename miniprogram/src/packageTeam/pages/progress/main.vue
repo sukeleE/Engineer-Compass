@@ -36,7 +36,7 @@
                 <text v-if="l.self_rating" class="tag tag-blue">自评 {{ l.self_rating }}★</text>
               </view>
             </view>
-            <Markdown v-if="stripHtml(l.content)" :content="stripHtml(l.content)" />
+            <Markdown v-if="stripHtml(l.content)" :content="stripHtml(l.content)" clamp />
             <AttachmentList v-if="l.attachments && l.attachments.length" :attachments="l.attachments" />
             <view v-if="l.review" class="review">组长点评：{{ l.review }}<text v-if="l.score">（{{ l.score }} 分）</text></view>
 

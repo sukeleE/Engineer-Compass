@@ -655,6 +655,18 @@ function toggleFt(id) {
   expandedFt.value = s;
 }
 
+// 时间线汇报过长折叠：默认只显示前几行，纯文本超过阈值才提供「展开全文/收起」
+const LOG_CLAMP_TEXT_LEN = 120;
+function logLong(l) {
+  return htmlToText(l.content || '').length > LOG_CLAMP_TEXT_LEN;
+}
+const expandedLogs = ref(new Set());
+function toggleLog(id) {
+  const s = new Set(expandedLogs.value);
+  s.has(id) ? s.delete(id) : s.add(id);
+  expandedLogs.value = s;
+}
+
 // ==================== 汇报按周折叠（历史周期打包，默认只展开最新一周；自由汇报置顶常显） ====================
 // period_key：周打卡为 YYYY-Www（ISO 周键），日打卡/一次性为 YYYY-MM-DD，统一换算成 ISO 周
 function isoWeekOf(dateStr) {
@@ -1454,7 +1466,8 @@ reload().catch((e) => ElMessage.error(e.message));
                   :show-text="false" style="width:120px" />
                 <span v-if="l.self_rating != null">自评效果 <b>{{ '★'.repeat(l.self_rating) }}</b></span>
               </div>
-              <div v-if="l.content" class="log-rich" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
+              <div v-if="l.content" class="log-rich" :class="{ 'log-clamp': logLong(l) && !expandedLogs.has(l.id) }" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
+              <el-button v-if="logLong(l)" link size="small" class="log-toggle" @click="toggleLog(l.id)">{{ expandedLogs.has(l.id) ? '收起' : '展开全文' }}</el-button>
               <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
               <!-- 组长评价区：评分 / 评语 / 优秀（task 权限者可操作） -->
               <div v-if="l.schedule_id" class="ci-review">
@@ -1580,7 +1593,9 @@ reload().catch((e) => ElMessage.error(e.message));
 .log-rich {
   :deep(video) { max-width: 100%; max-height: 320px; border-radius: 8px; }
   :deep(iframe) { width: 100%; max-width: 640px; height: 360px; border-radius: 8px; border: none; }
+  &.log-clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 }
+.log-toggle { margin-top: 2px; padding: 0; height: auto; }
 
 // ==================== 周期打卡 ====================
 .ci-due { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 8px; }
