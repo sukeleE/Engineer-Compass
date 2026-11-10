@@ -24,6 +24,8 @@ const todayStr = () => {
 const active = ref('my');
 const loading = ref(false);
 const policy = ref(null);
+const loaded = ref(false);        // 首次 loadAll 是否完成（用于设置 tab 自动回填）
+const settingsLoaded = ref(false); // 考勤设置表单是否已回填过，避免切走再切回覆盖未保存编辑
 const isManager = ref(false);
 const my = ref(null);
 const board = ref(null);
@@ -87,6 +89,7 @@ async function loadAll() {
   try {
     const [s, m] = await Promise.all([api.attendanceSettings(props.teamId), api.attendanceMy(props.teamId, myMonth.value)]);
     policy.value = s.settings;
+    loaded.value = true;
     isManager.value = s.is_manager || !!props.perms?.attendance || !!props.me?.is_owner;
     my.value = m;
     if (isManager.value) await loadManager();
@@ -312,7 +315,12 @@ function openSettings() {
     exceptions: (p.exceptions || []).map((x) => ({ ...x })),
   });
   active.value = 'settings';
+  settingsLoaded.value = true;
 }
+watch([active, loaded], () => {
+  if (active.value === 'settings' && loaded.value && !settingsLoaded.value) openSettings();
+});
+
 function addSlot() {
   if (sf.slots.length >= 8) return ElMessage.warning('最多 8 个考勤时段');
   sf.slots.push({ id: '', name: `时段${sf.slots.length + 1}`, start: '08:30', late: '09:00', end: '10:00' });
