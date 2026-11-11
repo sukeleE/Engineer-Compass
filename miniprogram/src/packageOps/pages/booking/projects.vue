@@ -19,7 +19,7 @@
         <text v-if="p.canManage" class="pend">待审 {{ p.pending_count }}</text>
         <text>我的预约 {{ p.my_booking_count }}</text>
       </view>
-      <view class="p-creator">负责人：{{ p.creator_name || '—' }}</view>
+      <view class="p-creator">负责人：{{ managerText(p) }}</view>
     </view>
 
     <view v-if="createOpen" class="modal-mask" @click="createOpen = false">
@@ -60,6 +60,11 @@ const modeIndex = ref(0);
 async function load() {
   const r = await api.bookingProjects();
   list.value = r.projects || [];
+}
+function managerText(p) {
+  const ms = p.managers;
+  if (!Array.isArray(ms) || !ms.length) return p.creator_name || '—';
+  return ms.length === 1 ? ms[0].name : ms[0].name + ' 等 ' + ms.length + ' 人';
 }
 function openDetail(p) { uni.navigateTo({ url: '/packageOps/pages/booking/detail?id=' + p.id }); }
 function goMine() { uni.navigateTo({ url: '/packageOps/pages/booking/mine' }); }

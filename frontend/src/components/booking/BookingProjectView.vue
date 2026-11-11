@@ -17,7 +17,7 @@
           <el-tag v-else type="success" size="small">开放中</el-tag>
         </h2>
         <p class="sub2">{{ project.description || '暂无项目说明' }}</p>
-        <p class="bpv-meta dim">负责人：{{ project.creator_name || '—' }} ｜ 默认新资源审批方式：{{ MODE_ZH[project.default_approve_mode] }} ｜ {{ project.resource_count }} 项资源</p>
+        <p class="bpv-meta dim">负责人：{{ managerText }} ｜ 默认新资源审批方式：{{ MODE_ZH[project.default_approve_mode] }} ｜ {{ project.resource_count }} 项资源</p>
       </div>
       <el-button v-if="project.canManage" @click="openSettings">⚙️ 项目设置</el-button>
     </div>
@@ -134,6 +134,21 @@
             <el-radio value="closed">关闭（仅负责人/管理员/已有预约者可见）</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="协同负责人（与主负责人拥有同等资源/审批/设置管理权）">
+          <div class="sf-managers">
+            <el-tag v-for="m in sf.managers" :key="m.id" class="sf-mgr-tag"
+              :closable="!m.is_owner" :type="m.is_owner ? 'primary' : 'info'" effect="plain"
+              @close="removeManager(m)">
+              {{ m.name }}{{ m.is_owner ? '（主）' : '' }}
+            </el-tag>
+            <el-select v-model="managerPick" filterable remote remote-show-suffix :reserve-keyword="false"
+              :remote-method="searchManagers" :loading="managerSearching" clearable
+              placeholder="搜索用户名/昵称/姓名添加" class="sf-mgr-select" @change="addManager">
+              <el-option v-for="u in managerOptions" :key="u.id" :label="userLabel(u)" :value="u.id" />
+            </el-select>
+          </div>
+          <p class="sf-mgr-hint dim">主负责人（项目创建者）不可移除；协同负责人最多 20 人，移除即时生效。</p>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="settingsOpen = false">取消</el-button>
@@ -190,7 +205,10 @@ const actingId = ref(null);
 
 const settingsOpen = ref(false);
 const saving = ref(false);
-const sf = ref({ name: '', description: '', default_approve_mode: 'approval', status: 'open' });
+const sf = ref({ name: '', description: '', default_approve_mode: 'approval', status: 'open', managers: [] });
+const managerPick = ref(null);
+const managerOptions = ref([]);
+const managerSearching = ref(false);
 
 const bookingInitial = ref(null);
 const detailId = ref(null);
@@ -300,8 +318,55 @@ function openSettings() {
     description: project.value.description || '',
     default_approve_mode: project.value.default_approve_mode,
     status: project.value.status,
+    managers: Array.isArray(project.value.managers) ? project.value.managers.map((m) => ({ ...m })) : [],
   };
+  managerPick.value = null;
+  managerOptions.value = [];
   settingsOpen.value = true;
+}
+const managerText = computed(() => {
+  const ms = project.value.managers;
+  if (!Array.isArray(ms) || !ms.length) return project.value.creator_name || '—';
+  return ms.length === 1 ? ms[0].name : `${ms[0].name} 等 ${ms.length} 人`;
+});
+function userLabel(u) {
+  return u.real_name ? `${u.nickname || u.username}（${u.real_name}）` : (u.nickname || u.username);
+}
+async function searchManagers(q) {
+  const kw = String(q || '').trim();
+  if (!kw) { managerOptions.value = []; return; }
+  managerSearching.value = true;
+  try {
+    const d = await api.bookingUserSearch(kw);
+    const exist = new Set(sf.value.managers.map((m) => m.id));
+    managerOptions.value = (d.users || []).filter((u) => !exist.has(u.id));
+  } finally {
+    managerSearching.value = false;
+  }
+}
+async function addManager(uid) {
+  if (!uid) return;
+  try {
+    const d = await api.bookingManagerAdd(project.value.id, uid);
+    project.value = d.project;
+    sf.value.managers = Array.isArray(d.project.managers) ? d.project.managers.map((m) => ({ ...m })) : [];
+    ElMessage.success(d.message || '已添加协同负责人');
+  } catch (e) {
+    ElMessage.error(e.message);
+  }
+  managerPick.value = null;
+  managerOptions.value = [];
+}
+async function removeManager(m) {
+  if (m.is_owner) return;
+  try {
+    const d = await api.bookingManagerRemove(project.value.id, m.id);
+    project.value = d.project;
+    sf.value.managers = Array.isArray(d.project.managers) ? d.project.managers.map((x) => ({ ...x })) : [];
+    ElMessage.success(d.message || '已移除协同负责人');
+  } catch (e) {
+    ElMessage.error(e.message);
+  }
 }
 async function saveSettings() {
   if (!sf.value.name.trim()) return ElMessage.warning('项目名称不能为空');
@@ -347,6 +412,10 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
+.sf-managers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.sf-mgr-tag { font-size: 13px; }
+.sf-mgr-select { width: 260px; }
+.sf-mgr-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
 .bpv-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .bpv-title {
   h2 { margin: 6px 0 8px; font-size: 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

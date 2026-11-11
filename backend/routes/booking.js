@@ -1,6 +1,6 @@
 // 资源预约模块路由（挂载 /api/booking，整路由需登录）
 // 与小组域 team_device/device_booking 设备预约完全独立，互不影响。
-// 身份两层：建档者=项目负责人（管资源/组队/审批/取消），超级管理员全权；任何登录用户可建档/浏览开放项目/下单。
+// 身份三层：建档者=主负责人（不可被移除），booking_project_manager 内为协同负责人（同等资源/组队/审批/设置管理权），超级管理员全权；任何登录用户可建档/浏览开放项目/下单。
 // 审批为**资源级**开关：approve_mode=first_come 创建即确认（冲突即拒）；approval 走 pending→confirmed/rejected。
 // 时间口径：start_time/end_time 为北京时间朴素串 'YYYY-MM-DD HH:MM'，定宽字符串直接半开区间字典序比较，
 //   全链路禁止 toLocal 补 Z（否则再差 8 小时）。30 分钟一格，每日开放 07:00–22:00，可跨天连续占用（最长 7 天）。
@@ -132,7 +132,21 @@ const getResource = (id) => db.prepare('SELECT * FROM booking_resource WHERE id 
 const getBooking = (id) => db.prepare('SELECT * FROM booking WHERE id = ?').get(Number(id));
 const getTeam = (id) => db.prepare('SELECT * FROM booking_team WHERE id = ?').get(Number(id));
 
-const canManageProject = (req, p) => !!isSuperAdmin(req.user) || p.created_by === req.user.id;
+// 协同负责人 ID 集合按请求缓存（项目列表等热点路径避免逐行查库）
+function managerIdSet(req, projectId) {
+  if (!req._bkManagerCache) req._bkManagerCache = new Map();
+  let set = req._bkManagerCache.get(projectId);
+  if (!set) {
+    set = new Set(
+      db.prepare('SELECT user_id FROM booking_project_manager WHERE project_id = ?').all(projectId).map((x) => x.user_id),
+    );
+    req._bkManagerCache.set(projectId, set);
+  }
+  return set;
+}
+const canManageProject = (req, p) => !!isSuperAdmin(req.user)
+  || p.created_by === req.user.id
+  || managerIdSet(req, p.id).has(req.user.id);
 // 开放项目所有登录用户可见；关闭项目仅负责人/管理员/在该项目有预约者可见
 function canViewProject(req, p) {
   if (!p) return false;
@@ -175,14 +189,27 @@ function projectOut(p, req) {
       AND (b.booker_id = ? OR EXISTS (SELECT 1 FROM booking_participant bp WHERE bp.booking_id = b.id AND bp.user_id = ?))`
   ).get(p.id, req.user.id, req.user.id).n;
   const creator = p.created_by
-    ? db.prepare('SELECT nickname, username, real_name FROM user WHERE id = ?').get(p.created_by)
+    ? db.prepare('SELECT id, nickname, username, real_name, avatar FROM user WHERE id = ?').get(p.created_by)
     : null;
+  // 协同负责人名单：主负责人（created_by）始终排首位且不可移除，其后为追加的协同负责人
+  const coRows = db.prepare(
+    `SELECT u.id, u.nickname, u.username, u.real_name, u.avatar
+     FROM booking_project_manager m JOIN user u ON u.id = m.user_id
+     WHERE m.project_id = ? ORDER BY m.add_time, m.user_id`
+  ).all(p.id);
+  const managers = [];
+  if (creator) managers.push({ id: creator.id, name: displayNameOf(creator), avatar: creator.avatar || '', is_owner: true });
+  for (const u of coRows) {
+    if (creator && u.id === creator.id) continue;
+    managers.push({ id: u.id, name: displayNameOf(u), avatar: u.avatar || '', is_owner: false });
+  }
   return {
     id: p.id, name: p.name, description: p.description || '',
     default_approve_mode: p.default_approve_mode, status: p.status,
     created_by: p.created_by, creator_name: creator ? displayNameOf(creator) : '',
+    managers,
     create_time: p.create_time, close_time: p.close_time,
-    myRole: p.created_by === req.user.id ? 'owner' : null,
+    myRole: p.created_by === req.user.id ? 'owner' : (canManageProject(req, p) ? 'manager' : null),
     canManage: canManageProject(req, p),
     resource_count: resourceCount, pending_count: pendingCount, my_booking_count: myCount,
   };
@@ -517,7 +544,10 @@ r.get('/projects', ah((req, res) => {
       `SELECT DISTINCT b.project_id FROM booking b
         WHERE b.booker_id = ? OR EXISTS (SELECT 1 FROM booking_participant bp WHERE bp.booking_id = b.id AND bp.user_id = ?)`
     ).all(req.user.id, req.user.id).map((x) => x.project_id));
-    ps = ps.filter((p) => p.created_by === req.user.id || partIds.has(p.id));
+    const coManaged = new Set(
+      db.prepare('SELECT project_id FROM booking_project_manager WHERE user_id = ?').all(req.user.id).map((x) => x.project_id),
+    );
+    ps = ps.filter((p) => p.created_by === req.user.id || coManaged.has(p.id) || partIds.has(p.id));
   } else {
     ps = ps.filter((p) => canViewProject(req, p));
   }
@@ -574,6 +604,38 @@ r.put('/projects/:id', ah((req, res) => {
   tx(() => db.prepare(`UPDATE booking_project SET ${fields.join(', ')} WHERE id = ?`).run(...vals, p.id));
   logAudit(req, 'booking-project-update', p.name, { project_id: p.id, body: req.body });
   res.json({ project: projectOut(getProject(p.id), req), message: '已保存（模式调整只影响新预约，历史单不追溯）' });
+}));
+
+// ==================== 协同负责人（主负责人 created_by 不可移除；副负责人拥有同等管理权） ====================
+r.post('/projects/:id/managers', ah((req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理协同负责人');
+  const userId = Number(req.body?.user_id);
+  if (!Number.isInteger(userId)) throw new HttpError(400, '缺少用户 ID');
+  if (userId === p.created_by) throw new HttpError(400, '项目创建者本就是主负责人，无需添加');
+  const u = db.prepare('SELECT id, status, username FROM user WHERE id = ?').get(userId);
+  if (!u) throw new HttpError(404, '用户不存在');
+  if (u.status === 1) throw new HttpError(400, '该用户已被封禁，不能设为协同负责人');
+  if (db.prepare('SELECT 1 FROM booking_project_manager WHERE project_id = ? AND user_id = ?').get(p.id, userId))
+    throw new HttpError(409, '该用户已是协同负责人');
+  const n = db.prepare('SELECT COUNT(*) AS n FROM booking_project_manager WHERE project_id = ?').get(p.id).n;
+  if (n >= 20) throw new HttpError(400, '协同负责人最多 20 人');
+  tx(() => db.prepare('INSERT INTO booking_project_manager (project_id, user_id) VALUES (?,?)').run(p.id, userId));
+  logAudit(req, 'booking-manager-add', u.username || String(userId), { project: p.id, user_id: userId });
+  res.status(201).json({ project: projectOut(getProject(p.id), req), message: '已添加协同负责人' });
+}));
+
+r.delete('/projects/:id/managers/:userId', ah((req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理协同负责人');
+  const userId = Number(req.params.userId);
+  if (userId === p.created_by) throw new HttpError(400, '主负责人（项目创建者）不可移除');
+  const info = tx(() => db.prepare('DELETE FROM booking_project_manager WHERE project_id = ? AND user_id = ?').run(p.id, userId));
+  if (!info.changes) throw new HttpError(404, '该用户不是本项目的协同负责人');
+  logAudit(req, 'booking-manager-remove', String(userId), { project: p.id, user_id: userId });
+  res.json({ project: projectOut(getProject(p.id), req), message: '已移除协同负责人' });
 }));
 
 // ==================== 用户搜索（全站可搜，排自己/封禁；仿 purchase users/search） ====================

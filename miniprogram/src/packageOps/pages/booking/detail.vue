@@ -264,6 +264,23 @@
           <text>开放预约</text>
           <switch :checked="psForm.open" color="#2563eb" @change="onPsStatus" />
         </view>
+        <view class="f-label">协同负责人（与主负责人拥有同等资源 / 审批 / 设置管理权）</view>
+        <view class="part-chips">
+          <text v-for="m in psForm.managers" :key="m.id" class="tag part-chip"
+            :class="m.is_owner ? 'tag-blue' : 'tag-gray'" @click="removeManager(m)">
+            {{ m.name }}{{ m.is_owner ? '（主）' : ' ×' }}
+          </text>
+        </view>
+        <view class="part-row">
+          <input v-model="mgrKeyword" class="modal-input part-input" placeholder="搜用户名 / 昵称 / 真名" @confirm="searchManagers" />
+          <view class="mini-btn" @click="searchManagers">搜索</view>
+        </view>
+        <view v-if="mgrResults.length" class="part-results">
+          <view v-for="u in mgrResults" :key="u.id" class="part-item" @click="addManager(u)">
+            ＋ {{ u.real_name || u.nickname || u.username }}<text v-if="u.real_name && u.nickname !== u.real_name">（{{ u.nickname || u.username }}）</text>
+          </view>
+        </view>
+        <view class="f-hint">主负责人（项目创建者）不可移除；协同负责人最多 20 人，移除即时生效。</view>
         <view class="modal-actions">
           <button class="btn btn-ghost modal-btn" @click="psOpen = false">取消</button>
           <button class="btn btn-primary modal-btn" @click="submitProject">保存</button>
@@ -658,13 +675,18 @@ function renameResGroup(grp) {
 // ============ 项目设置 ============
 const psOpen = ref(false);
 const psModeLabels = ['审批制（提交后负责人审批）', '先到先得（提交即确认）'];
-const psForm = reactive({ name: '', description: '', modeIndex: 0, open: true });
+const psForm = reactive({ name: '', description: '', modeIndex: 0, open: true, managers: [] });
+const mgrKeyword = ref('');
+const mgrResults = ref([]);
 function openProjectForm() {
   const p = project.value;
   psForm.name = p.name;
   psForm.description = p.description || '';
   psForm.modeIndex = p.default_approve_mode === 'first_come' ? 1 : 0;
   psForm.open = p.status === 'open';
+  psForm.managers = Array.isArray(p.managers) ? p.managers.map((m) => ({ ...m })) : [];
+  mgrKeyword.value = '';
+  mgrResults.value = [];
   psOpen.value = true;
 }
 function onPsMode(e) { psForm.modeIndex = Number(e.detail.value); }
@@ -680,6 +702,27 @@ async function submitProject() {
   psOpen.value = false;
   toast('已保存', 'success');
   load();
+}
+async function searchManagers() {
+  const q = mgrKeyword.value.trim();
+  if (!q) return;
+  const r = await api.bookingUserSearch(q);
+  const exist = new Set(psForm.managers.map((m) => m.id));
+  mgrResults.value = (r.users || []).filter((u) => !exist.has(u.id));
+}
+async function addManager(u) {
+  const d = await api.bookingManagerAdd(id.value, u.id);
+  project.value = d.project;
+  psForm.managers = Array.isArray(d.project.managers) ? d.project.managers.map((m) => ({ ...m })) : [];
+  mgrResults.value = mgrResults.value.filter((x) => x.id !== u.id);
+  toast(d.message || '已添加协同负责人', 'success');
+}
+async function removeManager(m) {
+  if (m.is_owner) return toast('主负责人不可移除');
+  const d = await api.bookingManagerRemove(id.value, m.id);
+  project.value = d.project;
+  psForm.managers = Array.isArray(d.project.managers) ? d.project.managers.map((x) => ({ ...x })) : [];
+  toast(d.message || '已移除协同负责人', 'success');
 }
 
 // ============ 审批 ============

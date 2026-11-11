@@ -76,6 +76,14 @@ migCol('booking', 'item_kind', "ALTER TABLE booking ADD COLUMN item_kind TEXT DE
 migCol('booking_resource', 'is_carrier', "ALTER TABLE booking_resource ADD COLUMN is_carrier INTEGER NOT NULL DEFAULT 0"); // 借用登记占位资源
 db.exec("UPDATE booking_resource SET is_carrier = 1 WHERE name = '借用登记' AND is_carrier = 0"); // 老库按名占位资源一次性回填
 migCol('booking_resource', 'group_name', "ALTER TABLE booking_resource ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"); // 表格导入分组（工作表名），空=未分组
+// 项目协同负责人关联表（新库 schema.sql 已含，老库此处补建；IF NOT EXISTS 幂等）
+db.exec(`CREATE TABLE IF NOT EXISTS booking_project_manager (
+  project_id INTEGER NOT NULL REFERENCES booking_project(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  add_time   TEXT DEFAULT (datetime('now','localtime')),
+  PRIMARY KEY (project_id, user_id)
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_bk_pm_user ON booking_project_manager(user_id)');
 
 // 一次性表重建：唯一约束由 (project_id, name) 放宽为 (project_id, group_name, name)，
 // 支持不同工作表（房间）下的同名设备。SQLite 无法直接改表约束：显式带 id 搬运，

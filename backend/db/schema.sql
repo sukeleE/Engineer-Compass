@@ -904,6 +904,16 @@ CREATE TABLE IF NOT EXISTS booking_log (
 );
 CREATE INDEX IF NOT EXISTS idx_bk_log_booking ON booking_log(booking_id);
 
+-- 资源预约：项目协同负责人（created_by 为主负责人始终保留；副负责人拥有与主负责人同等的资源/审批/组队/设置管理权，
+-- 仅不能移除主负责人；用户被删时 ON DELETE CASCADE 自动清退）
+CREATE TABLE IF NOT EXISTS booking_project_manager (
+  project_id INTEGER NOT NULL REFERENCES booking_project(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  add_time   TEXT DEFAULT (datetime('now','localtime')),
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bk_pm_user ON booking_project_manager(user_id);
+
 -- 表60 checkin_schedule 周期打卡 / 定时汇报任务（进度对齐页，组长/任务管理权限者可建）
 CREATE TABLE IF NOT EXISTS checkin_schedule (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,

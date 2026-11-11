@@ -152,6 +152,38 @@ try {
   ok('非法默认审批模式 400', g.ok);
   g = await expect(`/booking/projects/${P.id}`, 403, { method: 'PUT', token: tB, body: { description: '黑进来' } });
   ok('非负责人改项目设置 403', g.ok);
+
+  // ---------- 1b. 多协同负责人（created_by 为主负责人，booking_project_manager 为协同负责人） ----------
+  g = await req(`/booking/projects/${P.id}/managers`, { method: 'POST', token: tA, body: { user_id: B.id } });
+  ok('甲添加乙为协同负责人 201，managers 主+副两人且主负责人置顶', g.status === 201
+    && g.data.project.managers.length === 2
+    && g.data.project.managers[0].is_owner === true && g.data.project.managers[0].id === A.id
+    && g.data.project.managers[1].id === B.id && g.data.project.managers[1].is_owner === false, g.data);
+  g = await expect(`/booking/projects/${P.id}/managers`, 409, { method: 'POST', token: tA, body: { user_id: B.id } });
+  ok('重复添加协同负责人 409', g.ok);
+  g = await expect(`/booking/projects/${P.id}/managers`, 400, { method: 'POST', token: tA, body: { user_id: A.id } });
+  ok('添加主负责人自己 400（本就是主负责人）', g.ok);
+  g = await req(`/booking/projects/${P.id}`, { token: tB });
+  ok('乙视角 myRole=manager 且 canManage=true', g.data.project.myRole === 'manager' && g.data.project.canManage === true, g.data.project);
+  g = await expect(`/booking/projects/${P.id}`, 200, { method: 'PUT', token: tB, body: { description: '乙协同维护' } });
+  ok('协同负责人乙可改项目设置 200（原 403 反转）', g.ok);
+  g = await expect(`/booking/projects/${P.id}/managers/${A.id}`, 400, { method: 'DELETE', token: tB });
+  ok('乙不能移除主负责人甲 400', g.ok);
+  g = await expect(`/booking/projects/${P.id}/managers`, 403, { method: 'POST', token: tC, body: { user_id: D.id } });
+  ok('路人丙不能添加协同负责人 403', g.ok);
+  g = await expect(`/booking/projects/${P.id}/managers/${B.id}`, 403, { method: 'DELETE', token: tC });
+  ok('路人丙不能移除协同负责人 403', g.ok);
+  g = await req('/booking/projects?scope=managed', { token: tB });
+  ok('乙的 managed 列表包含协同管理项目', g.data.projects.some((x) => x.id === P.id));
+  g = await req('/booking/projects?scope=mine', { token: tB });
+  ok('乙的 mine 列表也包含协同管理项目', g.data.projects.some((x) => x.id === P.id));
+  // 恢复初始状态：甲移除乙，保证后续「乙=路人」系列 403 断言不被污染
+  g = await req(`/booking/projects/${P.id}/managers/${B.id}`, { method: 'DELETE', token: tA });
+  ok('甲移除乙 200，managers 只剩主负责人', g.status === 200 && g.data.project.managers.length === 1, g.data);
+  g = await expect(`/booking/projects/${P.id}/managers/${B.id}`, 404, { method: 'DELETE', token: tA });
+  ok('重复移除协同负责人 404', g.ok);
+  g = await expect(`/booking/projects/${P.id}`, 403, { method: 'PUT', token: tB, body: { description: '再黑一次' } });
+  ok('移除后乙改设置重新 403', g.ok);
   g = await req('/booking/projects', { token: tC });
   ok('开放项目对所有登录用户可见', g.data.projects.some((x) => x.id === P.id));
 

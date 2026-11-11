@@ -1,11 +1,11 @@
 # 资源预约模块（/booking）技术文档
 
-2026-10-15 落地。导航项「🏢 资源预约」，路由 `/booking`（大厅）与 `/booking/:id`（项目页）。后端挂 `/api/booking`（避开已占用的 `/api/resource`），表前缀 `booking_`，新表编号 **53–59**（schema.sql 末尾 `IF NOT EXISTS` 追加，冷启动自动建表）。同日简化：资源五分类收敛为两类，`backend/db/database.js` 用 `PRAGMA user_version=2` 闸门做一次性存量回填（lab/classroom→space、prop/equipment/instrument→item，先探测表存在，老库零影响）。2026-11-11 增强：表格导入上限由 10MB/200 行放宽到 **100MB/2000 行**；一个 Excel 的多个工作表（Sheet）按表名分组导入（`booking_resource.group_name`，取 Sheet 名），Web/小程序均按组折叠展示、结构与原表一致，组可整组重命名；资源唯一约束随之由 `UNIQUE(project_id,name)` 放宽为 `UNIQUE(project_id,group_name,name)`（不同房间允许同名设备，组内仍唯一），老库启动时走守卫式表重建迁移（见 §3）。
+2026-10-15 落地。导航项「🏢 资源预约」，路由 `/booking`（大厅）与 `/booking/:id`（项目页）。后端挂 `/api/booking`（避开已占用的 `/api/resource`），表前缀 `booking_`，新表编号 **53–59**（schema.sql 末尾 `IF NOT EXISTS` 追加，冷启动自动建表）。同日简化：资源五分类收敛为两类，`backend/db/database.js` 用 `PRAGMA user_version=2` 闸门做一次性存量回填（lab/classroom→space、prop/equipment/instrument→item，先探测表存在，老库零影响）。2026-11-11 增强：表格导入上限由 10MB/200 行放宽到 **100MB/2000 行**；一个 Excel 的多个工作表（Sheet）按表名分组导入（`booking_resource.group_name`，取 Sheet 名），Web/小程序均按组折叠展示、结构与原表一致，组可整组重命名；资源唯一约束随之由 `UNIQUE(project_id,name)` 放宽为 `UNIQUE(project_id,group_name,name)`（不同房间允许同名设备，组内仍唯一），老库启动时走守卫式表重建迁移（见 §3）。同日增强：项目负责人支持多人——`created_by` 为主负责人（项目创建者，不可移除），新增关联表 `booking_project_manager` 存协同负责人（上限 20 人，拥有与主负责人同等的资源/导入/审批/组队/项目设置/分组重命名管理权，唯一限制是不能移除主负责人）；管理入口在项目设置弹窗，`projectOut` 输出 `managers[]`（主负责人置顶 is_owner=true）与三态 `myRole='owner'|'manager'|null`。
 
 ## 1. 领域与口径
 
 - **实名认证硬门禁（2026-10-16）**：资源预约、经费报销、物料采购三个模块的全部端点要求账号已在账号安全页填写真实姓名（`user.real_name`，2–20 字中英文），未实名一律 403 `{code:'need_real_name'}`，**管理员不豁免**；唯一白名单是预约模块 `POST /projects/:id/conflicts`（弹窗内实时冲突预检，不泄密）。报销的匿名邀请面 `/api/expense/o/*`（凭邀请码只读/认领/下载/导出）不挂门禁。前端 `/booking`、`/purchase` 路由 `meta.requiresRealName` 守卫先于页面挂载拦截，弹不可关闭的实名弹窗；未实名用户每人一条 `personal_notice(type=realname_required, link=/account-security)`，实名后自动已读。三模块内人员署名统一为「真名（昵称）」，由 `displayNameOf()`（后端 middleware.js，前端 utils/displayName.js 同口径）在**写库瞬间生成快照**（booker_name/owner_name/applicant_name/actor_name 等），读取端原样渲染快照，不再 JOIN 实时真名二次组合；昵称本身已含真名时（如「张玉磊（284806020）」）直接用昵称，避免叠成「张玉磊（张玉磊（284806020））」。历史快照不回溯。实时 user 对象（选人下拉、审批人、登录本人）仍按当前真名/昵称即时组合。
-- **项目（booking_project）**：登录用户可建；建档者即负责人（`created_by`），管理员管全部（同物料采购口径）。项目只关不删（无 DELETE 端点）。
+- **项目（booking_project）三层身份**：登录用户可建；建档者 `created_by` 是**主负责人**（不可被移除，删用户时 SET NULL 项目保留），`booking_project_manager` 关联表内为**协同负责人**（与主负责人同等管理权，仅不能移除主负责人；上限 20、封禁用户不可加、删用户 CASCADE 清退），超级管理员管全部（同物料采购口径）。`canManageProject = 超管 || created_by || 关联表命中`，协同负责人 ID 集合按请求缓存避免列表 N+1。项目只关不删（无 DELETE 端点）。
 - **两类资源**：📦 **物品资源** `kind=item`（is_space=0，按数量库存池共享）；🏢 **空间资源** `kind=space`（is_space=1，同一时段独占、按容量限人数）。`is_space` 是冲突/容量/库存逻辑的唯一依据，kind 仅用于展示/分组/过滤且与 is_space 一一对应（资源创建后二者均不可变）。资源被预约引用后只能归档不能硬删（DELETE 409）。
 - **审批模式在资源级**：每个资源 `approve_mode = approval | first_come`。`first_come` 不冲突即 confirmed；`approval` 落 pending 待负责人/管理员审批。项目上的 `default_approve_mode` 只作新资源表单预填；切换不追溯历史单。
 - **pending 即占位**：冲突检测的 BLOCKING 集合 = pending+confirmed。甘特实时显示申请中琥珀斜纹块；驳回/取消立即释放槽位。取舍：宁可让后申请者看到占用改时间，也不要"先批先得、后批者被拒"。v1 不做 pending 超时自动释放。
@@ -22,7 +22,7 @@
 - 甘特把夜段（22:00→次日 07:00）**折叠**在日界线两侧：`col = dayDiff*30 + (分钟-420)/30`，跨天块天然跨列连续渲染；从一天末尾反向拖到次日开头即跨天单。
 - 审计时间用 `datetime('now','localtime')`。
 
-## 3. 数据表（53–59）与级联
+## 3. 数据表（53–59，另加协同负责人关联表）与级联
 
 | # | 表 | 要点 |
 |---|---|---|
@@ -33,8 +33,9 @@
 | 57 | booking | project_id/resource_id **RESTRICT**；start_time/end_time、qty（空间恒1）、headcount、purpose、status、source(solo/team/custom)、team_id **SET NULL**、booker_id CASCADE + booker_name 快照、审批三字段、取消三字段 |
 | 58 | booking_participant | booking_id **CASCADE**、user_id CASCADE、user_name 快照、is_booker、ord、UNIQUE(booking_id,user_id) |
 | 59 | booking_log | booking_id **CASCADE**、action(created/approved/rejected/canceled)、actor_id/name、comment |
+| 59+ | booking_project_manager | 协同负责人关联：project_id **CASCADE**、user_id **CASCADE**、add_time、PK(project_id,user_id)；索引 idx_bk_pm_user(user_id)。老库由 database.js 冷启动 `CREATE TABLE IF NOT EXISTS` 幂等补建 |
 
-项目/资源 RESTRICT（项目只关不删、资源只归档）；组队/成员/参与人/日志 CASCADE；删用户：其预约 CASCADE、名下项目保留（created_by SET NULL）。
+项目/资源 RESTRICT（项目只关不删、资源只归档）；组队/成员/参与人/日志/协同负责人关联 CASCADE；删用户：其预约 CASCADE、名下项目保留（created_by SET NULL）、其协同负责人身份由关联表 ON DELETE CASCADE 自动清退。
 
 - **2026-11-11 分组迁移（老库冷启动自动执行，新库守卫跳过）**：`migCol` 先补 `group_name TEXT NOT NULL DEFAULT ''`；随后读 `sqlite_master` 中的建表 DDL，仅当正则命中旧约束 `UNIQUE (project_id, name)` 才做一次性表重建——先 `PRAGMA foreign_keys=OFF`（连接级 PRAGMA 不能在事务内切），事务内建 `booking_resource_new`（新约束）、**显式带 id 逐列搬运**保证 booking 外键不断、DROP+RENAME、重建 pstatus/pkind/pgroup 三个索引，COMMIT 后恢复 foreign_keys 并跑 `PRAGMA foreign_key_check`，有残留即抛错阻止启动；异常路径 ROLLBACK 并恢复 PRAGMA。
 
@@ -60,9 +61,10 @@ confirmed：预约者开始前可取消（已开始→400 提示联系负责人�
 
 | 方法/路径 | 说明 |
 |---|---|
-| GET /projects?scope=all\|mine\|managed | 列表项带 myRole/canManage/resource_count/pending_count/my_booking_count；closed 按可见性过滤 |
+| GET /projects?scope=all\|mine\|managed | 列表项带 myRole（三态 owner/manager/null）/canManage/resource_count/pending_count/my_booking_count 与 managers[]；closed 按可见性过滤；scope=mine 含本人协同管理的项目 |
 | POST /projects | 201，重名 409 |
 | GET /projects/:id / PUT /projects/:id | 详情 / 改名说明默认模式状态 |
+| POST /projects/:id/managers · DELETE /projects/:id/managers/:userId | 协同负责人增（body `{user_id}`，201）/删；仅 canManageProject 可调（403）；加主负责人自己/封禁用户/满 20 → 400，重复 → 409，用户不存在 → 404；移除主负责人 → 400、非协同 → 404；审计 booking-manager-add/remove，响应回带更新后的 project |
 | GET /projects/:id/resources?status=&kind= | 资源列表（kind=item\|space） |
 | POST /projects/:id/resources | 白名单归一：space 强制 capacity、quantity=1；item 强制 quantity、capacity=NULL |
 | POST /projects/:id/resources/bulk | 类型表单批量（≤2000 行），整体事务，坏行 400「第 N 行」回滚，组内（project_id+group_name+name）重名 409 |
@@ -135,6 +137,6 @@ confirmed：预约者开始前可取消（已开始→400 提示联系负责人�
 
 ## 8. 测试
 
-- `npm run smoke:booking` —— 自起沙盒后端（3107、mkdtemp、env 白名单、cwd 临时目录避 .env、taskkill 收尾），**134 项**：建档/资源两类（item/space）/bulk/表格导入（xlsx 垃圾行+别名表头（含「品名」）+设备多分隔符、坏容量透传、UTF-8/GBK CSV、**2005 行截断为 2000**、无表头/空表、.txt/无 file/坏 kind/403/401/404/**101MB 413**、两 kind 模板 PK 魔数与表头精确断言、重名 409 行号）/**多 Sheet 分组 10 项**（standard_item 命中不调 AI、分组摘要含空表 0 条、**纯空 Sheet 经路由合并保留 0 条分组**、资产明细块/分段标题跳过且跨组同名保留、跨组同名 bulk 201、同组同名 409、分组重命名 200 与回显、重命名撞名 409、非负责人 403）/归档/组队/时间窗/空间独占/物品池/资源级双模式/取消/多人/timeline/通知去重/外键级联。
+- `npm run smoke:booking` —— 自起沙盒后端（3107、mkdtemp、env 白名单、cwd 临时目录避 .env、taskkill 收尾），**147 项**：建档/资源两类（item/space）/bulk/表格导入（xlsx 垃圾行+别名表头（含「品名」）+设备多分隔符、坏容量透传、UTF-8/GBK CSV、**2005 行截断为 2000**、无表头/空表、.txt/无 file/坏 kind/403/401/404/**101MB 413**、两 kind 模板 PK 魔数与表头精确断言、重名 409 行号）/**多 Sheet 分组 10 项**（standard_item 命中不调 AI、分组摘要含空表 0 条、**纯空 Sheet 经路由合并保留 0 条分组**、资产明细块/分段标题跳过且跨组同名保留、跨组同名 bulk 201、同组同名 409、分组重命名 200 与回显、重命名撞名 409、非负责人 403）/**多协同负责人 13 项**（添加 201 且 managers 主负责人置顶、重复添加 409、加主负责人自己 400、协同方 myRole=manager/canManage 且可改项目设置、协同方不能移除主负责人 400、路人增删协同负责人均 403、scope=managed/mine 列表均含协同管理项目、移除 200、重复移除 404、移除后原协同方权限回收重新 403）/归档/组队/时间窗/空间独占/物品池/资源级双模式/取消/多人/timeline/通知去重/外键级联。
 - `npm run probe:booking-ui` —— Playwright（3108+5199、PROBE 临时库、双 context 演 A/B/C），**53 项**：建项→建空间/物品资源→甘特拖格 pending 块定位→重叠实时 409 禁用提交→临时搜非好友 C→固定组队下单→C 的 mine→先到先得蓝块+库存热度+超量拦截→审批变蓝→C 收通知点 link 自动弹详情→390px 手风琴建约无横溢→表格导入（分裂下拉入口、模板 download 事件、CSV 标签预览回填断言、多 Sheet xlsx 三标签（含空表空态）/逐标签行数与跨组同名/切组编辑值保留/排除标签置灰/整组排除恢复、分组落库新卡、**7d 含重名红行的总表：排除前拦截→整组排除后红点红标消失并仅落其余组**、**7e 周视图分组标签（6 标签含全部/未分组/CSV/三导入组、徽标计数、切组行过滤、类型筛选联动与分组失效回落全部）**）→无 pageerror/无意外 4xx5xx（有意的 `/conflicts` 4xx 放行）。注意：C 盘空间不足时须把 TEMP/TMP 重定向到其他盘再跑，否则 vite 临时文件写满会间歇白屏。
 - 回归：smoke:repo / smoke:account / vite build 全绿；依赖 :3000 dev server 的既有冒烟（purchase 等）未在沙盒跑，booking 挂载不改动其代码路径。
