@@ -48,7 +48,7 @@
 
         <div class="ri-preview-head">
           <p class="ri-tip">
-            顶部标签切换工作表（每个标签=一个分组），可整组取消勾选或就地修改组名；红色行需要修正，黄色行表示 AI 置信度较低。可直接修改类型、库存、容量、审批方式等字段。
+            顶部标签切换工作表（每个标签=一个分组），可整组取消勾选或就地修改组名；整组取消勾选后该组不参与校验与导入（适合排除「总表/汇总」类工作表）。红色行需要修正，黄色行表示 AI 置信度较低，可直接修改类型、库存、容量、审批方式等字段。
           </p>
           <el-button size="small" plain @click="addRow">＋ 添加一行</el-button>
         </div>
@@ -59,7 +59,7 @@
             @click="activeIndex = idx">
             <span class="ri-tab-name">{{ g.name }}</span>
             <span class="ri-tab-badge">{{ g.list.length }}</span>
-            <span v-if="g.invalid" class="ri-tab-dot" :title="`异常 ${g.invalid} 行`"></span>
+            <span v-if="!g.excluded && g.invalid" class="ri-tab-dot" :title="`异常 ${g.invalid} 行`"></span>
           </button>
         </div>
         <section v-if="activeGroup" :key="activeGroup.key" class="ri-group" :class="{ excluded: activeGroup.excluded }">
@@ -68,7 +68,7 @@
             <el-input v-model="activeGroup.name" size="small" class="ri-gname-input" @change="renameGroup(activeGroup)" />
             <span class="ri-gmeta">
               {{ activeGroup.list.length }} 条
-              <template v-if="activeGroup.invalid"> · <b class="ri-danger-text">异常 {{ activeGroup.invalid }}</b></template>
+              <template v-if="!activeGroup.excluded && activeGroup.invalid"> · <b class="ri-danger-text">异常 {{ activeGroup.invalid }}</b></template>
               <template v-if="activeGroup.skipped"> · 跳过明细 {{ activeGroup.skipped }}</template>
             </span>
           </header>
@@ -294,6 +294,7 @@ function toggleGroup(g, included) {
   const meta = groupMeta.value.find((m) => m.name === g.origName);
   g.excluded = !included;
   if (meta) meta.excluded = g.excluded;
+  validatePreview(); // 排除状态变化后立即刷新红标/异常计数
 }
 function renameGroup(g) {
   const next = String(g.name || '').trim().slice(0, 30);
@@ -363,7 +364,12 @@ async function handleFile(file) {
   }
 }
 function validatePreview() {
-  const named = rows.value.filter((r) => String(r.name || '').trim());
+  // 仅校验参与导入的分组；整组排除的行清除红标，其重名/字段问题不再拦截导入
+  const isExcludedRow = (r) => !!groupOf(r.group_name)?.excluded;
+  for (const r of rows.value) {
+    if (isExcludedRow(r) && Array.isArray(r.issues) && r.issues.length) r.issues = [];
+  }
+  const named = rows.value.filter((r) => !isExcludedRow(r) && String(r.name || '').trim());
   const seen = new Set();
   let errorCount = 0;
   named.forEach((r) => {

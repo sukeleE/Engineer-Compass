@@ -9,6 +9,7 @@
 //   → A 审批通过 → 块变蓝 → C 收到通知并点 link 自动弹详情
 //   → 390px 窄屏：手风琴建约全链路、无横溢
 //   → 表格导入：模板下载 + 选 CSV 解析回填（告警/warnings）→ bulk 落库新卡
+//   → 整组排除含重名红行的「总表」：排除前拦截、排除后红点红标消失并放行
 //   全程无 pageerror、无意外 4xx/5xx
 //
 // 沙盒：后端 cwd=临时目录（无 .env）+ 临时 DB + 临时上传目录，跑完即弃，绝不碰真实数据。
@@ -516,6 +517,63 @@ try {
     panel2.includes('N2-201') && panel2.includes('N2-202') &&
     (panel2.match(/UI跨组示波器/g) || []).length === 2 && panel2.includes('UI另一组电烙铁'),
     panel2.replace(/\n/g, ' ').slice(0, 300));
+
+  // ===== 7d. 整组排除含重名红行的「总表」：排除前拦截，排除后红点/红标消失且放行导入 =====
+  const dupPath = path.join(work, 'ui-summary-dup.xlsx');
+  {
+    const wb = XLSX.utils.book_new();
+    const head = ['资源名称', '规格型号', '库存数量', '单位', '存放位置', '审批方式'];
+    const aoaSummary = [head,
+      ['UI汇总钳工台', 'QB-7', '7', '张', '总表', '需审批'],
+      ['UI汇总钳工台', 'QB-7', '7', '张', '总表', '需审批']]; // 同组同名 → 红行拦截
+    const aoaRoom = [head,
+      ['UI房间A示波器', 'DS1102', '3', '台', '房间A', '先到先得']];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaSummary), '总表');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaRoom), '房间A');
+    writeFileSync(dupPath, XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  }
+  await pageA.locator('.rp-bar .el-dropdown__caret-button').click();
+  await pageA.getByRole('menuitem', { name: /导入表格/ }).click();
+  await dlg(pageA).waitFor();
+  const autoBox3 = dlg(pageA).locator('.ri-auto-check .el-checkbox__input');
+  if ((await autoBox3.getAttribute('aria-checked')) !== 'false') await autoBox3.click();
+  await dlg(pageA).locator('input[type=file]').setInputFiles(dupPath);
+  const dupTabs = dlg(pageA).locator('.ri-tab');
+  await dupTabs.nth(1).waitFor({ timeout: 15000 });
+  const dupTabNames = await dlg(pageA).locator('.ri-tab-name').allInnerTexts();
+  const sumIdx = dupTabNames.indexOf('总表');
+  const roomIdx = dupTabNames.indexOf('房间A');
+  ok('重名工作簿解析为「总表/房间A」两个标签', sumIdx >= 0 && roomIdx >= 0, dupTabNames.join('|'));
+  await dupTabs.nth(sumIdx).click();
+  await dlg(pageA).locator('.ri-table tbody tr').first().waitFor();
+  ok('总表标签初始带异常红点且组内 1 行红标',
+    (await dupTabs.nth(sumIdx).locator('.ri-tab-dot').count()) === 1 &&
+    (await dlg(pageA).locator('.ri-table .issue-tag').count()) >= 1 &&
+    (await dlg(pageA).locator('.ri-table tbody tr.invalid').count()) === 1);
+  // 排除前：重名红行拦截提交
+  await dlg(pageA).getByRole('button', { name: /导入 3 条/ }).click();
+  await pageA.getByText(/有 1 行信息不正确/).waitFor({ timeout: 5000 });
+  ok('排除前同组重名红行拦截导入', true);
+  // 整组排除总表：红点/红标立即消失，计数只剩房间 A 的 1 条
+  await dlg(pageA).locator('.ri-group').first().locator('.ri-group-head .el-checkbox__input').click();
+  await dlg(pageA).getByRole('button', { name: /导入 1 条/ }).waitFor({ timeout: 5000 });
+  // el-tag 带 300ms 离场过渡（el-zoom-in-center），轮询等 DOM 真正移除后再断言
+  const tagLoc = dlg(pageA).locator('.ri-table .issue-tag');
+  for (let i = 0; i < 40 && (await tagLoc.count()); i++) await sleep(80);
+  ok('排除总表后标签红点与表格红标均消失',
+    (await dupTabs.nth(sumIdx).locator('.ri-tab-dot').count()) === 0 &&
+    (await tagLoc.count()) === 0 &&
+    (await dlg(pageA).locator('.ri-table tbody tr.invalid').count()) === 0);
+  ok('被排除总表标签置灰且房间A标签无红点',
+    (await dupTabs.nth(sumIdx).evaluate((el) => el.classList.contains('excluded'))) &&
+    (await dupTabs.nth(roomIdx).locator('.ri-tab-dot').count()) === 0);
+  await dlg(pageA).getByRole('button', { name: /导入 1 条/ }).click();
+  await pageA.getByText('已导入 1 条资源').waitFor({ timeout: 8000 });
+  await sleep(500);
+  const panel3 = await pageA.locator('.rp-wrap').innerText();
+  ok('排除总表后成功导入且仅落房间A资源',
+    panel3.includes('UI房间A示波器') && !panel3.includes('UI汇总钳工台'),
+    panel3.replace(/\n/g, ' ').slice(0, 300));
 
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

@@ -23,7 +23,7 @@
 
         <!-- 步骤三：分组预览核对 -->
         <template v-if="items.length">
-          <view class="step-title">③ 按工作表分组核对（{{ validItems.length }} 条可导入 / {{ items.length - validItems.length }} 条异常）</view>
+          <view class="step-title">③ 按工作表分组核对（{{ validItems.length }} 条可导入<text v-if="excludedCount"> / 已排除 {{ excludedCount }} 条</text><text v-if="stats.invalid"> / 待修正 {{ stats.invalid }} 条</text>）</view>
           <view class="stat-row">
             <text class="tag tag-blue">物品 {{ stats.item }}</text>
             <text class="tag tag-purple">空间 {{ stats.space }}</text>
@@ -36,17 +36,17 @@
               :class="{ on: idx === activeIndex, off: g.excluded }" @click="activeIndex = idx">
               <text class="grp-tab-name">🗂️ {{ g.name }}</text>
               <text class="grp-tab-badge">{{ g.list.length }}</text>
-              <text v-if="g.invalid" class="grp-tab-dot"></text>
+              <text v-if="!g.excluded && g.invalid" class="grp-tab-dot"></text>
             </view>
           </scroll-view>
           <view v-if="activeGroup" class="grp" :class="{ off: activeGroup.excluded }">
             <view class="grp-head">
               <switch :checked="!activeGroup.excluded" color="#2563eb" style="transform:scale(0.8)" @change="(e) => toggleGroup(activeGroup, e.detail.value)" />
               <text class="grp-name">🗂️ {{ activeGroup.name }}</text>
-              <text class="grp-count">{{ activeGroup.list.length }} 条<text v-if="activeGroup.invalid"> · 异常 {{ activeGroup.invalid }}</text><text v-if="activeGroup.skipped"> · 跳过 {{ activeGroup.skipped }}</text></text>
+              <text class="grp-count">{{ activeGroup.list.length }} 条<text v-if="activeGroup.invalid && !activeGroup.excluded"> · 异常 {{ activeGroup.invalid }}</text><text v-if="activeGroup.skipped"> · 跳过 {{ activeGroup.skipped }}</text></text>
             </view>
             <view v-if="!activeGroup.list.length" class="grp-empty">该工作表无有效资源行（空表或明细均被跳过）</view>
-            <view v-for="it in activeGroup.list" :key="it._uid" class="imp-card" :class="{ bad: !it.valid }">
+            <view v-for="it in activeGroup.list" :key="it._uid" class="imp-card" :class="{ bad: !it.valid && !activeGroup.excluded }">
               <view class="imp-head">
                 <text class="imp-name">{{ it.name || '（空名称）' }}</text>
                 <text class="tag" :class="it.kind === 'space' ? 'tag-purple' : 'tag-blue'">{{ it.kind === 'space' ? '空间' : '物品' }}</text>
@@ -57,7 +57,9 @@
                 <text v-if="it.location"> · {{ it.location }}</text>
                 <text v-if="it.spec"> · {{ it.spec }}</text>
               </view>
-              <view v-for="(msg, j) in it.issues" :key="j" class="issue-line">✕ {{ msg }}</view>
+              <template v-if="!activeGroup.excluded">
+                <view v-for="(msg, j) in it.issues" :key="j" class="issue-line">✕ {{ msg }}</view>
+              </template>
               <view v-for="(msg, j) in it.warnings" :key="'g' + j" class="warn-line">⚠ {{ msg }}</view>
               <text class="imp-del" @click="dropRow(it._uid)">移除该行</text>
             </view>
@@ -97,7 +99,8 @@ const stats = computed(() => {
   const s = { item: 0, space: 0, invalid: 0 };
   for (const it of items.value) {
     if (it.kind === 'space') s.space += 1; else s.item += 1;
-    if (!it.valid) s.invalid += 1;
+    // 整组排除后其异常不再计入待修正，也不拦截导入
+    if (!it.valid && !isExcluded(it.group_name)) s.invalid += 1;
   }
   return s;
 });
@@ -119,6 +122,7 @@ const groupView = computed(() => {
 // 标签页只渲染当前组；索引钳制，删行/删组后不越界
 const activeGroup = computed(() => groupView.value[Math.min(activeIndex.value, groupView.value.length - 1)] || null);
 const validItems = computed(() => items.value.filter((x) => x.valid && !isExcluded(x.group_name)));
+const excludedCount = computed(() => items.value.filter((x) => isExcluded(x.group_name)).length);
 function isExcluded(name) {
   const g = groupView.value.find((x) => x.name === (name || ''));
   return !!g?.excluded;
