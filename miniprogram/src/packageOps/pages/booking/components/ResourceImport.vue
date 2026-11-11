@@ -31,13 +31,22 @@
             <text class="tag" style="background:#f1f5f9;color:#475569">分组 {{ groupView.length }}</text>
           </view>
 
-          <view v-for="g in groupView" :key="g.key" class="grp" :class="{ off: g.excluded }">
-            <view class="grp-head">
-              <switch :checked="!g.excluded" color="#2563eb" style="transform:scale(0.8)" @change="(e) => toggleGroup(g, e.detail.value)" />
-              <text class="grp-name">🗂️ {{ g.name }}</text>
-              <text class="grp-count">{{ g.list.length }} 条<text v-if="g.invalid"> · 异常 {{ g.invalid }}</text><text v-if="g.skipped"> · 跳过 {{ g.skipped }}</text></text>
+          <scroll-view scroll-x class="grp-tabs" :show-scrollbar="false">
+            <view v-for="(g, idx) in groupView" :key="g.key" class="grp-tab"
+              :class="{ on: idx === activeIndex, off: g.excluded }" @click="activeIndex = idx">
+              <text class="grp-tab-name">🗂️ {{ g.name }}</text>
+              <text class="grp-tab-badge">{{ g.list.length }}</text>
+              <text v-if="g.invalid" class="grp-tab-dot"></text>
             </view>
-            <view v-for="it in g.list" :key="it._uid" class="imp-card" :class="{ bad: !it.valid }">
+          </scroll-view>
+          <view v-if="activeGroup" class="grp" :class="{ off: activeGroup.excluded }">
+            <view class="grp-head">
+              <switch :checked="!activeGroup.excluded" color="#2563eb" style="transform:scale(0.8)" @change="(e) => toggleGroup(activeGroup, e.detail.value)" />
+              <text class="grp-name">🗂️ {{ activeGroup.name }}</text>
+              <text class="grp-count">{{ activeGroup.list.length }} 条<text v-if="activeGroup.invalid"> · 异常 {{ activeGroup.invalid }}</text><text v-if="activeGroup.skipped"> · 跳过 {{ activeGroup.skipped }}</text></text>
+            </view>
+            <view v-if="!activeGroup.list.length" class="grp-empty">该工作表无有效资源行（空表或明细均被跳过）</view>
+            <view v-for="it in activeGroup.list" :key="it._uid" class="imp-card" :class="{ bad: !it.valid }">
               <view class="imp-head">
                 <text class="imp-name">{{ it.name || '（空名称）' }}</text>
                 <text class="tag" :class="it.kind === 'space' ? 'tag-purple' : 'tag-blue'">{{ it.kind === 'space' ? '空间' : '物品' }}</text>
@@ -82,6 +91,7 @@ const groupMeta = ref([]);
 const warnings = ref([]);
 const parseInfo = ref(null);
 let uidSeq = 0;
+const activeIndex = ref(0); // 当前查看的工作表分组
 
 const stats = computed(() => {
   const s = { item: 0, space: 0, invalid: 0 };
@@ -106,6 +116,8 @@ const groupView = computed(() => {
   for (const g of out) g.invalid = g.list.filter((x) => !x.valid).length;
   return out;
 });
+// 标签页只渲染当前组；索引钳制，删行/删组后不越界
+const activeGroup = computed(() => groupView.value[Math.min(activeIndex.value, groupView.value.length - 1)] || null);
 const validItems = computed(() => items.value.filter((x) => x.valid && !isExcluded(x.group_name)));
 function isExcluded(name) {
   const g = groupView.value.find((x) => x.name === (name || ''));
@@ -143,6 +155,7 @@ async function uploadParse(filePath) {
     groupMeta.value = Array.isArray(out.groups) ? out.groups.map((g) => ({ ...g, excluded: false })) : [];
     warnings.value = out.warnings || [];
     parseInfo.value = { ai_used: !!out.ai_used, strategy: out.strategy || out.source || '' };
+    activeIndex.value = 0;
     parsed.value = true;
     if (!items.value.length) toast('没有识别出确定的资源行，请核对模板格式');
   } catch (e) { /* request/upload 已全局 toast */ } finally {
@@ -191,7 +204,16 @@ async function submit() {
 .parse-info { font-size: 23rpx; color: #2563eb; margin-top: 14rpx; }
 .warn-line { font-size: 23rpx; color: #b45309; background: #fffbeb; border-radius: 10rpx; padding: 10rpx 16rpx; margin-top: 10rpx; }
 .stat-row { display: flex; gap: 12rpx; margin: 12rpx 0; flex-wrap: wrap; }
+.grp-tabs { white-space: nowrap; margin: 4rpx 0 18rpx; }
+.grp-tab { display: inline-flex; align-items: center; gap: 8rpx; max-width: 340rpx; background: #f1f5f9; border: 1rpx solid #e2e8f0; border-radius: 28rpx; padding: 10rpx 22rpx; margin-right: 12rpx; font-size: 24rpx; color: #475569; }
+.grp-tab.on { background: #eff6ff; border-color: #2563eb; color: #2563eb; font-weight: 700; }
+.grp-tab.off { opacity: .5; }
+.grp-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 230rpx; }
+.grp-tab-badge { background: #e2e8f0; border-radius: 16rpx; padding: 0 12rpx; font-size: 21rpx; }
+.grp-tab.on .grp-tab-badge { background: #dbeafe; }
+.grp-tab-dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: #ef4444; flex: none; }
 .grp { border: 1rpx solid #e2e8f0; border-radius: 16rpx; padding: 14rpx 16rpx; margin-bottom: 16rpx; }
+.grp-empty { text-align: center; color: #94a3b8; font-size: 24rpx; padding: 32rpx 0; }
 .grp.off { opacity: .55; background: #f8fafc; }
 .grp-head { display: flex; align-items: center; gap: 10rpx; margin-bottom: 8rpx; }
 .grp-name { font-size: 26rpx; font-weight: 700; color: #1e293b; flex: 1; }

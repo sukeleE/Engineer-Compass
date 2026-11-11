@@ -48,82 +48,89 @@
 
         <div class="ri-preview-head">
           <p class="ri-tip">
-            每个工作表对应一个分组，可整组取消勾选或就地修改组名；红色行需要修正，黄色行表示 AI 置信度较低。可直接修改类型、库存、容量、审批方式等字段。
+            顶部标签切换工作表（每个标签=一个分组），可整组取消勾选或就地修改组名；红色行需要修正，黄色行表示 AI 置信度较低。可直接修改类型、库存、容量、审批方式等字段。
           </p>
           <el-button size="small" plain @click="addRow">＋ 添加一行</el-button>
         </div>
 
-        <div class="ri-groups">
-          <section v-for="g in groupView" :key="g.key" class="ri-group" :class="{ excluded: g.excluded }">
-            <header class="ri-group-head">
-              <el-checkbox :model-value="!g.excluded" @change="(v) => toggleGroup(g, v)" />
-              <el-input v-model="g.name" size="small" class="ri-gname-input" @change="renameGroup(g)" />
-              <span class="ri-gmeta">
-                {{ g.list.length }} 条
-                <template v-if="g.invalid"> · <b class="ri-danger-text">异常 {{ g.invalid }}</b></template>
-                <template v-if="g.skipped"> · 跳过明细 {{ g.skipped }}</template>
-              </span>
-              <el-button link size="small" @click="g.open = !g.open">{{ g.open ? '收起' : '展开' }}</el-button>
-            </header>
-            <div v-show="g.open" class="ri-table-wrap">
-              <table class="ri-table">
-                <thead>
-                  <tr>
-                    <th style="width: 42px">#</th>
-                    <th style="width: 104px">类型*</th>
-                    <th style="min-width: 150px">名称*</th>
-                    <th style="width: 128px">规格型号</th>
-                    <th style="width: 104px">库存*</th>
-                    <th style="width: 70px">单位</th>
-                    <th style="min-width: 120px">位置/房间号</th>
-                    <th style="width: 104px">容量*</th>
-                    <th style="min-width: 150px">室内设备</th>
-                    <th style="width: 118px">审批方式</th>
-                    <th style="width: 105px">来源</th>
-                    <th style="width: 48px"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in g.list" :key="row._uid" :class="{ invalid: row.issues?.length, low: row.confidence === 'low' }">
-                    <td class="dim">{{ rowIndexMap[row._uid] + 1 }}</td>
-                    <td>
-                      <el-select v-model="row.kind" size="small" style="width: 92px">
-                        <el-option value="item" label="📦 物品" />
-                        <el-option value="space" label="🏢 空间" />
-                      </el-select>
-                    </td>
-                    <td>
-                      <el-input v-model="row.name" size="small" placeholder="资源名称" />
-                      <el-tag v-for="(issue, ii) in row.issues" :key="ii" size="small" type="danger" effect="plain"
-                        class="issue-tag" :title="issue">!</el-tag>
-                    </td>
-                    <td><el-input v-model="row.spec" size="small" placeholder="物品规格" :disabled="row.kind === 'space'" /></td>
-                    <td><el-input-number v-model="row.quantity" :min="1" :max="9999" size="small" controls-position="right"
-                      style="width: 96px" :disabled="row.kind === 'space'" /></td>
-                    <td><el-input v-model="row.unit" size="small" maxlength="8" placeholder="件" :disabled="row.kind === 'space'" /></td>
-                    <td><el-input v-model="row.location" size="small" placeholder="存放位置/房间号" /></td>
-                    <td><el-input-number v-model="row.capacity" :min="1" :max="9999" size="small" controls-position="right"
-                      style="width: 96px" :disabled="row.kind === 'item'" /></td>
-                    <td><el-input v-model="row.equipment_text" size="small" placeholder="投影、白板…"
-                      :disabled="row.kind === 'item'" /></td>
-                    <td>
-                      <el-select v-model="row.approve_mode" size="small" clearable placeholder="项目默认" style="width: 104px">
-                        <el-option value="approval" label="需审批" />
-                        <el-option value="first_come" label="先到先得" />
-                        <el-option value="" label="项目默认" />
-                      </el-select>
-                    </td>
-                    <td class="source-cell dim" :title="`${row._sheet || ''} 第 ${row._row || ''} 行`">
-                      <template v-if="row._sheet">{{ row._sheet }} / 第{{ row._row }}行</template>
-                      <template v-else>手动</template>
-                    </td>
-                    <td><el-button link type="danger" size="small" @click="removeRow(row)">删</el-button></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
+        <div class="ri-tabs">
+          <button v-for="(g, idx) in groupView" :key="g.key" type="button" class="ri-tab"
+            :class="{ active: idx === activeIndex, excluded: g.excluded }" :title="g.name"
+            @click="activeIndex = idx">
+            <span class="ri-tab-name">{{ g.name }}</span>
+            <span class="ri-tab-badge">{{ g.list.length }}</span>
+            <span v-if="g.invalid" class="ri-tab-dot" :title="`异常 ${g.invalid} 行`"></span>
+          </button>
         </div>
+        <section v-if="activeGroup" :key="activeGroup.key" class="ri-group" :class="{ excluded: activeGroup.excluded }">
+          <header class="ri-group-head">
+            <el-checkbox :model-value="!activeGroup.excluded" @change="(v) => toggleGroup(activeGroup, v)" />
+            <el-input v-model="activeGroup.name" size="small" class="ri-gname-input" @change="renameGroup(activeGroup)" />
+            <span class="ri-gmeta">
+              {{ activeGroup.list.length }} 条
+              <template v-if="activeGroup.invalid"> · <b class="ri-danger-text">异常 {{ activeGroup.invalid }}</b></template>
+              <template v-if="activeGroup.skipped"> · 跳过明细 {{ activeGroup.skipped }}</template>
+            </span>
+          </header>
+          <div v-if="activeGroup.list.length" class="ri-table-wrap">
+            <table class="ri-table">
+              <thead>
+                <tr>
+                  <th style="width: 42px">#</th>
+                  <th style="width: 104px">类型*</th>
+                  <th style="min-width: 150px">名称*</th>
+                  <th style="width: 128px">规格型号</th>
+                  <th style="width: 104px">库存*</th>
+                  <th style="width: 70px">单位</th>
+                  <th style="min-width: 120px">位置/房间号</th>
+                  <th style="width: 104px">容量*</th>
+                  <th style="min-width: 150px">室内设备</th>
+                  <th style="width: 118px">审批方式</th>
+                  <th style="width: 105px">来源</th>
+                  <th style="width: 48px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in activeGroup.list" :key="row._uid" :class="{ invalid: row.issues?.length, low: row.confidence === 'low' }">
+                  <td class="dim">{{ rowIndexMap[row._uid] + 1 }}</td>
+                  <td>
+                    <el-select v-model="row.kind" size="small" style="width: 92px">
+                      <el-option value="item" label="📦 物品" />
+                      <el-option value="space" label="🏢 空间" />
+                    </el-select>
+                  </td>
+                  <td>
+                    <el-input v-model="row.name" size="small" placeholder="资源名称" />
+                    <el-tag v-for="(issue, ii) in row.issues" :key="ii" size="small" type="danger" effect="plain"
+                      class="issue-tag" :title="issue">!</el-tag>
+                  </td>
+                  <td><el-input v-model="row.spec" size="small" placeholder="物品规格" :disabled="row.kind === 'space'" /></td>
+                  <td><el-input-number v-model="row.quantity" :min="1" :max="9999" size="small" controls-position="right"
+                    style="width: 96px" :disabled="row.kind === 'space'" /></td>
+                  <td><el-input v-model="row.unit" size="small" maxlength="8" placeholder="件" :disabled="row.kind === 'space'" /></td>
+                  <td><el-input v-model="row.location" size="small" placeholder="存放位置/房间号" /></td>
+                  <td><el-input-number v-model="row.capacity" :min="1" :max="9999" size="small" controls-position="right"
+                    style="width: 96px" :disabled="row.kind === 'item'" /></td>
+                  <td><el-input v-model="row.equipment_text" size="small" placeholder="投影、白板…"
+                    :disabled="row.kind === 'item'" /></td>
+                  <td>
+                    <el-select v-model="row.approve_mode" size="small" clearable placeholder="项目默认" style="width: 104px">
+                      <el-option value="approval" label="需审批" />
+                      <el-option value="first_come" label="先到先得" />
+                      <el-option value="" label="项目默认" />
+                    </el-select>
+                  </td>
+                  <td class="source-cell dim" :title="`${row._sheet || ''} 第 ${row._row || ''} 行`">
+                    <template v-if="row._sheet">{{ row._sheet }} / 第{{ row._row }}行</template>
+                    <template v-else>手动</template>
+                  </td>
+                  <td><el-button link type="danger" size="small" @click="removeRow(row)">删</el-button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="ri-group-empty dim">该工作表无有效资源行（空表或明细均被跳过），仍可改名或整组排除。</p>
+        </section>
       </template>
 
       <input v-if="rows.length" ref="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" />
@@ -164,6 +171,7 @@ const dragOver = ref(false);
 const autoImport = ref(true);
 const parseInfo = ref({ strategy: '', aiUsed: false, canAuto: false });
 let uidSeq = 0;
+const activeIndex = ref(0); // 当前查看的分组（按索引追踪，组改名不影响）
 
 const STRATEGY_ZH = {
   standard_item: '标准物品资源表',
@@ -213,6 +221,11 @@ const groupView = computed(() => {
   for (const g of out) g.invalid = g.list.filter((r) => r.issues?.length).length;
   return out;
 });
+// 标签页只渲染当前组；索引钳制，删组/删行后不会越界
+const activeGroup = computed(() => groupView.value[Math.min(activeIndex.value, groupView.value.length - 1)] || null);
+watch(() => groupView.value.length, (n) => {
+  if (activeIndex.value > n - 1) activeIndex.value = Math.max(0, n - 1);
+});
 const rowIndexMap = computed(() => {
   const m = {};
   rows.value.forEach((r, i) => { m[r._uid] = i; });
@@ -238,6 +251,7 @@ function resetState() {
   dragOver.value = false;
   autoImport.value = true;
   parseInfo.value = { strategy: '', aiUsed: false, canAuto: false };
+  activeIndex.value = 0;
 }
 function blankRow(kind = 'item', groupName = '') {
   return {
@@ -249,7 +263,9 @@ function blankRow(kind = 'item', groupName = '') {
 }
 function addRow() {
   if (rows.value.length >= IMPORT_MAX) return ElMessage.warning(`一次最多导入 ${IMPORT_MAX} 条`);
-  rows.value.push(blankRow('item'));
+  // 加到当前查看的分组（origName 是规范 group_name，'未分组' 对应空串）
+  const groupName = activeGroup.value ? activeGroup.value.origName : '';
+  rows.value.push(blankRow('item', groupName));
 }
 function removeRow(row) {
   const i = rows.value.findIndex((r) => r._uid === row._uid);
@@ -322,6 +338,7 @@ async function handleFile(file) {
     parseInfo.value = { strategy: d.strategy || d.source || '', aiUsed: Boolean(d.ai_used), canAuto: Boolean(d.can_auto_import) };
     groupMeta.value = Array.isArray(d.groups) ? d.groups.map((g) => ({ ...g, excluded: false })) : [];
     rows.value = (d.items || []).map(toCommonRow);
+    activeIndex.value = 0;
 
     if (!rows.value.length) {
       resetState();
@@ -453,18 +470,34 @@ async function downloadTpl(kind = 'mixed') {
 .ri-tip { font-size: 12.5px; color: var(--text-3); margin: 4px 0 10px; }
 .dim { color: var(--text-3); }
 .ri-danger-text { color: var(--el-color-danger, #ef4444); }
-.ri-groups { display: flex; flex-direction: column; gap: 12px; max-height: 56vh; overflow-y: auto; padding-right: 4px; }
+.ri-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border-2, #d8dee8); }
+.ri-tab {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 220px;
+  padding: 6px 12px; border-radius: 18px; border: 1px solid var(--border-2, #d8dee8);
+  background: var(--bg-2, #f6f8fa); color: var(--text-2, #475569); font-size: 12.5px; cursor: pointer;
+}
+.ri-tab:hover { border-color: var(--el-color-primary, #409eff); }
+.ri-tab.active {
+  border-color: var(--el-color-primary, #409eff); color: var(--el-color-primary, #409eff);
+  background: color-mix(in srgb, #409eff 8%, white); font-weight: 600;
+}
+.ri-tab.excluded { opacity: .5; }
+.ri-tab.excluded .ri-tab-name { text-decoration: line-through; }
+.ri-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.ri-tab-badge { background: rgba(15, 23, 42, .08); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.ri-tab.active .ri-tab-badge { background: color-mix(in srgb, #409eff 18%, white); }
+.ri-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--el-color-danger, #ef4444); flex: none; }
 .ri-group { border: 1px solid var(--border-2, #d8dee8); border-radius: 10px; overflow: hidden; }
 .ri-group.excluded { opacity: .55; background: var(--bg-2, #f6f8fa); }
 .ri-group-head {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; background: var(--bg-2, #f6f8fa);
   border-bottom: 1px solid var(--border-2, #d8dee8);
-  position: sticky; top: 0; z-index: 1;
 }
 .ri-gname-input { width: 260px; }
 .ri-gmeta { font-size: 12.5px; color: var(--text-3); margin-right: auto; }
-.ri-table-wrap { overflow-x: auto; }
+.ri-group-empty { padding: 30px 12px; text-align: center; font-size: 13px; margin: 0; }
+.ri-table-wrap { overflow: auto; max-height: 50vh; }
 .ri-table {
   width: 100%; border-collapse: collapse; min-width: 1080px;
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border-2); font-size: 12.5px; text-align: left; vertical-align: middle; }

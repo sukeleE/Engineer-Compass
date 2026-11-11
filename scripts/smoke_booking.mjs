@@ -350,14 +350,18 @@ try {
       ['组测机械臂', 'ARM-01', 2, '不同房间同名设备'],
     ]), '仓库');
     XLSX.utils.book_append_sheet(gwb, XLSX.utils.aoa_to_sheet([['空表标题'], ['家具类', '', '']]), 'N2-208');
+    XLSX.utils.book_append_sheet(gwb, XLSX.utils.aoa_to_sheet([]), '真空表'); // 无 item 无 skipped，靠 out.groups 合并保留
     const multiBuf = XLSX.write(gwb, { type: 'buffer', bookType: 'xlsx' });
     g = await upload(`/booking/projects/${P.id}/resources/auto-parse`, { token: tA, file: multiBuf, filename: 'multi.xlsx' });
     ok('多 Sheet 自动解析命中 standard_item 且不调 AI', g.status === 200 && g.data.strategy === 'standard_item' && g.data.ai_used === false, g.data);
     const gN113 = g.data.groups.find((x) => x.name === 'N2-113');
     const gCk = g.data.groups.find((x) => x.name === '仓库');
     const gEmpty = g.data.groups.find((x) => x.name === 'N2-208');
+    const gVoid = g.data.groups.find((x) => x.name === '真空表');
     ok('分组摘要与工作表结构一致（2/1/0 条，空表保留 0 条分组）',
       gN113?.items === 2 && gCk?.items === 1 && gEmpty?.items === 0, g.data.groups);
+    ok('纯空 Sheet 经路由合并 out.groups 后保留 0 条分组',
+      !!gVoid && gVoid.items === 0 && g.data.groups.length === 4, g.data.groups.map((x) => x.name));
     ok('资产明细块与分段标题跳过，跨组同名设备都保留', g.data.items.length === 3 &&
       g.data.items.filter((x) => x.name === '组测机械臂').length === 2 &&
       g.data.items.every((x) => x.group_name === x._sheet), g.data.items);

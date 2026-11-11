@@ -424,12 +424,15 @@ try {
   const [n0, n1] = await Promise.all([nameInputs.nth(0).inputValue(), nameInputs.nth(1).inputValue()]);
   const groupHeads = dlg(pageA).locator('.ri-group-head');
   const groupName = await groupHeads.first().locator('.ri-gname-input input').inputValue();
+  const tabCount7b = await dlg(pageA).locator('.ri-tab').count();
+  const tabName7b = await dlg(pageA).locator('.ri-tab-name').first().innerText();
   const importText = await dlg(pageA).innerText();
-  ok('CSV 解析回填：单工作表成 1 分组、名称入框、可导入/分组计数',
+  ok('CSV 解析回填：顶部 1 个工作表标签、名称入框、可导入/分组计数',
     n0 === 'UI导入电池盒' && n1 === 'UI导入扎带堆' && rowCount === 2 &&
     (await groupHeads.count()) === 1 && groupName === 'CSV' &&
+    tabCount7b === 1 && tabName7b === 'CSV' &&
     importText.includes('2 条可导入 / 1 个分组') && importText.includes('物品 2 条'),
-    `n0=${n0} n1=${n1} rows=${rowCount} group=${groupName}`);
+    `n0=${n0} n1=${n1} rows=${rowCount} group=${groupName} tabs=${tabCount7b}`);
   // 库存列（新表第 5 列：#/类型/名称/规格/库存）回填数字
   const qty0 = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(5) input').nth(0).inputValue();
   ok('库存数字回填（字符串→数字框）', qty0 === '12', `qty0=${qty0}`);
@@ -454,6 +457,7 @@ try {
       ['UI另一组电烙铁', '936D', '8', '把', 'N2-202', '先到先得']];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaA), 'N2-201');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaB), 'N2-202');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([]), '空房间'); // 空 Sheet：保留 0 条标签
     writeFileSync(xlsxPath, XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
   await pageA.locator('.rp-bar .el-dropdown__caret-button').click();
@@ -462,21 +466,45 @@ try {
   const autoBox2 = dlg(pageA).locator('.ri-auto-check .el-checkbox__input');
   if ((await autoBox2.getAttribute('aria-checked')) !== 'false') await autoBox2.click();
   await dlg(pageA).locator('input[type=file]').setInputFiles(xlsxPath);
-  await dlg(pageA).locator('.ri-group').nth(1).waitFor({ timeout: 15000 });
-  const gNames = await dlg(pageA).locator('.ri-gname-input input').evaluateAll((els) => els.map((e) => e.value));
-  const multiRows = await dlg(pageA).locator('.ri-table tbody tr').count();
+  const tabs = dlg(pageA).locator('.ri-tab');
+  await tabs.nth(1).waitFor({ timeout: 15000 });
+  const tabNames = await dlg(pageA).locator('.ri-tab-name').allInnerTexts();
   const multiText = await dlg(pageA).innerText();
-  // 名称在 el-input 的 value 里（不进 innerText），按输入框值统计跨组同名
-  const nameVals = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(3) input')
-    .evaluateAll((els) => els.map((e) => e.value));
-  const dupCount = nameVals.filter((x) => x === 'UI跨组示波器').length;
-  ok('多 Sheet 预览：按工作表分 2 组、共 4 行、跨组同名都保留',
-    gNames.length === 2 && gNames.includes('N2-201') && gNames.includes('N2-202') &&
-    multiRows === 4 && dupCount === 2 &&
-    multiText.includes('4 条可导入 / 2 个分组'),
-    `groups=${gNames.join('|')} rows=${multiRows} dup=${dupCount}`);
-  // 整组排除：勾掉第一组后只剩 2 条，再勾回恢复 4 条
+  // 一次只渲染当前标签的表格：逐标签点击读取行数/名称/面板组名
+  const perTab = [];
+  for (let i = 0; i < 2; i++) {
+    await tabs.nth(i).click();
+    await dlg(pageA).locator('.ri-table tbody tr').first().waitFor();
+    const rows = await dlg(pageA).locator('.ri-table tbody tr').count();
+    const names = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(3) input')
+      .evaluateAll((els) => els.map((e) => e.value));
+    const headName = await dlg(pageA).locator('.ri-gname-input input').inputValue();
+    perTab.push({ rows, names, headName });
+  }
+  const dupCount = perTab.flatMap((t) => t.names).filter((x) => x === 'UI跨组示波器').length;
+  ok('多 Sheet 预览：顶部 3 个工作表标签（含空表）、有数据组各 2 行、跨组同名都保留',
+    (await tabs.count()) === 3 && tabNames.includes('N2-201') && tabNames.includes('N2-202') && tabNames.includes('空房间') &&
+    perTab.every((t) => t.rows === 2) && perTab.map((t) => t.headName).join('|') === 'N2-201|N2-202' &&
+    dupCount === 2 && multiText.includes('4 条可导入 / 2 个分组'),
+    `tabs=${tabNames.join('|')} rows=${perTab.map((t) => t.rows).join('|')} dup=${dupCount}`);
+  // 空 Sheet 标签可切换：显示空态提示且无表格行（空表不计入「个分组」计数）
+  await tabs.nth(2).click();
+  const emptyVisible = await dlg(pageA).locator('.ri-group-empty').isVisible();
+  const emptyRows = await dlg(pageA).locator('.ri-table tbody tr').count();
+  ok('空工作表标签显示空态提示且无表格行', emptyVisible && emptyRows === 0, `rows=${emptyRows}`);
+  await tabs.nth(0).click();
+  // 切换标签后已编辑的值保留（数据在行模型上，切组不丢输入）
+  await tabs.nth(0).click();
+  const qtyInput = dlg(pageA).locator('.ri-table tbody tr').first().locator('td:nth-child(5) input');
+  await qtyInput.fill('99');
+  await tabs.nth(1).click();
+  await tabs.nth(0).click();
+  const keptQty = await dlg(pageA).locator('.ri-table tbody tr').first().locator('td:nth-child(5) input').inputValue();
+  ok('切换工作表标签后已编辑库存值保留', keptQty === '99', `kept=${keptQty}`);
+  // 整组排除：切回第一组勾掉后只剩 2 条，标签置灰；再勾回恢复 4 条
   await dlg(pageA).locator('.ri-group').first().locator('.ri-group-head .el-checkbox__input').click();
+  ok('被排除的工作表标签带 excluded 置灰样式',
+    await tabs.nth(0).evaluate((el) => el.classList.contains('excluded')));
   await dlg(pageA).getByRole('button', { name: /导入 2 条/ }).waitFor({ timeout: 5000 });
   await dlg(pageA).locator('.ri-group').first().locator('.ri-group-head .el-checkbox__input').click();
   await dlg(pageA).getByRole('button', { name: /导入 4 条/ }).waitFor({ timeout: 5000 });

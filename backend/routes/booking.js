@@ -676,6 +676,20 @@ function enrichBookingImportItems(out, project) {
     if (!groupMap.has(key)) groupMap.set(key, { name: key, sheet_index: Number(s.sheet_index) || 0, items: 0, invalid: 0, skipped: 0, excluded: false });
     groupMap.get(key).skipped += 1;
   }
+  // 解析器的 groups 覆盖全部工作表（含纯空 Sheet：无 item 也无 skipped），补齐 0 条分组，
+  // 让前端标签与原表工作表一一对应；AI 通道不返回 groups 时保持按 items/skipped 重建的行为
+  if (Array.isArray(out.groups)) {
+    for (const pg of out.groups) {
+      const key = String(pg.name || '');
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          name: key,
+          sheet_index: Number.isInteger(Number(pg.sheet_index)) ? Number(pg.sheet_index) : 0,
+          items: 0, invalid: 0, skipped: pg.skipped || 0, excluded: false,
+        });
+      }
+    }
+  }
   const groups = [...groupMap.values()].sort((a, b) => a.sheet_index - b.sheet_index);
   return {
     items,
