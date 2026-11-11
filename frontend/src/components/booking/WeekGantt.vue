@@ -21,6 +21,15 @@
         style="margin-left: auto" @change="(v) => emit('toggle-history', v)" />
     </div>
 
+    <!-- 分组标签：按资源分组（导入时的工作表/房间）切换查看，缓解资源过多时的拥挤 -->
+    <div v-if="showGroupTabs" class="wg-groups">
+      <button v-for="g in groupTabs" :key="g.key" type="button"
+        class="wg-grp" :class="{ on: groupFilter === g.key }" @click="pickGroup(g.key)">
+        <span class="wg-grp-name">{{ g.label }}</span>
+        <span class="wg-grp-badge">{{ g.count }}</span>
+      </button>
+    </div>
+
     <!-- 桌面：7×30 大网格甘特 -->
     <div v-if="!isMobile" ref="scrollEl" v-loading="loading" class="wg-scroll">
       <div v-if="rows.length" class="wg-grid" :class="{ nocreate: project.status !== 'open' }">
@@ -74,7 +83,8 @@
           </div>
         </template>
       </div>
-      <el-empty v-else :description="kindFilter.length === 0 ? '当前筛选下没有资源' : '项目内还没有可用资源'" :image-size="90" />
+      <el-empty v-else :description="kindFilter.length === 0 ? '当前类型筛选下没有资源'
+        : (groupFilter !== '__all__' ? '该分组下没有资源' : '项目内还没有可用资源')" :image-size="90" />
     </div>
 
     <!-- 窄屏：日期选择 + 资源手风琴 -->
@@ -141,6 +151,7 @@ const WD_CN = ['日', '一', '二', '三', '四', '五', '六'];
 const rulerHrs = [7, 9, 11, 13, 15, 17, 19, 21];
 
 const kindFilter = ref(KINDS.map((k) => k.key));
+const groupFilter = ref('__all__'); // __all__=全部分组；否则为资源 group_name（空串即「未分组」）
 const weekStartMonday = ref(true);
 const showHistory = ref(false);
 const todayIdx = (from) => {
@@ -194,11 +205,30 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+// ---- 分组标签：基于当前类型筛选后的资源按 group_name 聚合（空组名=未分组），保持后端返回顺序 ----
+const groupTabs = computed(() => {
+  const list = (props.data?.resources || []).filter((r) => kindFilter.value.includes(r.kind));
+  const map = new Map();
+  for (const r of list) {
+    const key = r.group_name || '';
+    if (!map.has(key)) map.set(key, { key, label: key || '未分组', count: 0 });
+    map.get(key).count += 1;
+  }
+  return [{ key: '__all__', label: '全部', count: list.length }, ...[...map.values()]];
+});
+// 除「全部」外还有 ≥2 个真实分组时才显示标签栏，单分组项目保持原样
+const showGroupTabs = computed(() => groupTabs.value.length > 2);
+function pickGroup(key) {
+  groupFilter.value = key;
+  nextTick(scrollToToday); // 桌面端切换后重新把今天列滚入视口，窄屏 scrollToToday 自动跳过
+}
+
 // ---- 行模型：资源 + 预约块贪心泳道 ----
 const rows = computed(() => {
   if (!props.data) return [];
   return props.data.resources
     .filter((r) => kindFilter.value.includes(r.kind))
+    .filter((r) => groupFilter.value === '__all__' || (r.group_name || '') === groupFilter.value)
     .map((resource) => {
       const items = (props.data.bookings || [])
         .filter((b) => b.resource_id === resource.id)
@@ -403,6 +433,12 @@ onMounted(() => {
 });
 // timeline 数据到达/翻周/历史切换后重新定位（不监听用户纯滚动）
 watch(() => props.data, () => nextTick(scrollToToday));
+// 类型筛选变化或数据刷新后当前分组可能消失，回落「全部」
+watch(groupTabs, (tabs) => {
+  if (groupFilter.value !== '__all__' && !tabs.some((t) => t.key === groupFilter.value)) {
+    groupFilter.value = '__all__';
+  }
+});
 onBeforeUnmount(() => { clearInterval(nowTimer); mq.removeEventListener?.('change', syncMq); cleanupDrag(); });
 </script>
 
@@ -411,6 +447,21 @@ onBeforeUnmount(() => { clearInterval(nowTimer); mq.removeEventListener?.('chang
 .wg-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .wg-range { font-size: 14px; color: var(--text-2); white-space: nowrap; }
 .wg-kinds { margin-left: 8px; }
+
+.wg-groups { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; }
+.wg-grp {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 220px;
+  padding: 5px 12px; border-radius: 18px; border: 1px solid var(--border-2, #d8dee8);
+  background: var(--bg-2, #f6f8fa); color: var(--text-2, #475569); font-size: 12.5px; cursor: pointer;
+  &:hover { border-color: var(--primary, #2563eb); }
+  &.on {
+    border-color: var(--primary, #2563eb); color: var(--primary, #2563eb);
+    background: color-mix(in srgb, #2563eb 8%, white); font-weight: 600;
+  }
+}
+.wg-grp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.wg-grp-badge { background: rgba(15, 23, 42, .08); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.wg-grp.on .wg-grp-badge { background: color-mix(in srgb, #2563eb 16%, white); }
 
 .wg-scroll { overflow: auto; border: 1px solid var(--border-2); border-radius: 10px; background: var(--card-bg); max-height: 70vh; }
 // 列数必须与脚本里 TOTAL = 7 * SLOTS_PER_DAY 一致；首列 = 资源名列宽

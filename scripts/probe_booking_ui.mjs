@@ -10,6 +10,7 @@
 //   → 390px 窄屏：手风琴建约全链路、无横溢
 //   → 表格导入：模板下载 + 选 CSV 解析回填（告警/warnings）→ bulk 落库新卡
 //   → 整组排除含重名红行的「总表」：排除前拦截、排除后红点红标消失并放行
+//   → 周视图分组标签：分组切换过滤资源行、类型筛选联动与分组失效兜底
 //   全程无 pageerror、无意外 4xx/5xx
 //
 // 沙盒：后端 cwd=临时目录（无 .env）+ 临时 DB + 临时上传目录，跑完即弃，绝不碰真实数据。
@@ -574,6 +575,42 @@ try {
   ok('排除总表后成功导入且仅落房间A资源',
     panel3.includes('UI房间A示波器') && !panel3.includes('UI汇总钳工台'),
     panel3.replace(/\n/g, ' ').slice(0, 300));
+
+  // ===== 7e. 周视图分组标签：按资源分组切换查看，缓解资源过多时的拥挤 =====
+  await pageA.locator('.tabchip', { hasText: '周视图' }).click();
+  const grpBar = pageA.locator('.wg-groups');
+  await grpBar.waitFor({ timeout: 8000 });
+  const grpNames = await pageA.locator('.wg-grp .wg-grp-name').allInnerTexts();
+  const grpBadges = await pageA.locator('.wg-grp .wg-grp-badge').allInnerTexts();
+  ok('周视图分组标签含全部/未分组/CSV 与三个多表导入分组且徽标计数正确',
+    JSON.stringify(grpNames) === JSON.stringify(['全部', '未分组', 'CSV', 'N2-201', 'N2-202', '房间A']) &&
+    JSON.stringify(grpBadges) === JSON.stringify(['9', '2', '2', '2', '2', '1']),
+    `${grpNames.join('|')} / ${grpBadges.join('|')}`);
+  ok('默认选中「全部」且甘特渲染全部 9 个资源行',
+    (await pageA.locator('.wg-grp.on .wg-grp-name').innerText()) === '全部' &&
+    (await pageA.locator('.wg-track').count()) === 9);
+  await pageA.locator('.wg-grp', { hasText: 'N2-201' }).click();
+  await pageA.waitForFunction(() => document.querySelectorAll('.wg-track').length === 2, undefined, { timeout: 5000 });
+  const n201Names = await pageA.locator('.wg-name .wg-ntext').allInnerTexts();
+  ok('切到 N2-201 后甘特只渲染该组 2 行且名称正确、不含其他组资源',
+    (await pageA.locator('.wg-grp.on .wg-grp-name').innerText()) === 'N2-201' &&
+    n201Names.some((t) => t.includes('UI跨组示波器')) && n201Names.some((t) => t.includes('UI双组万用表')) &&
+    !n201Names.some((t) => t.includes('UI房间A示波器')), n201Names.join('|'));
+  await pageA.locator('.wg-grp', { hasText: '房间A' }).click();
+  await pageA.waitForFunction(() => document.querySelectorAll('.wg-track').length === 1, undefined, { timeout: 5000 });
+  const roomNames = await pageA.locator('.wg-name .wg-ntext').allInnerTexts();
+  ok('切到房间A后甘特只剩 1 行', roomNames.length === 1 && roomNames[0].includes('UI房间A示波器'), roomNames.join('|'));
+  // 停在房间A（纯物品组）时取消物品筛选：该组消失，watch 兜底回落「全部」，单分组下标签栏隐藏
+  await pageA.locator('.wg-kinds .el-checkbox-button', { hasText: '物品资源' }).click();
+  await grpBar.waitFor({ state: 'hidden', timeout: 5000 });
+  ok('只留空间资源时分组标签栏隐藏且甘特只剩 1 个空间行',
+    (await pageA.locator('.wg-groups').count()) === 0 && (await pageA.locator('.wg-track').count()) === 1);
+  // 恢复物品筛选：标签栏回来，选中项已兜底回落「全部」，9 行恢复
+  await pageA.locator('.wg-kinds .el-checkbox-button', { hasText: '物品资源' }).click();
+  await grpBar.waitFor({ state: 'visible', timeout: 5000 });
+  ok('恢复物品筛选后标签栏回来、选中回落「全部」且 9 行恢复',
+    (await pageA.locator('.wg-grp.on .wg-grp-name').innerText()) === '全部' &&
+    (await pageA.locator('.wg-track').count()) === 9);
 
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
