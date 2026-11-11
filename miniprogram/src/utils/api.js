@@ -276,6 +276,7 @@ export const api = {
   bookingTeamUpdate: (tid, card) => request('/booking/teams/' + tid, { method: 'PUT', data: card }),
   bookingTeamDelete: (tid) => request('/booking/teams/' + tid, { method: 'DELETE' }),
   bookingResourceBulk: (pid, items) => request('/booking/projects/' + pid + '/resources/bulk', { method: 'POST', data: { items: items } }),
+  bookingResourceGroupRename: (pid, from, to) => request('/booking/projects/' + pid + '/resource-groups/rename', { method: 'POST', data: { from: from, to: to } }),
   bookingResourceAutoParse: (pid, filePath) => uploadFile('/booking/projects/' + pid + '/resources/auto-parse', filePath, { name: 'file' }),
   bookingBorrowRecords: (p) => request('/booking/borrow-records' + qs(p)),
 

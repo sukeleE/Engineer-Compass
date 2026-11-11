@@ -75,6 +75,61 @@ migCol('booking', 'item_thumb', "ALTER TABLE booking ADD COLUMN item_thumb TEXT 
 migCol('booking', 'item_kind', "ALTER TABLE booking ADD COLUMN item_kind TEXT DEFAULT ''");   // 借用登记类型：device / room
 migCol('booking_resource', 'is_carrier', "ALTER TABLE booking_resource ADD COLUMN is_carrier INTEGER NOT NULL DEFAULT 0"); // 借用登记占位资源
 db.exec("UPDATE booking_resource SET is_carrier = 1 WHERE name = '借用登记' AND is_carrier = 0"); // 老库按名占位资源一次性回填
+migCol('booking_resource', 'group_name', "ALTER TABLE booking_resource ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"); // 表格导入分组（工作表名），空=未分组
+
+// 一次性表重建：唯一约束由 (project_id, name) 放宽为 (project_id, group_name, name)，
+// 支持不同工作表（房间）下的同名设备。SQLite 无法直接改表约束：显式带 id 搬运，
+// 保证 booking 外键引用不断，重建后用 foreign_key_check 复检。新库 schema.sql 已是新约束，守卫直接跳过。
+{
+  const brDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'booking_resource'").get()?.sql || '';
+  if (/UNIQUE\s*\(\s*project_id\s*,\s*name\s*\)/i.test(brDdl)) {
+    db.exec('PRAGMA foreign_keys = OFF;'); // 连接级 PRAGMA 不能在事务内切换，必须先关再开事务
+    try {
+      db.exec('BEGIN;');
+      db.exec(`CREATE TABLE booking_resource_new (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id   INTEGER NOT NULL REFERENCES booking_project(id) ON DELETE RESTRICT,
+        kind         TEXT NOT NULL,
+        is_space     INTEGER NOT NULL DEFAULT 0,
+        name         TEXT NOT NULL,
+        spec         TEXT DEFAULT '',
+        location     TEXT DEFAULT '',
+        group_name   TEXT NOT NULL DEFAULT '',
+        capacity     INTEGER,
+        quantity     INTEGER NOT NULL DEFAULT 1,
+        unit         TEXT DEFAULT '',
+        params       TEXT NOT NULL DEFAULT '{}',
+        image        TEXT DEFAULT '',
+        damaged_qty  INTEGER NOT NULL DEFAULT 0,
+        approve_mode TEXT NOT NULL DEFAULT 'approval',
+        status       TEXT NOT NULL DEFAULT 'active',
+        is_carrier   INTEGER NOT NULL DEFAULT 0,
+        created_by   INTEGER REFERENCES user(id) ON DELETE SET NULL,
+        create_time  TEXT DEFAULT (datetime('now','localtime')),
+        update_time  TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE (project_id, group_name, name)
+      );`);
+      db.exec(`INSERT INTO booking_resource_new
+        (id, project_id, kind, is_space, name, spec, location, group_name, capacity, quantity, unit, params, image, damaged_qty, approve_mode, status, is_carrier, created_by, create_time, update_time)
+        SELECT id, project_id, kind, is_space, name, spec, location, group_name, capacity, quantity, unit, params, image, damaged_qty, approve_mode, status, is_carrier, created_by, create_time, update_time
+        FROM booking_resource;`);
+      db.exec('DROP TABLE booking_resource;');
+      db.exec('ALTER TABLE booking_resource_new RENAME TO booking_resource;');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_bk_resource_pstatus ON booking_resource(project_id, status);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_bk_resource_pkind ON booking_resource(project_id, kind);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_bk_resource_pgroup ON booking_resource(project_id, group_name);');
+      db.exec('COMMIT;');
+    } catch (e) {
+      try { db.exec('ROLLBACK;'); } catch { /* 事务已结束 */ }
+      throw e;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON;');
+    }
+    const fkIssues = db.prepare('PRAGMA foreign_key_check').all();
+    if (fkIssues.length) throw new Error('booking_resource 分组迁移外键复检失败：' + JSON.stringify(fkIssues));
+  }
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_bk_resource_pgroup ON booking_resource(project_id, group_name);'); // 分组索引（老库补列后建，新库 schema 已含列）
 migCol('announcement', 'popup', 'ALTER TABLE announcement ADD COLUMN popup INTEGER NOT NULL DEFAULT 0'); // 公告弹窗强提醒（更新/维护通告）
 
 // ---- user_version 闸门：只对「升级前的老库」执行一次的存量数据回填 ----

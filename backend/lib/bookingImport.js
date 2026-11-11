@@ -5,8 +5,8 @@
 import * as XLSX from 'xlsx';
 import { parseCsvText, decodeCsvBuffer } from './csvText.js';
 
-export const BOOKING_IMPORT_MAX = 200;
-export const BOOKING_IMPORT_LIMIT_BYTES = 10 * 1024 * 1024;
+export const BOOKING_IMPORT_MAX = 2000;
+export const BOOKING_IMPORT_LIMIT_BYTES = 100 * 1024 * 1024;
 
 export class BookingImportError extends Error {}
 
@@ -14,7 +14,7 @@ const cellText = (v) => (v === null || v === undefined ? '' : String(v).trim());
 
 // 表头别名（有序：先精确等值，再 includes 包含）
 const HEAD_ALIASES = {
-  name: ['名称', '资源名称', '物品名称', '空间名称', '资源名', '物品', '空间'],
+  name: ['品名', '名称', '资源名称', '物品名称', '空间名称', '资源名', '物品', '空间'],
   approve: ['审批方式', '预约方式', '审批模式'],
   space: {
     location: ['位置', '房间号', '教室', '地点'],
@@ -145,12 +145,33 @@ export function recognizeBookingXlsx(kind, buf) {
   } catch (e) {
     throw new BookingImportError(`Excel 解析失败：${String(e?.message || e).slice(0, 100)}，请确认文件未损坏或另存为 .xlsx/.csv`);
   }
-  const sn = wb.SheetNames?.[0];
-  if (!sn) throw new BookingImportError('Excel 里没有工作表');
-  const ws = wb.Sheets[sn];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
-  const { items, warnings } = parseBookingAoa(kind, aoa);
-  return { items, warnings: [`工作表「${sn}」`, ...warnings], source: 'xlsx' };
+  const names = wb.SheetNames || [];
+  if (!names.length) throw new BookingImportError('Excel 里没有工作表');
+  // 多工作表：逐表解析并带上 _sheet/_sheet_index，单个表无表头只告警跳过，不影响其他表
+  const items = [];
+  const warnings = [];
+  let truncated = 0;
+  names.forEach((sn, si) => {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, blankrows: false, defval: '' });
+    let parsed;
+    try {
+      parsed = parseBookingAoa(kind, aoa);
+    } catch (e) {
+      if (e instanceof BookingImportError) {
+        warnings.push(`工作表「${sn}」未识别到有效表头，已跳过`);
+        return;
+      }
+      throw e;
+    }
+    for (const it of parsed.items) {
+      if (items.length >= BOOKING_IMPORT_MAX) { truncated += 1; continue; }
+      items.push({ ...it, _sheet: sn, _sheet_index: si });
+    }
+    warnings.push(...parsed.warnings.map((w) => `「${sn}」${w}`));
+  });
+  if (truncated) warnings.push(`最多导入 ${BOOKING_IMPORT_MAX} 条，已截断后续 ${truncated} 行`);
+  if (!items.length) warnings.push('所有工作表均未识别到有效数据行');
+  return { items, warnings: [`共 ${names.length} 个工作表`, ...warnings], source: 'xlsx', truncated: truncated > 0 };
 }
 
 export function recognizeBookingCsv(kind, buf) {

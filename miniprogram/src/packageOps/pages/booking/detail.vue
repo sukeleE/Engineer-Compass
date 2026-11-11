@@ -17,26 +17,33 @@
           <button class="btn btn-outline half" @click="importOpen = true">📥 批量导入</button>
         </view>
       <EmptyState v-if="!resources.length" icon="📦" text="暂无可预约资源" />
-      <view v-for="r in resources" :key="r.id" class="card res">
-        <view class="r-head">
-          <text class="r-icon">{{ r.icon }}</text>
-          <view class="r-main">
-            <text class="r-name">{{ r.name }}</text>
-            <text class="r-sub">{{ r.kind_label }}{{ r.location ? ' · ' + r.location : '' }}{{ r.spec ? ' · ' + r.spec : '' }}</text>
+      <view v-for="grp in resourceGroups" :key="grp.name || 'ungrouped'" class="res-group">
+        <view class="rg-head">
+          <text class="rg-name">🗂️ {{ grp.label }}</text>
+          <text class="rg-count">{{ grp.list.length }} 项</text>
+          <text v-if="canManage && grp.name" class="mini-btn rg-rename" @click="renameResGroup(grp)">重命名</text>
+        </view>
+        <view v-for="r in grp.list" :key="r.id" class="card res">
+          <view class="r-head">
+            <text class="r-icon">{{ r.icon }}</text>
+            <view class="r-main">
+              <text class="r-name">{{ r.name }}</text>
+              <text class="r-sub">{{ r.kind_label }}{{ r.location ? ' · ' + r.location : '' }}{{ r.spec ? ' · ' + r.spec : '' }}</text>
+            </view>
+            <text class="tag" :class="r.status === 'active' ? 'tag-blue' : 'tag-gray'">{{ r.status === 'active' ? '可用' : '已归档' }}</text>
           </view>
-          <text class="tag" :class="r.status === 'active' ? 'tag-blue' : 'tag-gray'">{{ r.status === 'active' ? '可用' : '已归档' }}</text>
-        </view>
-        <view class="r-meta">
-          <text v-if="r.is_space">容纳 {{ r.capacity }} 人</text>
-          <text v-else>库存 {{ r.quantity }}{{ r.unit ? ' ' + r.unit : '' }}（损坏 {{ r.damaged_qty }}）</text>
-          <text class="mode">{{ r.approve_mode === 'first_come' ? '先到先得' : '需审批' }}</text>
-        </view>
-        <button v-if="r.status === 'active' && project.status === 'open'" class="btn btn-primary btn-sm btn-block" @click="openBook(r)">预约此资源</button>
-        <view v-if="canManage" class="r-ops">
-          <text class="mini-btn" @click="openResForm(r)">编辑</text>
-          <text v-if="r.status === 'active'" class="mini-btn" @click="archiveRes(r)">归档</text>
-          <text v-else class="mini-btn" @click="restoreRes(r)">恢复</text>
-          <text class="mini-btn danger" @click="removeRes(r)">删除</text>
+          <view class="r-meta">
+            <text v-if="r.is_space">容纳 {{ r.capacity }} 人</text>
+            <text v-else>库存 {{ r.quantity }}{{ r.unit ? ' ' + r.unit : '' }}（损坏 {{ r.damaged_qty }}）</text>
+            <text class="mode">{{ r.approve_mode === 'first_come' ? '先到先得' : '需审批' }}</text>
+          </view>
+          <button v-if="r.status === 'active' && project.status === 'open'" class="btn btn-primary btn-sm btn-block" @click="openBook(r)">预约此资源</button>
+          <view v-if="canManage" class="r-ops">
+            <text class="mini-btn" @click="openResForm(r)">编辑</text>
+            <text v-if="r.status === 'active'" class="mini-btn" @click="archiveRes(r)">归档</text>
+            <text v-else class="mini-btn" @click="restoreRes(r)">恢复</text>
+            <text class="mini-btn danger" @click="removeRes(r)">删除</text>
+          </view>
         </view>
       </view>
     </block>
@@ -210,6 +217,11 @@
           </picker>
           <view class="f-label">名称</view>
           <input v-model="resForm.name" class="modal-input" maxlength="30" placeholder="资源名称（必填）" />
+          <view class="f-label">分组（选填，对应导入时的工作表）</view>
+          <input v-model="resForm.group_name" class="modal-input" maxlength="30" placeholder="留空为未分组，可填房间/工作表名" />
+          <scroll-view v-if="groupOptions.length" scroll-x class="rg-quick">
+            <text v-for="g in groupOptions" :key="g" class="rg-chip" @click="resForm.group_name = g">{{ g }}</text>
+          </scroll-view>
           <view class="f-label">规格 / 位置（选填）</view>
           <input v-model="resForm.spec" class="modal-input" maxlength="40" placeholder="规格型号" />
           <input v-model="resForm.location" class="modal-input" maxlength="60" placeholder="存放位置" />
@@ -317,6 +329,17 @@ const resources = ref([]);
 const bookings = ref([]);
 const tab = ref('resources');
 const canManage = computed(() => !!project.value && project.value.canManage);
+// 多工作表导入后按 group_name 分组展示，结构与原 Excel 工作表一致
+const resourceGroups = computed(() => {
+  const map = new Map();
+  for (const r of resources.value) {
+    const key = r.group_name || '';
+    if (!map.has(key)) map.set(key, { name: key, label: key || '未分组', list: [] });
+    map.get(key).list.push(r);
+  }
+  return [...map.values()];
+});
+const groupOptions = computed(() => [...new Set(resources.value.map((r) => r.group_name).filter(Boolean))]);
 const today = new Date().toISOString().slice(0, 10);
 
 function bkLabel(s) { return { pending: '待审批', confirmed: '已确认', rejected: '已驳回', canceled: '已取消' }[s] || s; }
@@ -547,12 +570,13 @@ const editingRes = ref(null);
 const kindLabels = ['物品资源', '空间资源'];
 const modeLabels = ['审批制', '先到先得'];
 const kindIndex = ref(0);
-const resForm = reactive({ name: '', spec: '', location: '', capacity: '', quantity: 1, unit: '', damaged_qty: 0, modeIndex: 0 });
+const resForm = reactive({ name: '', group_name: '', spec: '', location: '', capacity: '', quantity: 1, unit: '', damaged_qty: 0, modeIndex: 0 });
 function openResForm(r) {
   editingRes.value = r || null;
   if (r) {
     kindIndex.value = r.is_space ? 1 : 0;
     resForm.name = r.name;
+    resForm.group_name = r.group_name || '';
     resForm.spec = r.spec || '';
     resForm.location = r.location || '';
     resForm.capacity = r.capacity || '';
@@ -562,7 +586,7 @@ function openResForm(r) {
     resForm.modeIndex = r.approve_mode === 'first_come' ? 1 : 0;
   } else {
     kindIndex.value = 0;
-    Object.assign(resForm, { name: '', spec: '', location: '', capacity: '', quantity: 1, unit: '', damaged_qty: 0, modeIndex: 0 });
+    Object.assign(resForm, { name: '', group_name: '', spec: '', location: '', capacity: '', quantity: 1, unit: '', damaged_qty: 0, modeIndex: 0 });
   }
   resOpen.value = true;
 }
@@ -573,6 +597,7 @@ async function submitRes() {
   const isSpace = kindIndex.value === 1;
   const card = {
     name: resForm.name.trim(),
+    group_name: resForm.group_name.trim().slice(0, 30),
     spec: resForm.spec.trim(),
     location: resForm.location.trim(),
     approve_mode: resForm.modeIndex === 1 ? 'first_come' : 'approval',
@@ -605,6 +630,29 @@ async function removeRes(r) {
   await api.bookingResourceDelete(r.id);
   toast('已删除', 'success');
   load();
+}
+
+// 分组重命名：整组（对应一个 Excel 工作表）批量改名
+function renameResGroup(grp) {
+  uni.showModal({
+    title: '重命名分组',
+    editable: true,
+    placeholderText: '输入新的分组名称',
+    content: grp.name,
+    success: async (m) => {
+      if (!m.confirm) return;
+      const to = (m.content || '').trim().slice(0, 30);
+      if (!to) return toast('分组名称不能为空');
+      if (to === grp.name) return;
+      try {
+        const out = await api.bookingResourceGroupRename(id.value, grp.name, to);
+        toast(out.message || '分组已重命名', 'success');
+        load();
+      } catch (e) {
+        toast(e && e.message ? e.message : '重命名失败');
+      }
+    },
+  });
 }
 
 // ============ 项目设置 ============
@@ -710,6 +758,13 @@ onShow(() => {
 .r-meta { display: flex; justify-content: space-between; font-size: 24rpx; color: #475569; margin: 14rpx 0; }
 .r-meta .mode { color: #2563eb; }
 .r-ops { display: flex; gap: 14rpx; justify-content: flex-end; margin-top: 12rpx; }
+.res-group { margin-bottom: 18rpx; }
+.rg-head { display: flex; align-items: center; gap: 14rpx; padding: 8rpx 6rpx; }
+.rg-name { font-size: 27rpx; font-weight: 800; color: #1e293b; }
+.rg-count { font-size: 22rpx; color: #94a3b8; flex: 1; }
+.rg-rename { padding: 6rpx 22rpx; }
+.rg-quick { white-space: nowrap; margin-bottom: 14rpx; }
+.rg-chip { display: inline-block; background: #eff6ff; color: #2563eb; font-size: 23rpx; border-radius: 24rpx; padding: 8rpx 22rpx; margin-right: 12rpx; }
 .btn-sm { height: 72rpx; font-size: 26rpx; }
 .mini-btn { background: #eff6ff; color: #2563eb; font-size: 24rpx; border-radius: 26rpx; padding: 10rpx 28rpx; }
 .mini-btn.danger { background: #fee2e2; color: #ef4444; }

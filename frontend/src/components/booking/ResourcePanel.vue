@@ -6,7 +6,7 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="manual">✍️ 手动添加</el-dropdown-item>
-            <el-dropdown-item command="import">📥 导入表格（AI 自动识别）</el-dropdown-item>
+            <el-dropdown-item command="import">📥 导入表格（AI 自动识别/多工作表分组）</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -17,45 +17,57 @@
     </div>
 
     <div v-loading="loading">
-      <div v-for="g in groups" :key="g.key" class="rp-group">
-        <h4><span class="rp-gicon">{{ g.icon }}</span>{{ g.label }}<span class="rp-gcount">{{ g.list.length }}</span></h4>
-        <div v-if="g.list.length" class="rp-cards">
-          <article v-for="r in g.list" :key="r.id" class="rs-card" :class="{ archived: r.status === 'archived' }">
-            <img v-if="r.image" :src="r.image" class="rs-photo" alt="资源照片" @click="openDetail(r)" />
-            <div class="rs-main">
-              <b class="rs-name" @click="openDetail(r)">{{ r.name }}</b>
-              <el-tag size="small" :type="r.approve_mode === 'first_come' ? 'success' : 'warning'" effect="plain">
-                {{ MODE_ZH[r.approve_mode] }}
-              </el-tag>
-              <el-tag v-if="r.status === 'archived'" size="small" type="info">已归档</el-tag>
-            </div>
-            <div class="rs-meta">
-              <template v-if="r.is_space">
-                <span>👥 容量 {{ r.capacity }} 人</span>
-                <span v-if="r.location">📍 {{ r.location }}</span>
-                <span v-for="e in r.params?.equipment" :key="e" class="rs-tag">🛠 {{ e }}</span>
-              </template>
-              <template v-else>
-                <span>📦 库存 {{ r.quantity }} {{ r.unit }}</span>
-                <span v-if="r.spec">📐 {{ r.spec }}</span>
-                <span v-if="r.location">📍 {{ r.location }}</span>
-              </template>
-            </div>
-            <div v-if="project.canManage" class="rs-actions">
-              <el-button link type="primary" size="small" @click="openDetail(r)">详情</el-button>
-              <el-button link type="primary" size="small" @click="edit(r)">编辑</el-button>
-              <el-button v-if="r.status === 'active'" link type="warning" size="small" @click="archive(r)">归档</el-button>
-              <el-button v-else link type="success" size="small" @click="restore(r)">恢复</el-button>
-              <el-button link type="danger" size="small" @click="remove(r)">删除</el-button>
-            </div>
-          </article>
-        </div>
-        <p v-else class="rp-empty dim">暂无{{ g.label }}</p>
+      <div v-for="grp in resourceGroups" :key="grp.name || 'ungrouped'" class="rp-group">
+        <h4>
+          <span class="rp-gicon">🗂️</span>{{ grp.label }}
+          <span class="rp-gcount">{{ grp.list.length }}</span>
+          <el-button v-if="project.canManage && grp.name" link type="primary" size="small" @click="renameGroup(grp)">
+            ✏️ 重命名分组
+          </el-button>
+        </h4>
+        <template v-for="kg in grp.kindGroups" :key="kg.key">
+          <div v-if="kg.list.length" class="rp-kindline">
+            <span class="rp-gicon">{{ kg.icon }}</span>{{ kg.label }}
+            <span class="rp-gcount">{{ kg.list.length }}</span>
+          </div>
+          <div v-if="kg.list.length" class="rp-cards">
+            <article v-for="r in kg.list" :key="r.id" class="rs-card" :class="{ archived: r.status === 'archived' }">
+              <img v-if="r.image" :src="r.image" class="rs-photo" alt="资源照片" @click="openDetail(r)" />
+              <div class="rs-main">
+                <b class="rs-name" @click="openDetail(r)">{{ r.name }}</b>
+                <el-tag size="small" :type="r.approve_mode === 'first_come' ? 'success' : 'warning'" effect="plain">
+                  {{ MODE_ZH[r.approve_mode] }}
+                </el-tag>
+                <el-tag v-if="r.status === 'archived'" size="small" type="info">已归档</el-tag>
+              </div>
+              <div class="rs-meta">
+                <template v-if="r.is_space">
+                  <span>👥 容量 {{ r.capacity }} 人</span>
+                  <span v-if="r.location">📍 {{ r.location }}</span>
+                  <span v-for="e in r.params?.equipment" :key="e" class="rs-tag">🛠 {{ e }}</span>
+                </template>
+                <template v-else>
+                  <span>📦 库存 {{ r.quantity }} {{ r.unit }}</span>
+                  <span v-if="r.spec">📐 {{ r.spec }}</span>
+                  <span v-if="r.location">📍 {{ r.location }}</span>
+                </template>
+              </div>
+              <div v-if="project.canManage" class="rs-actions">
+                <el-button link type="primary" size="small" @click="openDetail(r)">详情</el-button>
+                <el-button link type="primary" size="small" @click="edit(r)">编辑</el-button>
+                <el-button v-if="r.status === 'active'" link type="warning" size="small" @click="archive(r)">归档</el-button>
+                <el-button v-else link type="success" size="small" @click="restore(r)">恢复</el-button>
+                <el-button link type="danger" size="small" @click="remove(r)">删除</el-button>
+              </div>
+            </article>
+          </div>
+        </template>
+        <p v-if="!grp.list.length" class="rp-empty dim">暂无资源</p>
       </div>
     </div>
 
     <ResourceFormDialog v-if="formOpen" :model-value="formOpen" :project="project" :resource="editing"
-      @close="formOpen = false" @saved="onSaved" />
+      :group-options="groupOptions" @close="formOpen = false" @saved="onSaved" />
     <ResourceImportDialog v-if="importOpen" :model-value="importOpen" :project="project"
       :existing-names="resources.map((r) => r.name)" @close="importOpen = false" @saved="onSaved" />
     <ResourceDetailDialog v-if="detailRes" :resource="detailRes" @close="detailRes = null" />
@@ -87,10 +99,25 @@ function handleAddCommand(cmd) {
   else formOpen.value = true;
 }
 
-const groups = computed(() => KINDS.map((k) => ({
-  ...k,
-  list: resources.value.filter((r) => r.kind === k.key),
-})).filter((g) => g.list.length));
+// 先按导入分组（工作表名），组内再按物品/空间两类展示，结构与原表一致
+const resourceGroups = computed(() => {
+  const map = new Map();
+  for (const r of resources.value) {
+    const key = r.group_name || '';
+    if (!map.has(key)) map.set(key, { name: key, label: key || '未分组', list: [], kindGroups: [] });
+    map.get(key).list.push(r);
+  }
+  const groups = [...map.values()];
+  for (const g of groups) {
+    g.kindGroups = KINDS.map((k) => ({
+      ...k,
+      list: g.list.filter((r) => r.kind === k.key),
+    })).filter((k) => k.list.length);
+  }
+  return groups;
+});
+// 手动新建/编辑资源时的分组候选（项目内已有分组名）
+const groupOptions = computed(() => [...new Set(resources.value.map((r) => r.group_name).filter(Boolean))]);
 
 async function load() {
   loading.value = true;
@@ -109,6 +136,26 @@ function onSaved() {
 function edit(r) {
   editing.value = r;
   formOpen.value = true;
+}
+async function renameGroup(grp) {
+  let value;
+  try {
+    ({ value } = await ElMessageBox.prompt('请输入新的分组名称（同组内资源名不可重复）', '重命名分组', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: grp.name,
+      inputValidator: (v) => (v && v.trim().length <= 30) || '分组名不能为空且不超过 30 字',
+    }));
+  } catch { return; }
+  const to = value.trim();
+  if (to === grp.name) return;
+  try {
+    const d = await api.bookingResourceGroupRename(props.project.id, grp.name, to);
+    ElMessage.success(d.message || '分组已重命名');
+    load();
+  } catch (e) {
+    ElMessage.error(e.message);
+  }
 }
 async function archive(r) {
   try {
@@ -149,6 +196,11 @@ defineExpose({ reload: load });
 }
 .rp-gicon { font-size: 16px; }
 .rp-gcount { font-size: 12px; color: var(--text-3); font-weight: 400; }
+.rp-kindline {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-3); margin: 8px 0 6px;
+  .rp-gicon { font-size: 14px; }
+}
 .rp-empty { font-size: 12.5px; margin: 0 0 6px; }
 .rp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .rs-card {

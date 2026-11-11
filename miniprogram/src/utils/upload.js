@@ -15,6 +15,7 @@ export function uploadFile(path, filePath, options) {
       filePath: filePath,
       name: opts.name || 'file',
       formData: opts.formData || {},
+      timeout: opts.timeout || 300000, // 百兆表格上传默认 5 分钟
       header: header,
       success: function (res) {
         let body = {};

@@ -16,6 +16,7 @@
 
       <dl class="rd-dl">
         <div><dt>类型</dt><dd>{{ resource.is_space ? '🏢 空间资源' : '📦 物品资源' }}</dd></div>
+        <div v-if="resource.group_name"><dt>分组</dt><dd>🗂️ {{ resource.group_name }}</dd></div>
         <div v-if="resource.is_space"><dt>容量</dt><dd>👥 {{ resource.capacity }} 人</dd></div>
         <template v-else>
           <div><dt>库存</dt><dd>×{{ resource.quantity }} {{ resource.unit || '件' }}</dd></div>

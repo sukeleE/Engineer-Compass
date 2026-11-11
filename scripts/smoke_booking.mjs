@@ -280,15 +280,16 @@ try {
   g = await req(`/booking/projects/${P.id}/resources/bulk`, { method: 'POST', token: tA, body: { items: itemsGbk } });
   ok('GBK CSV 批量落库 201', g.status === 201 && g.data.created === 2, g.data);
 
-  // 205 数据行截断 200 + warning（只解析不落库）
-  const bigAoa = [['名称', '容量'], ...Array.from({ length: 205 }, (_, i) => [`截断教室${i + 1}`, 10])];
-  g = await upload(parseUrl, { token: tA, kind: 'space', file: xlsxBuffer(bigAoa), filename: 'big205.xlsx' });
-  ok('205 数据行截断为 200 并告警', g.status === 200 && g.data.items.length === 200 &&
+  // 2005 数据行截断 2000 + warning（只解析不落库；上限已随百兆导入提升到 2000）
+  const bigAoa = [['名称', '容量'], ...Array.from({ length: 2005 }, (_, i) => [`截断教室${i + 1}`, 10])];
+  g = await upload(parseUrl, { token: tA, kind: 'space', file: xlsxBuffer(bigAoa), filename: 'big2005.xlsx' });
+  ok('2005 数据行截断为 2000 并告警', g.status === 200 && g.data.items.length === 2000 &&
     /截断后续 5 行/.test(g.data.warnings.join()), { n: g.data.items?.length, w: g.data.warnings });
 
   // 无表头 400；有表头无数据 200 items=[]
   g = await upload(parseUrl, { token: tA, kind: 'space', file: xlsxBuffer([['随便一列', '另一列'], ['foo', 'bar']]), filename: 'nohead.xlsx' });
-  ok('无名称列表头 400（BookingImportError）', g.status === 400 && /未识别到表头/.test(g.data.error), g.data);
+  ok('无名称列表头：跳过该表并 200 返回空 items（多表容错）', g.status === 200 && g.data.items.length === 0 &&
+    /未识别到有效表头/.test(g.data.warnings.join()), g.data);
   g = await upload(parseUrl, { token: tA, kind: 'space', file: xlsxBuffer([['名称', '位置', '容量']]), filename: 'headonly.xlsx' });
   ok('仅有表头 200：items 为空 + 提示', g.status === 200 && g.data.items.length === 0 &&
     /没有有效数据行/.test(g.data.warnings.join()), g.data);
@@ -307,8 +308,8 @@ try {
   g = await upload('/booking/projects/99999999/resources/parse-import',
     { token: tA, kind: 'space', file: xlsxBuffer([['名称']]), filename: 'x.xlsx' });
   ok('不存在项目解析 404', g.status === 404);
-  g = await upload(parseUrl, { token: tA, kind: 'space', file: Buffer.alloc(11 * 1024 * 1024), filename: 'huge.xlsx' });
-  ok('11MB 文件 413 中文文案', g.status === 413 && /文件过大/.test(g.data.error), g.status);
+  g = await upload(parseUrl, { token: tA, kind: 'space', file: Buffer.alloc(101 * 1024 * 1024), filename: 'huge.xlsx' });
+  ok('101MB 文件 413 中文文案（上限 100MB）', g.status === 413 && /文件过大/.test(g.data.error), g.status);
 
   // 模板：两 kind 的 PK 魔数 + 表头精确断言；坏 kind/权限/404
   g = await download(tplUrl('space'), tA);
@@ -331,6 +332,56 @@ try {
   // 重复导入：重名 409 带行号（表格教室一已落库）
   g = await req(`/booking/projects/${P.id}/resources/bulk`, { method: 'POST', token: tA, body: { items: sp } });
   ok('重复导入同名 409 带行号', g.status === 409 && /第 1 行/.test(g.data.error), g.data);
+  // ========== 多工作表分组导入（房间设备登记表形态：标题行+品名表头+分段标题+资产编号明细块） ==========
+  {
+    const gwb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(gwb, XLSX.utils.aoa_to_sheet([
+      ['N2-113 机器人实验室'],
+      ['品名', '规格型号', '登记数量', '备注'],
+      ['组测机械臂', 'ARM-01', 6, ''],
+      ['家具类', '', '', ''],
+      ['组测工作台', 'TB-02', 4, ''],
+      ['资产编号', '品名', '分类条目', '规格型号', '登记数量'],
+      ['S001', '组测机械臂', '工业机器人', 'ARM-01', 1],
+    ]), 'N2-113');
+    XLSX.utils.book_append_sheet(gwb, XLSX.utils.aoa_to_sheet([
+      ['仓库'],
+      ['品名', '规格型号', '登记数量', '备注'],
+      ['组测机械臂', 'ARM-01', 2, '不同房间同名设备'],
+    ]), '仓库');
+    XLSX.utils.book_append_sheet(gwb, XLSX.utils.aoa_to_sheet([['空表标题'], ['家具类', '', '']]), 'N2-208');
+    const multiBuf = XLSX.write(gwb, { type: 'buffer', bookType: 'xlsx' });
+    g = await upload(`/booking/projects/${P.id}/resources/auto-parse`, { token: tA, file: multiBuf, filename: 'multi.xlsx' });
+    ok('多 Sheet 自动解析命中 standard_item 且不调 AI', g.status === 200 && g.data.strategy === 'standard_item' && g.data.ai_used === false, g.data);
+    const gN113 = g.data.groups.find((x) => x.name === 'N2-113');
+    const gCk = g.data.groups.find((x) => x.name === '仓库');
+    const gEmpty = g.data.groups.find((x) => x.name === 'N2-208');
+    ok('分组摘要与工作表结构一致（2/1/0 条，空表保留 0 条分组）',
+      gN113?.items === 2 && gCk?.items === 1 && gEmpty?.items === 0, g.data.groups);
+    ok('资产明细块与分段标题跳过，跨组同名设备都保留', g.data.items.length === 3 &&
+      g.data.items.filter((x) => x.name === '组测机械臂').length === 2 &&
+      g.data.items.every((x) => x.group_name === x._sheet), g.data.items);
+    const parsedItems = g.data.items;
+    g = await req(`/booking/projects/${P.id}/resources/bulk`, { method: 'POST', token: tA, body: { items: parsedItems } });
+    ok('跨分组同名 bulk 整体落库 201', g.status === 201 && g.data.created === 3, g.data);
+    g = await req(`/booking/projects/${P.id}/resources/bulk`, { method: 'POST', token: tA,
+      body: { items: [{ kind: 'item', name: '组测机械臂', quantity: 1, group_name: '仓库' }] } });
+    ok('同组同名 bulk 409 且提示分组', g.status === 409 && /仓库/.test(g.data.error), g.data);
+    g = await req(`/booking/projects/${P.id}/resource-groups/rename`, { method: 'POST', token: tA,
+      body: { from: '仓库', to: '中心仓库' } });
+    ok('分组重命名 200 且批量生效', g.status === 200 && g.data.updated === 1, g.data);
+    const afterRename = (await req(`/booking/projects/${P.id}/resources?status=all`, { token: tA })).data.resources;
+    ok('重命名后资源挂到新分组且回显 group_name',
+      afterRename.some((x) => x.name === '组测机械臂' && x.group_name === '中心仓库'),
+      afterRename.map((x) => [x.name, x.group_name]));
+    g = await req(`/booking/projects/${P.id}/resource-groups/rename`, { method: 'POST', token: tA,
+      body: { from: 'N2-113', to: '中心仓库' } });
+    ok('重命名到含同名资源的分组 409 预检', g.status === 409, g.data);
+    g = await req(`/booking/projects/${P.id}/resource-groups/rename`, { method: 'POST', token: tB,
+      body: { from: 'N2-113', to: 'X' } });
+    ok('非负责人重命名 403', g.status === 403, g.status);
+  }
+
 
   // 未引用资源可硬删
   const tmp = (await api(`/booking/projects/${P.id}/resources`, { method: 'POST', token: tA,

@@ -804,6 +804,7 @@ CREATE TABLE IF NOT EXISTS booking_resource (
   name         TEXT NOT NULL,
   spec         TEXT DEFAULT '',                -- 规格型号（物品）
   location     TEXT DEFAULT '',                -- 楼栋/房间号/存放位置
+  group_name   TEXT NOT NULL DEFAULT '',       -- 导入分组（工作表名）；空=未分组，展示与原表多 Sheet 结构一致
   capacity     INTEGER,                        -- 空间：可容纳人数；物品恒 NULL
   quantity     INTEGER NOT NULL DEFAULT 1,     -- 物品：库存总数；空间恒 1
   unit         TEXT DEFAULT '',                -- 物品单位：件/台/套…
@@ -816,7 +817,7 @@ CREATE TABLE IF NOT EXISTS booking_resource (
   created_by   INTEGER REFERENCES user(id) ON DELETE SET NULL,
   create_time  TEXT DEFAULT (datetime('now','localtime')),
   update_time  TEXT DEFAULT (datetime('now','localtime')),
-  UNIQUE (project_id, name)
+  UNIQUE (project_id, group_name, name)        -- 组内唯一：不同工作表（房间）允许同名设备
 );
 CREATE INDEX IF NOT EXISTS idx_bk_resource_pstatus ON booking_resource(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_bk_resource_pkind ON booking_resource(project_id, kind);

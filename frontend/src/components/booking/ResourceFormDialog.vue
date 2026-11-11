@@ -13,6 +13,12 @@
       <el-form-item label="位置">
         <el-input v-model="f.location" maxlength="60" :placeholder="meta.space ? '楼栋/房间号' : '存放位置'" />
       </el-form-item>
+      <el-form-item label="分组（可选，对应导入时的工作表）">
+        <el-select v-model="f.group_name" filterable allow-create clearable default-first-option
+          :reserve-keyword="false" style="width: 100%" placeholder="留空为未分组，可选择已有分组或输入新分组名">
+          <el-option v-for="g in groupOptions" :key="g" :value="g" :label="g" />
+        </el-select>
+      </el-form-item>
 
       <!-- 实物 / 现场照片（可选）：录入时拍一张，资源详情里可查看 -->
       <el-form-item label="资源照片（可选）">
@@ -77,11 +83,12 @@ const props = defineProps({
   modelValue: Boolean,
   project: { type: Object, required: true },
   resource: { type: Object, default: null },
+  groupOptions: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['close', 'saved']);
 
 const empty = () => ({
-  kind: 'space', name: '', location: '', capacity: 30, quantity: 1,
+  kind: 'space', name: '', location: '', group_name: '', capacity: 30, quantity: 1,
   unit: '', spec: '', equipment: [], image: '', approve_mode: props.project.default_approve_mode || 'approval',
 });
 const f = ref(empty());
@@ -96,6 +103,7 @@ watch(() => props.modelValue, (v) => {
       kind: props.resource.kind, name: props.resource.name, location: props.resource.location,
       capacity: props.resource.capacity ?? 30, quantity: props.resource.quantity ?? 1,
       unit: props.resource.unit || '', spec: props.resource.spec || '',
+      group_name: props.resource.group_name || '',
       equipment: props.resource.params?.equipment || [],
       image: props.resource.image || '',
       approve_mode: props.resource.approve_mode,
@@ -140,6 +148,7 @@ async function submit() {
   if (!isSpace && !(f.value.quantity >= 1)) return ElMessage.warning('请填写库存数量');
   const body = {
     kind: f.value.kind, name: f.value.name.trim(), location: f.value.location,
+    group_name: (f.value.group_name || '').trim().slice(0, 30),
     image: f.value.image || '', approve_mode: f.value.approve_mode,
     ...(isSpace
       ? { capacity: f.value.capacity, equipment: f.value.equipment }
@@ -149,7 +158,7 @@ async function submit() {
   try {
     if (props.resource) {
       // 编辑时 kind/容量库存之外字段按类型提交；容量库存变更后端有占用复检
-      const editBody = { name: body.name, location: body.location, image: body.image, approve_mode: body.approve_mode };
+      const editBody = { name: body.name, location: body.location, group_name: body.group_name, image: body.image, approve_mode: body.approve_mode };
       if (isSpace) editBody.capacity = body.capacity, editBody.equipment = body.equipment;
       else editBody.quantity = body.quantity, editBody.unit = body.unit, editBody.spec = body.spec;
       await api.bookingResourceUpdate(props.resource.id, editBody);

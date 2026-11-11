@@ -19,7 +19,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl/你的域名.key;   # ← 私钥文件
     ssl_protocols TLSv1.2 TLSv1.3;   # 覆盖全局的 TLSv1/TLSv1.1 旧协议
 
-    client_max_body_size 30m;        # 资料上传对齐后端 30mb 限制
+    client_max_body_size 100m;       # 对齐后端：资源预约表格导入上限 100MB
 
     root /var/www/compass;
     index index.html;

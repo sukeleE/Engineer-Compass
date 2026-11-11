@@ -19,8 +19,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const backendRequire = createRequire(path.join(ROOT, 'backend', 'package.json'));
+const XLSX = backendRequire('xlsx');
 const PORT = 3108, VITE = 5199;
 const API = `http://localhost:${PORT}/api`, WEB = `http://localhost:${VITE}`;
 
@@ -390,16 +393,21 @@ try {
   ok('窄屏当天列表出现预约 chip', (await pageA.locator('.wg-m-item').first().innerText()).includes(A.user.nickname));
   await pageA.setViewportSize({ width: 1280, height: 900 });
 
-  // ===== 7b. 表格导入：模板下载 + CSV 解析回填 → bulk 落库 =====
+  // ===== 7b. 表格导入：模板下载 + CSV 分组预览 → bulk 落库 =====
   await pageA.goto(`${WEB}/booking/${pid}`);
   await pageA.locator('.tabchip', { hasText: '可用资源' }).click();
-  await pageA.getByRole('button', { name: '📋 批量导入' }).click();
+  // 入口：分裂按钮「＋ 添加资源」下拉里的「导入表格」（弹层挂 body）
+  await pageA.locator('.rp-bar .el-dropdown__caret-button').click();
+  await pageA.getByRole('menuitem', { name: /导入表格/ }).click();
   await dlg(pageA).waitFor();
-  await dlg(pageA).locator('.el-radio-button', { hasText: '物品资源' }).click();
+  // 关闭「识别无误后自动导入」，确保停在分组预览态做断言
+  const autoBox = dlg(pageA).locator('.ri-auto-check .el-checkbox__input');
+  if ((await autoBox.getAttribute('aria-checked')) !== 'false') await autoBox.click();
 
-  // 模板下载（blob 链接触发 download 事件，文件名取自 filename*）
+  // 模板下载改为下拉菜单（仅物品资源模板）
   const dlPromise = pageA.waitForEvent('download');
   await dlg(pageA).getByRole('button', { name: /下载模板/ }).click();
+  await pageA.getByRole('menuitem', { name: '仅物品资源模板' }).click();
   const dl = await dlPromise;
   ok('模板下载：文件名含「资源导入模板」', (dl.suggestedFilename() || '').includes('资源导入模板'), dl.suggestedFilename());
 
@@ -409,26 +417,77 @@ try {
     'UI导入电池盒,5号8格,12,个,器材柜C1,先到先得',
     'UI导入扎带堆,3x100mm,40,包,,需审批'].join('\n'), 'utf8');
   await dlg(pageA).locator('input[type=file]').setInputFiles(csvPath);
-  await dlg(pageA).locator('.el-alert--warning').waitFor({ timeout: 8000 });
-  // 名称在 el-input 内（value 不进 innerText），按输入框值断言；行数=2 数据+1 补齐空行
-  const nameInputs = dlg(pageA).locator('.ri-table tbody tr td:nth-child(2) input');
-  await nameInputs.nth(0).waitFor({ timeout: 5000 });
+  await dlg(pageA).locator('.ri-table tbody tr').first().waitFor({ timeout: 10000 });
+  // 新表列序：# / 类型 / 名称(3) / 规格 / 库存(5)…；CSV 单表成一个分组「CSV」
   const rowCount = await dlg(pageA).locator('.ri-table tbody tr').count();
+  const nameInputs = dlg(pageA).locator('.ri-table tbody tr td:nth-child(3) input');
   const [n0, n1] = await Promise.all([nameInputs.nth(0).inputValue(), nameInputs.nth(1).inputValue()]);
+  const groupHeads = dlg(pageA).locator('.ri-group-head');
+  const groupName = await groupHeads.first().locator('.ri-gname-input input').inputValue();
   const importText = await dlg(pageA).innerText();
-  ok('CSV 解析回填：名称/库存入框 + 表头告警 + 有效行计数',
-    n0 === 'UI导入电池盒' && n1 === 'UI导入扎带堆' && rowCount === 3 &&
-    importText.includes('已识别表头') && importText.includes('（2 条有效行）'),
-    `n0=${n0} n1=${n1} rows=${rowCount}`);
-  // 库存列（物品表第 4 列：#/名称/规格/库存）回填数字
-  const qty0 = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(4) input').nth(0).inputValue();
+  ok('CSV 解析回填：单工作表成 1 分组、名称入框、可导入/分组计数',
+    n0 === 'UI导入电池盒' && n1 === 'UI导入扎带堆' && rowCount === 2 &&
+    (await groupHeads.count()) === 1 && groupName === 'CSV' &&
+    importText.includes('2 条可导入 / 1 个分组') && importText.includes('物品 2 条'),
+    `n0=${n0} n1=${n1} rows=${rowCount} group=${groupName}`);
+  // 库存列（新表第 5 列：#/类型/名称/规格/库存）回填数字
+  const qty0 = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(5) input').nth(0).inputValue();
   ok('库存数字回填（字符串→数字框）', qty0 === '12', `qty0=${qty0}`);
   await dlg(pageA).getByRole('button', { name: /导入 2 条/ }).click();
   await pageA.getByText('已导入 2 条资源').waitFor({ timeout: 8000 });
   await sleep(500);
   const panelText = await pageA.locator('.rp-wrap').innerText();
-  ok('导入后面板出现两条物品卡（库存回显）', panelText.includes('UI导入电池盒') && panelText.includes('库存 12')
-    && panelText.includes('UI导入扎带堆') && panelText.includes('库存 40'), panelText.replace(/\n/g, ' ').slice(0, 300));
+  ok('导入后面板按分组展示两条物品卡（库存回显）', panelText.includes('UI导入电池盒') && panelText.includes('库存 12')
+    && panelText.includes('UI导入扎带堆') && panelText.includes('库存 40') && panelText.includes('CSV'),
+    panelText.replace(/\n/g, ' ').slice(0, 300));
+
+  // ===== 7c. 多 Sheet 工作簿：两工作表分两组，跨组同名设备放行 =====
+  const xlsxPath = path.join(work, 'ui-multi-sheet.xlsx');
+  {
+    const wb = XLSX.utils.book_new();
+    const head = ['资源名称', '规格型号', '库存数量', '单位', '存放位置', '审批方式'];
+    const aoaA = [head,
+      ['UI跨组示波器', 'DS1054Z', '4', '台', 'N2-201', '需审批'],
+      ['UI双组万用表', 'UT61E', '6', '块', 'N2-201', '先到先得']];
+    const aoaB = [head,
+      ['UI跨组示波器', 'DS1104Z', '2', '台', 'N2-202', '需审批'],
+      ['UI另一组电烙铁', '936D', '8', '把', 'N2-202', '先到先得']];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaA), 'N2-201');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaB), 'N2-202');
+    writeFileSync(xlsxPath, XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  }
+  await pageA.locator('.rp-bar .el-dropdown__caret-button').click();
+  await pageA.getByRole('menuitem', { name: /导入表格/ }).click();
+  await dlg(pageA).waitFor();
+  const autoBox2 = dlg(pageA).locator('.ri-auto-check .el-checkbox__input');
+  if ((await autoBox2.getAttribute('aria-checked')) !== 'false') await autoBox2.click();
+  await dlg(pageA).locator('input[type=file]').setInputFiles(xlsxPath);
+  await dlg(pageA).locator('.ri-group').nth(1).waitFor({ timeout: 15000 });
+  const gNames = await dlg(pageA).locator('.ri-gname-input input').evaluateAll((els) => els.map((e) => e.value));
+  const multiRows = await dlg(pageA).locator('.ri-table tbody tr').count();
+  const multiText = await dlg(pageA).innerText();
+  // 名称在 el-input 的 value 里（不进 innerText），按输入框值统计跨组同名
+  const nameVals = await dlg(pageA).locator('.ri-table tbody tr td:nth-child(3) input')
+    .evaluateAll((els) => els.map((e) => e.value));
+  const dupCount = nameVals.filter((x) => x === 'UI跨组示波器').length;
+  ok('多 Sheet 预览：按工作表分 2 组、共 4 行、跨组同名都保留',
+    gNames.length === 2 && gNames.includes('N2-201') && gNames.includes('N2-202') &&
+    multiRows === 4 && dupCount === 2 &&
+    multiText.includes('4 条可导入 / 2 个分组'),
+    `groups=${gNames.join('|')} rows=${multiRows} dup=${dupCount}`);
+  // 整组排除：勾掉第一组后只剩 2 条，再勾回恢复 4 条
+  await dlg(pageA).locator('.ri-group').first().locator('.ri-group-head .el-checkbox__input').click();
+  await dlg(pageA).getByRole('button', { name: /导入 2 条/ }).waitFor({ timeout: 5000 });
+  await dlg(pageA).locator('.ri-group').first().locator('.ri-group-head .el-checkbox__input').click();
+  await dlg(pageA).getByRole('button', { name: /导入 4 条/ }).waitFor({ timeout: 5000 });
+  await dlg(pageA).getByRole('button', { name: /导入 4 条/ }).click();
+  await pageA.getByText('已导入 4 条资源').waitFor({ timeout: 8000 });
+  await sleep(500);
+  const panel2 = await pageA.locator('.rp-wrap').innerText();
+  ok('多 Sheet 落库：面板出现两个工作表分组且跨组同名共存',
+    panel2.includes('N2-201') && panel2.includes('N2-202') &&
+    (panel2.match(/UI跨组示波器/g) || []).length === 2 && panel2.includes('UI另一组电烙铁'),
+    panel2.replace(/\n/g, ' ').slice(0, 300));
 
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

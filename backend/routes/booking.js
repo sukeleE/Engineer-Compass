@@ -12,7 +12,7 @@ import db from '../db/database.js';
 import { authRequired, logAudit, realNameRequired, displayNameOf, isSuperAdmin, hasAdminPerm } from './middleware.js';
 import {
   BookingImportError, recognizeBookingXlsx, recognizeBookingCsv, buildBookingTemplate,
-  BOOKING_IMPORT_LIMIT_BYTES,
+  BOOKING_IMPORT_LIMIT_BYTES, BOOKING_IMPORT_MAX,
 } from '../lib/bookingImport.js';
 import { aiParseMixedBooking, autoParseMixedBooking } from '../lib/bookingAiImport.js';
 
@@ -69,7 +69,7 @@ const importMem = multer({
 
 function handleBookingImportUploadError(err, req, res, next) {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤100MB）' });
     return res.status(400).json({ error: `上传失败：${err.message}` });
   }
   if (err instanceof BookingImportError) return res.status(400).json({ error: err.message });
@@ -154,7 +154,7 @@ const resourceOut = (rs) => {
   return {
     id: rs.id, project_id: rs.project_id, kind: rs.kind, is_space: !!rs.is_space,
     kind_label: KIND_META[rs.kind]?.label || rs.kind, icon: KIND_META[rs.kind]?.icon || '📦',
-    name: rs.name, spec: rs.spec || '', location: rs.location || '',
+    name: rs.name, spec: rs.spec || '', location: rs.location || '', group_name: rs.group_name || '',
     capacity: rs.capacity, quantity: rs.quantity, unit: rs.unit || '',
     image: rs.image || '', damaged_qty: rs.damaged_qty || 0,
     params, approve_mode: rs.approve_mode, status: rs.status,
@@ -204,6 +204,8 @@ function normResourceBody(kind, body, fallbackMode) {
   if (name === REGISTRATION_CARRIER_NAME) throw new HttpError(400, '「借用登记」是系统占位名称，请换一个资源名称');
   const spec = trim(body.spec).slice(0, 40);
   const location = trim(body.location).slice(0, 60);
+  // 导入分组（工作表名）：空串=未分组；同组内名称唯一，不同组允许同名
+  const group_name = trim(body.group_name).slice(0, 30);
   const approve_mode = normMode(body.approve_mode, fallbackMode);
 
   let capacity = null, quantity = 1, unit = '';
@@ -230,7 +232,7 @@ function normResourceBody(kind, body, fallbackMode) {
     if (!Number.isInteger(damaged_qty) || damaged_qty < 0 || damaged_qty > quantity)
       throw new HttpError(400, `损坏数量须为 0–${quantity} 的整数`);
   }
-  return { kind, isSpace: isSpace ? 1 : 0, name, spec, location, capacity, quantity, unit, image, damaged_qty, params: JSON.stringify(params), approve_mode };
+  return { kind, isSpace: isSpace ? 1 : 0, name, spec, location, group_name, capacity, quantity, unit, image, damaged_qty, params: JSON.stringify(params), approve_mode };
 }
 
 // 取参与人：solo=仅本人；team=本人为队长的组队当前成员展开；custom=临时 id 列表（本人强制并入）
@@ -592,7 +594,7 @@ r.get('/projects/:id/resources', ah((req, res) => {
   requireViewProject(req, p);
   const status = ['active', 'archived', 'all'].includes(String(req.query.status)) ? String(req.query.status) : 'active';
   const kind = String(req.query.kind || '');
-  let rows = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? ORDER BY is_space DESC, kind, id').all(p.id);
+  let rows = db.prepare('SELECT * FROM booking_resource WHERE project_id = ? ORDER BY group_name, is_space DESC, kind, id').all(p.id);
   rows = rows.filter((x) => !x.is_carrier); // 借用登记占位资源不进台账
   if (status !== 'all') rows = rows.filter((x) => x.status === status);
   if (KINDS.has(kind)) rows = rows.filter((x) => x.kind === kind);
@@ -604,38 +606,45 @@ r.post('/projects/:id/resources', ah((req, res) => {
   if (!p) throw new HttpError(404, '项目不存在');
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
   const norm = normResourceBody(req.body?.kind, req.body || {}, p.default_approve_mode);
-  if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND name = ?').get(p.id, norm.name))
-    throw new HttpError(409, '同项目内已存在同名资源');
+  if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND group_name = ? AND name = ?').get(p.id, norm.group_name, norm.name))
+    throw new HttpError(409, norm.group_name ? `分组「${norm.group_name}」内已存在同名资源` : '同项目内已存在同名资源');
 
   const info = tx(() => db.prepare(
-    `INSERT INTO booking_resource (project_id, kind, is_space, name, spec, location, capacity, quantity, unit, image, damaged_qty, params, approve_mode, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(p.id, norm.kind, norm.isSpace, norm.name, norm.spec, norm.location, norm.capacity, norm.quantity, norm.unit, norm.image, norm.damaged_qty, norm.params, norm.approve_mode, req.user.id));
+    `INSERT INTO booking_resource (project_id, kind, is_space, name, spec, location, group_name, capacity, quantity, unit, image, damaged_qty, params, approve_mode, created_by)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).run(p.id, norm.kind, norm.isSpace, norm.name, norm.spec, norm.location, norm.group_name, norm.capacity, norm.quantity, norm.unit, norm.image, norm.damaged_qty, norm.params, norm.approve_mode, req.user.id));
   res.status(201).json({ resource: resourceOut(getResource(info.lastInsertRowid)), message: '资源已添加' });
 }));
 
 // 资源表格解析结果统一做重名/字段校验；解析阶段不落库，确认后仍走 bulk 事务。
 function enrichBookingImportItems(out, project) {
+  // 唯一性作用域为 (分组, 名称)：不同工作表（房间）允许同名设备
+  const dupKey = (g, n) => `${g || ''}\u0000${n}`;
   const existing = new Map(
-    db.prepare('SELECT id, name FROM booking_resource WHERE project_id = ?').all(project.id).map((x) => [x.name, x.id])
+    db.prepare('SELECT group_name, name FROM booking_resource WHERE project_id = ?').all(project.id)
+      .map((x) => [dupKey(x.group_name, x.name), 1])
   );
   const seen = new Set();
-  const items = (Array.isArray(out.items) ? out.items : []).slice(0, 200).map((it) => {
+  const items = (Array.isArray(out.items) ? out.items : []).slice(0, BOOKING_IMPORT_MAX).map((it) => {
     const issues = Array.isArray(it.issues) ? [...it.issues] : [];
     const name = String(it.name || '').trim();
+    // 分组优先取入参 group_name，回落解析出的工作表名 _sheet
+    const group_name = String(it.group_name ?? it._sheet ?? '').trim().slice(0, 30);
     if (name) {
-      if (seen.has(name)) issues.push('表格内存在同名资源（同项目资源名不可重复）');
-      seen.add(name);
-      if (existing.has(name)) issues.push('项目内已存在同名资源');
+      const key = dupKey(group_name, name);
+      if (seen.has(key)) issues.push('同组内存在同名资源（组内资源名不可重复）');
+      seen.add(key);
+      if (existing.has(key)) issues.push(group_name ? '该分组内已存在同名资源' : '项目内已存在同名资源');
     }
     try {
-      normResourceBody(it.kind, it, project.default_approve_mode);
+      normResourceBody(it.kind, { ...it, group_name }, project.default_approve_mode);
     } catch (e) {
       issues.push(e.message);
     }
     return {
       kind: it.kind,
       name,
+      group_name,
       spec: String(it.spec || ''),
       quantity: it.quantity ?? '',
       unit: String(it.unit || ''),
@@ -647,14 +656,30 @@ function enrichBookingImportItems(out, project) {
       warnings: Array.isArray(it.warnings) ? it.warnings : [],
       reason: String(it.reason || ''),
       issues: [...new Set(issues)],
-      _sheet: it._sheet || '',
+      _sheet: it._sheet || group_name,
       _sheet_index: Number.isInteger(Number(it._sheet_index)) ? Number(it._sheet_index) : 0,
       _row: Number(it._row || 0),
     };
   }).map((it) => ({ ...it, valid: it.issues.length === 0 }));
   const skipped = Array.isArray(out.skipped) ? out.skipped : [];
+  // 分组摘要：与原表工作表一一对应，前端按组折叠展示/整组排除
+  const groupMap = new Map();
+  for (const it of items) {
+    const key = it.group_name || '';
+    if (!groupMap.has(key)) groupMap.set(key, { name: key, sheet_index: it._sheet_index, items: 0, invalid: 0, skipped: 0, excluded: false });
+    const g = groupMap.get(key);
+    g.items += 1;
+    if (!it.valid) g.invalid += 1;
+  }
+  for (const s of skipped) {
+    const key = String(s.sheet || '');
+    if (!groupMap.has(key)) groupMap.set(key, { name: key, sheet_index: Number(s.sheet_index) || 0, items: 0, invalid: 0, skipped: 0, excluded: false });
+    groupMap.get(key).skipped += 1;
+  }
+  const groups = [...groupMap.values()].sort((a, b) => a.sheet_index - b.sheet_index);
   return {
     items,
+    groups,
     skipped,
     warnings: Array.isArray(out.warnings) ? out.warnings : [],
     stats: {
@@ -676,7 +701,7 @@ r.post('/projects/:id/resources/bulk', ah((req, res) => {
   if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
   const arr = req.body?.items;
   if (!Array.isArray(arr) || !arr.length) throw new HttpError(400, '导入内容为空（需要 items 数组）');
-  if (arr.length > 200) throw new HttpError(400, '一次最多导入 200 条资源');
+  if (arr.length > BOOKING_IMPORT_MAX) throw new HttpError(400, `一次最多导入 ${BOOKING_IMPORT_MAX} 条资源`);
 
   const norms = arr.map((x, i) => {
     try {
@@ -689,14 +714,14 @@ r.post('/projects/:id/resources/bulk', ah((req, res) => {
   });
   const created = tx(() => {
     const ins = db.prepare(
-      `INSERT INTO booking_resource (project_id, kind, is_space, name, spec, location, capacity, quantity, unit, image, damaged_qty, params, approve_mode, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO booking_resource (project_id, kind, is_space, name, spec, location, group_name, capacity, quantity, unit, image, damaged_qty, params, approve_mode, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     );
     const ids = [];
     for (const n of norms) {
-      if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND name = ?').get(p.id, n.name))
-        throw new HttpError(409, `第 ${n._row} 行：同项目内已存在同名资源「${n.name}」`);
-      const info = ins.run(p.id, n.kind, n.isSpace, n.name, n.spec, n.location, n.capacity, n.quantity, n.unit, n.image, n.damaged_qty, n.params, n.approve_mode, req.user.id);
+      if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND group_name = ? AND name = ?').get(p.id, n.group_name, n.name))
+        throw new HttpError(409, `第 ${n._row} 行：${n.group_name ? `分组「${n.group_name}」内` : '项目内'}已存在同名资源「${n.name}」`);
+      const info = ins.run(p.id, n.kind, n.isSpace, n.name, n.spec, n.location, n.group_name, n.capacity, n.quantity, n.unit, n.image, n.damaged_qty, n.params, n.approve_mode, req.user.id);
       ids.push(info.lastInsertRowid);
     }
     return ids;
@@ -737,7 +762,7 @@ r.post('/projects/:id/resources/parse-import', importMem, ah((req, res) => {
 }), (err, req, res, next) => {
   // multer 超限在此转中文 413（BookingImportError 交下方统一中间件）
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤10MB）' });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '文件过大（表格文件 ≤100MB）' });
     return res.status(400).json({ error: `上传失败：${err.message}` });
   }
   next(err);
@@ -797,6 +822,28 @@ r.post('/projects/:id/resources/auto-parse', importMem, ah(async (req, res) => {
   });
 }), handleBookingImportUploadError);
 
+// 分组重命名：批量修改同项目下某分组的 group_name（多 Sheet 导入后的组名维护）
+r.post('/projects/:id/resource-groups/rename', ah((req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以管理资源');
+  const from = trim(req.body?.from);
+  const to = trim(req.body?.to);
+  if (!to || to.length > 30) throw new HttpError(400, '新分组名称不能为空且不超过 30 字');
+  if (from === to) return res.json({ updated: 0, message: '分组名未变化' });
+  const rows = db.prepare('SELECT id, name FROM booking_resource WHERE project_id = ? AND group_name = ?').all(p.id, from);
+  if (!rows.length) throw new HttpError(404, '分组不存在或分组内已无资源');
+  const clash = rows.find((x) => db.prepare(
+    'SELECT 1 FROM booking_resource WHERE project_id = ? AND group_name = ? AND name = ? AND id IS NOT ?'
+  ).get(p.id, to, x.name, x.id));
+  if (clash) throw new HttpError(409, `目标分组内已存在同名资源「${clash.name}」，请先处理后再重命名`);
+  const info = tx(() => db.prepare(
+    "UPDATE booking_resource SET group_name = ?, update_time = datetime('now','localtime') WHERE project_id = ? AND group_name = ?"
+  ).run(to, p.id, from));
+  logAudit(req, 'booking-group-rename', to, { project: p.id, from, count: info.changes });
+  res.json({ updated: info.changes, message: `已重命名分组（${info.changes} 条资源）` });
+}));
+
 r.put('/resources/:rid', ah((req, res) => {
   const rs = getResource(req.params.rid);
   if (!rs) throw new HttpError(404, '资源不存在');
@@ -810,12 +857,14 @@ r.put('/resources/:rid', ah((req, res) => {
   if (b.name !== undefined) {
     const name = trim(b.name);
     if (!name || name.length > 30) throw new HttpError(400, '资源名称不合法（1–30 字）');
-    if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND name = ? AND id IS NOT ?').get(p.id, name, rs.id))
-      throw new HttpError(409, '同项目内已存在同名资源');
+    const groupName = b.group_name !== undefined ? trim(b.group_name).slice(0, 30) : (rs.group_name || '');
+    if (db.prepare('SELECT 1 FROM booking_resource WHERE project_id = ? AND group_name = ? AND name = ? AND id IS NOT ?').get(p.id, groupName, name, rs.id))
+      throw new HttpError(409, groupName ? `分组「${groupName}」内已存在同名资源` : '同项目内已存在同名资源');
     fields.push('name = ?'); vals.push(name);
   }
   if (b.spec !== undefined) fields.push('spec = ?'), vals.push(trim(b.spec).slice(0, 40));
   if (b.location !== undefined) fields.push('location = ?'), vals.push(trim(b.location).slice(0, 60));
+  if (b.group_name !== undefined) fields.push('group_name = ?'), vals.push(trim(b.group_name).slice(0, 30));
   if (b.approve_mode !== undefined) fields.push('approve_mode = ?'), vals.push(normMode(b.approve_mode, rs.approve_mode));
   // 物品/空间都可更新照片（空串=移除照片）
   if (b.image !== undefined) fields.push('image = ?'), vals.push(typeof b.image === 'string' ? b.image.slice(0, 400000) : '');

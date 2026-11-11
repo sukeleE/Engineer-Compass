@@ -1,6 +1,6 @@
 # 资源预约模块（/booking）技术文档
 
-2026-10-15 落地。导航项「🏢 资源预约」，路由 `/booking`（大厅）与 `/booking/:id`（项目页）。后端挂 `/api/booking`（避开已占用的 `/api/resource`），表前缀 `booking_`，新表编号 **53–59**（schema.sql 末尾 `IF NOT EXISTS` 追加，冷启动自动建表）。同日简化：资源五分类收敛为两类，`backend/db/database.js` 用 `PRAGMA user_version=2` 闸门做一次性存量回填（lab/classroom→space、prop/equipment/instrument→item，先探测表存在，老库零影响）。
+2026-10-15 落地。导航项「🏢 资源预约」，路由 `/booking`（大厅）与 `/booking/:id`（项目页）。后端挂 `/api/booking`（避开已占用的 `/api/resource`），表前缀 `booking_`，新表编号 **53–59**（schema.sql 末尾 `IF NOT EXISTS` 追加，冷启动自动建表）。同日简化：资源五分类收敛为两类，`backend/db/database.js` 用 `PRAGMA user_version=2` 闸门做一次性存量回填（lab/classroom→space、prop/equipment/instrument→item，先探测表存在，老库零影响）。2026-11-11 增强：表格导入上限由 10MB/200 行放宽到 **100MB/2000 行**；一个 Excel 的多个工作表（Sheet）按表名分组导入（`booking_resource.group_name`，取 Sheet 名），Web/小程序均按组折叠展示、结构与原表一致，组可整组重命名；资源唯一约束随之由 `UNIQUE(project_id,name)` 放宽为 `UNIQUE(project_id,group_name,name)`（不同房间允许同名设备，组内仍唯一），老库启动时走守卫式表重建迁移（见 §3）。
 
 ## 1. 领域与口径
 
@@ -27,7 +27,7 @@
 | # | 表 | 要点 |
 |---|---|---|
 | 53 | booking_project | name UNIQUE、description、default_approve_mode（仅预填）、status open/closed、created_by→user **SET NULL**、close_time |
-| 54 | booking_resource | project_id **RESTRICT**、kind（item/space）、is_space（0/1，业务真值）、name、spec、location、capacity（空间）、quantity（物品）、unit、params JSON（空间存 `{"equipment":[...]}`）、approve_mode、status active/archived、created_by SET NULL、UNIQUE(project_id,name) |
+| 54 | booking_resource | project_id **RESTRICT**、kind（item/space）、is_space（0/1，业务真值）、name、spec、location、**group_name（表格导入分组=工作表名，''=未分组/手动建）**、capacity（空间）、quantity（物品）、unit、params JSON（空间存 `{"equipment":[...]}`）、image、damaged_qty、approve_mode、status active/archived、is_carrier、created_by SET NULL、**UNIQUE(project_id,group_name,name)**；索引 idx_bk_resource_pgroup(project_id,group_name) |
 | 55 | booking_team | project_id **CASCADE**、name、owner_id SET NULL、owner_name、UNIQUE(project_id,name) |
 | 56 | booking_team_member | team_id CASCADE、user_id CASCADE、user_name 快照、ord；PK(team_id,user_id) |
 | 57 | booking | project_id/resource_id **RESTRICT**；start_time/end_time、qty（空间恒1）、headcount、purpose、status、source(solo/team/custom)、team_id **SET NULL**、booker_id CASCADE + booker_name 快照、审批三字段、取消三字段 |
@@ -35,6 +35,8 @@
 | 59 | booking_log | booking_id **CASCADE**、action(created/approved/rejected/canceled)、actor_id/name、comment |
 
 项目/资源 RESTRICT（项目只关不删、资源只归档）；组队/成员/参与人/日志 CASCADE；删用户：其预约 CASCADE、名下项目保留（created_by SET NULL）。
+
+- **2026-11-11 分组迁移（老库冷启动自动执行，新库守卫跳过）**：`migCol` 先补 `group_name TEXT NOT NULL DEFAULT ''`；随后读 `sqlite_master` 中的建表 DDL，仅当正则命中旧约束 `UNIQUE (project_id, name)` 才做一次性表重建——先 `PRAGMA foreign_keys=OFF`（连接级 PRAGMA 不能在事务内切），事务内建 `booking_resource_new`（新约束）、**显式带 id 逐列搬运**保证 booking 外键不断、DROP+RENAME、重建 pstatus/pkind/pgroup 三个索引，COMMIT 后恢复 foreign_keys 并跑 `PRAGMA foreign_key_check`，有残留即抛错阻止启动；异常路径 ROLLBACK 并恢复 PRAGMA。
 
 ## 4. 状态机与并发
 
@@ -63,11 +65,12 @@ confirmed：预约者开始前可取消（已开始→400 提示联系负责人�
 | GET /projects/:id / PUT /projects/:id | 详情 / 改名说明默认模式状态 |
 | GET /projects/:id/resources?status=&kind= | 资源列表（kind=item\|space） |
 | POST /projects/:id/resources | 白名单归一：space 强制 capacity、quantity=1；item 强制 quantity、capacity=NULL |
-| POST /projects/:id/resources/bulk | 类型表单批量（≤200 行），整体事务，坏行 400「第 N 行」回滚 |
+| POST /projects/:id/resources/bulk | 类型表单批量（≤2000 行），整体事务，坏行 400「第 N 行」回滚，组内（project_id+group_name+name）重名 409 |
 | POST /projects/:id/resources/parse-import | multipart（字段 file+kind），表格只解析不落库，返回 `{items,warnings,source}` 供预览核对（见 5.1） |
 | GET /projects/:id/resources/import-template?kind= | 下载 xlsx 导入模板（仅表头无示例行），filename* 为 UTF-8 中文名 |
 | PUT/DELETE /resources/:rid | 编辑（kind/is_space 不可变，下调容量库存复检）；无引用才允许 DELETE |
 | POST /resources/:rid/archive \| /restore | 归档/恢复 |
+| POST /projects/:id/resource-groups/rename | 分组重命名（body `{from,to}`，to 非空≤30 字），整组批量改 group_name；目标组内同名资源 409，审计 booking-group-rename |
 | GET/POST /projects/:id/teams，PUT/DELETE /teams/:tid | 组队（可查看项目即可建队；只有队长/负责人可改删，历史快照不回改） |
 | GET /users/search?q= | 全站用户模糊（排自己、排封禁，LIMIT 10） |
 | POST /projects/:id/conflicts | **只检不写**，同 /bookings 入参；弹窗 400ms 防抖实时校验 |
@@ -78,18 +81,19 @@ confirmed：预约者开始前可取消（已开始→400 提示联系负责人�
 | GET /bookings/:id | {booking, logs}，聚合资源/项目名/参与人当前头像/perm |
 | POST /bookings/:id/approve \| /reject \| /cancel | approve 事务内复检；reject reason 必填≤200；cancel 按身份与开始时间分流 |
 
-错误处理：路由末尾 HttpError → JSON，409 透出 `conflicts[]`；表格解析的 BookingImportError → 400 中文文案；multer LIMIT_FILE_SIZE → 413「文件过大（表格文件 ≤10MB）」。
+错误处理：路由末尾 HttpError → JSON，409 透出 `conflicts[]`；表格解析的 BookingImportError → 400 中文文案；multer LIMIT_FILE_SIZE → 413「文件过大（表格文件 ≤100MB）」。
 
 ### 5.1 表格导入（xlsx/xls/csv）
 
 沿用采购 BOM 的「**上传只解析预览 → 用户核对 → 走现有 bulk 事务入库**」模式，parse-import 不做任何校验、不写库：
 
-- 解析器 `backend/lib/bookingImport.js`（中性 CSV 工具 `lib/csvText.js` 与 BOM 识别共用，支持引号内逗号/换行、utf8 致命失败回落 GBK、剥 BOM）；multer memoryStorage 不落盘，单文件 ≤10MB，扩展名白名单 .xlsx/.xls/.csv。
+- 解析器 `backend/lib/bookingImport.js`（中性 CSV 工具 `lib/csvText.js` 与 BOM 识别共用，支持引号内逗号/换行、utf8 致命失败回落 GBK、剥 BOM）；multer memoryStorage 不落盘，单文件 ≤100MB（`BOOKING_IMPORT_LIMIT_BYTES`，超限 413），扩展名白名单 .xlsx/.xls/.csv；规则/标准解析单文件最多 2000 行（`BOOKING_IMPORT_MAX`，超出截断+warning），AI 通道单独 500 行预算（`AI_PAYLOAD_MAX_ROWS`，超限提示删表分批）。
 - **表头启发式**：在前 5 行打分定位（名称列命中=10 分必须，其余每列 +1，同分取靠上）。别名：名称/资源名称/物品名称/空间名称…；空间认 位置/房间号/教室、容量/可容纳人数、室内设备/设备清单；物品认 规格型号、库存数量/库存、单位、存放位置；审批方式/预约方式 两类通用。表头前允许有标题行等垃圾行。
 - **跳过规则**：空名行、合计/总计/小计/共计行、名称列纯数字的序号残留行均跳过并汇总 warning；设备文本按 `[,，、;；/／换行]` 多分隔符切分。
 - **坏值不兜底**：capacity/quantity 原样字符串透传（''/'abc' 不默认 30/1），核对后提交时由 bulk 报「第 N 行」——预览行号与 bulk 行号严格一致（表头是第 0 行，不计行号）。
-- 审批词归一（需审批/先到先得/免审），无法辨认置空并 warning，落库时回落项目默认；一次最多 200 条，超出截断 + warning；只有表头没有数据行时返回 200 + 空 items + 提示（不是错误）。
-- 前端 `ResourceImportDialog`：下载模板（blob，token 只走头）、隐藏 file input 选表、el-alert 列 warnings、解析行回填可继续手改，footer 按**有效行（名称非空）**计数；切类型/重开弹窗清空。
+- 审批词归一（需审批/先到先得/免审），无法辨认置空并 warning，落库时回落项目默认；一次最多 2000 条，超出截断 + warning；只有表头没有数据行时返回 200 + 空 items + 提示（不是错误）。
+- 前端 `ResourceImportDialog`（Web）/ `ResourceImport.vue`（小程序）：下载模板（blob，token 只走头）、隐藏 file input 选表、el-alert 列 warnings；按工作表**分组折叠预览**，支持整组勾选排除、组名就地编辑，解析行可继续手改，footer 按**有效行（名称非空）**计数，提交带 group_name；切类型/重开弹窗清空。资源面板 `ResourcePanel.vue` / 小程序详情页按「分组→物品/空间→卡片」三级渲染，负责人可整组重命名。
+- **多工作表分组（2026-11-11）**：`recognizeBookingXlsx` 遍历工作簿全部 Sheet，每行附 `_sheet/_sheet_index`；入库时 group_name 取工作表名（手动传入优先），资源列表按 `group_name` 分组、组内再按 item/space 展示，空 Sheet 保留为 0 条分组。单个 Sheet 损坏/无表头只告警跳过，不拖垮整文件。标准台账（如实验室设备出入登记表）走 `detectStandardBookingSheets` 规则解析不调 AI：「资产编号」台件明细块整块跳过（与汇总行重复）、「家具类」分段标题跳过、有数量无容量强制 item；AI 通道 `ruleParseMixedSheets` 同口径并输出 `groups` 摘要（每组条数/跳过数）。前端默认走 `POST .../auto-parse`（AI 失败自动回落规则解析，300s 超时）。
 - 模板仅表头无示例行（示例行会被原样导成垃圾资源）。
 
 ## 6. timeline 契约与甘特算法
@@ -130,6 +134,6 @@ confirmed：预约者开始前可取消（已开始→400 提示联系负责人�
 
 ## 8. 测试
 
-- `npm run smoke:booking` —— 自起沙盒后端（3107、mkdtemp、env 白名单、cwd 临时目录避 .env、taskkill 收尾），**113 项**：建档/资源两类（item/space）/bulk/表格导入（xlsx 垃圾行+别名表头+设备多分隔符、坏容量透传、UTF-8/GBK CSV、205 行截断、无表头/空表、.txt/无 file/坏 kind/403/401/404/11MB 413、两 kind 模板 PK 魔数与表头精确断言、重名 409 行号）/归档/组队/时间窗/空间独占/物品池/资源级双模式/取消/多人/timeline/通知去重/外键级联。
-- `npm run probe:booking-ui` —— Playwright（3108+5199、PROBE 临时库、双 context 演 A/B/C），**36 项**：建项→建空间/物品资源→甘特拖格 pending 块定位→重叠实时 409 禁用提交→临时搜非好友 C→固定组队下单→C 的 mine→先到先得蓝块+库存热度+超量拦截→审批变蓝→C 收通知点 link 自动弹详情→390px 手风琴建约无横溢→表格导入（模板 download 事件、CSV setInputFiles 回填断言、落库新卡）→无 pageerror/无意外 4xx5xx（有意的 `/conflicts` 4xx 放行）。注意：C 盘空间不足时须把 TEMP/TMP 重定向到其他盘再跑，否则 vite 临时文件写满会间歇白屏。
+- `npm run smoke:booking` —— 自起沙盒后端（3107、mkdtemp、env 白名单、cwd 临时目录避 .env、taskkill 收尾），**133 项**：建档/资源两类（item/space）/bulk/表格导入（xlsx 垃圾行+别名表头（含「品名」）+设备多分隔符、坏容量透传、UTF-8/GBK CSV、**2005 行截断为 2000**、无表头/空表、.txt/无 file/坏 kind/403/401/404/**101MB 413**、两 kind 模板 PK 魔数与表头精确断言、重名 409 行号）/**多 Sheet 分组 9 项**（standard_item 命中不调 AI、分组摘要含空表 0 条、资产明细块/分段标题跳过且跨组同名保留、跨组同名 bulk 201、同组同名 409、分组重命名 200 与回显、重命名撞名 409、非负责人 403）/归档/组队/时间窗/空间独占/物品池/资源级双模式/取消/多人/timeline/通知去重/外键级联。
+- `npm run probe:booking-ui` —— Playwright（3108+5199、PROBE 临时库、双 context 演 A/B/C），**38 项**：建项→建空间/物品资源→甘特拖格 pending 块定位→重叠实时 409 禁用提交→临时搜非好友 C→固定组队下单→C 的 mine→先到先得蓝块+库存热度+超量拦截→审批变蓝→C 收通知点 link 自动弹详情→390px 手风琴建约无横溢→表格导入（分裂下拉入口、模板 download 事件、CSV 分组预览回填断言、多 Sheet xlsx 两组/跨组同名/整组排除恢复、分组落库新卡）→无 pageerror/无意外 4xx5xx（有意的 `/conflicts` 4xx 放行）。注意：C 盘空间不足时须把 TEMP/TMP 重定向到其他盘再跑，否则 vite 临时文件写满会间歇白屏。
 - 回归：smoke:repo / smoke:account / vite build 全绿；依赖 :3000 dev server 的既有冒烟（purchase 等）未在沙盒跑，booking 挂载不改动其代码路径。

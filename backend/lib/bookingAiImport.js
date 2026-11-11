@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { parseCsvText, decodeCsvBuffer } from './csvText.js';
 import { callDeepSeek } from '../routes/ai.js';
 import { BookingImportError, BOOKING_IMPORT_MAX } from './bookingImport.js';
+const AI_PAYLOAD_MAX_ROWS = 500; // AI 单次要整理的最大行数，超出截断并告警，避免 prompt 过大
 
 const cellText = (v) => (v === null || v === undefined ? '' : String(v).trim());
 const clampText = (v, n) => cellText(v).slice(0, n);
@@ -61,8 +62,8 @@ const compactSheets = (sheets) => sheets.map((s, si) => ({
 
 // ---------------- 规则解析：AI 不可用或标准混合模板时的确定性兜底 ----------------
 const MIXED_ALIASES = {
-  kind: ['资源类型', '类型', '类别', '分类', '物品/空间'],
-  name: ['资源名称', '物品名称', '空间名称', '名称', '资源名', '物品', '空间'],
+  kind: ['资源类型', '物品/空间', '资源类别'], // 不含裸「类型/分类」：避免「分类条目」这类资产编码列误判为物品/空间类型列
+  name: ['品名', '资源名称', '物品名称', '空间名称', '名称', '资源名', '物品', '空间'],
   approve: ['审批方式', '预约方式', '审批模式'],
   spec: ['规格型号', '规格', '型号'],
   quantity: ['库存数量', '库存', '数量'],
@@ -77,6 +78,33 @@ function matchAlias(text, aliases) {
   if (!text) return 0;
   if (aliases.includes(text)) return 2;
   return aliases.some((a) => text.includes(a)) ? 1 : 0;
+}
+
+// 资产编号明细表头：下方按台件逐条登记（每行 1 件），与上方汇总行重复，整块跳过避免双重计数
+function isAssetHeaderRow(row) {
+  const joined = row.cells.join(' ');
+  return /资产编号/.test(joined) && /规格型号|分类条目|品名/.test(joined);
+}
+
+// 分段标题行（如「家具类」）：仅首格有值、整行无数字，不是资源数据行
+function isSectionTitleRow(row) {
+  const nonEmpty = row.cells.filter(Boolean);
+  if (nonEmpty.length !== 1) return false;
+  const name = nonEmpty[0];
+  return !/\d/.test(name) && name.length <= 12;
+}
+
+// 无表头的房间登记台账（标题行+数据三列：品名/规格/登记数量）→ 虚拟表头，按物品处理
+function virtualLedgerHeader(sheet) {
+  const dataLike = sheet.rows.filter((row) => {
+    const c = row.cells;
+    return c[0] && c[0].length >= 2 && !isSectionTitleRow(row) && !isAssetHeaderRow(row)
+      && !/(合计|总计|小计)/.test(c[0]) && !/^\d+$/.test(c[0]);
+  });
+  if (dataLike.length < 2) return null;
+  const triple = dataLike.filter((row) => row.cells[1] || /^\d+(\.\d+)?$/.test(row.cells[2] || ''));
+  if (triple.length < 2) return null;
+  return { row: sheet.rows[0].r, cols: { name: 0, spec: 1, quantity: 2 }, score: 11, virtual: true };
 }
 
 function detectHeader(row) {
@@ -108,7 +136,7 @@ function detectHeader(row) {
 
   const nameCi = cols.name;
   if (nameCi === undefined) return null;
-  const exactName = ['资源名称', '物品名称', '空间名称', '名称'].includes(cells[nameCi]);
+  const exactName = ['品名', '资源名称', '物品名称', '空间名称', '名称'].includes(cells[nameCi]);
   const fieldCount = Object.keys(cols).filter((k) => k !== 'name').length;
   const score = 10 + fieldCount;
   // 只有一个“物品资源”标题不算表头；标准表头至少再有 1～2 个字段
@@ -158,16 +186,41 @@ export function ruleParseMixedSheets(rawSheets, forcedKind = '') {
   const warnings = [];
   let truncated = 0;
 
+  const pushSkipped = (sheet, si, row, reason) =>
+    skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason });
+  const pushItem = (it) => {
+    if (items.length >= BOOKING_IMPORT_MAX) { truncated++; return; }
+    items.push(it);
+  };
+
   for (let si = 0; si < sheets.length; si++) {
     const sheet = sheets[si];
-    const headers = sheet.rows.map((row) => ({ ...detectHeader(row), rowObj: row })).filter((h) => h && h.score >= 11)
-      .sort((a, b) => a.row - b.row);
+    if (!sheet.rows.length) continue;
 
-    if (headers.length) {
-      for (let hi = 0; hi < headers.length; hi++) {
-        const h = headers[hi];
+    // 标准/别名表头（score>=11）；「资产编号」明细表头不算主表头（其下是按台件登记的重复数据）
+    const stdHeaders = sheet.rows
+      .filter((row) => !isAssetHeaderRow(row))
+      .map((row) => ({ h: detectHeader(row), row }))
+      .filter((x) => x.h && x.h.score >= 11)
+      .map((x) => ({ ...x.h, rowObj: x.row }))
+      .sort((a, b) => a.row - b.row);
+    const assetHeaderRows = sheet.rows.filter(isAssetHeaderRow).map((row) => row.r);
+
+    // 数据行是否落在资产编号明细块内（资产表头到下一个标准表头/表尾之间）
+    const inAssetBlock = (r) => {
+      for (const ar of assetHeaderRows) {
+        if (r <= ar) continue;
+        const nextStd = stdHeaders.find((h) => h.row > ar);
+        if (!nextStd || r < nextStd.row) return true;
+      }
+      return false;
+    };
+
+    if (stdHeaders.length) {
+      for (let hi = 0; hi < stdHeaders.length; hi++) {
+        const h = stdHeaders[hi];
         const start = h.row + 1;
-        const end = hi + 1 < headers.length ? headers[hi + 1].row : Infinity;
+        const end = hi + 1 < stdHeaders.length ? stdHeaders[hi + 1].row : Infinity;
         let sectionKind = forcedKind || kindBySheetName(sheet.name);
         for (let k = sheet.rows.findIndex((x) => x.r === h.row) - 1; k >= 0 && h.row - sheet.rows[k].r <= 3; k--) {
           sectionKind = normalizeKind(sheet.rows[k].cells.join(' '), sectionKind);
@@ -175,10 +228,12 @@ export function ruleParseMixedSheets(rawSheets, forcedKind = '') {
 
         for (const row of sheet.rows.filter((x) => x.r >= start && x.r < end)) {
           const name = cellText(row.cells[h.cols.name]);
-          if (isSkipRow(name)) {
-            skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason: name ? '合计/序号行' : '空行' });
-            continue;
-          }
+          if (isAssetHeaderRow(row)) { pushSkipped(sheet, si, row, '资产编号明细表头'); continue; }
+          if (inAssetBlock(row.r)) { pushSkipped(sheet, si, row, '资产编号明细（按台件登记，与汇总行重复）'); continue; }
+          if (!name) { pushSkipped(sheet, si, row, '空行'); continue; }
+          if (isSectionTitleRow(row)) { pushSkipped(sheet, si, row, '分段标题/分类行'); continue; }
+          if (isSkipRow(name)) { pushSkipped(sheet, si, row, '合计/序号行'); continue; }
+
           const vals = {
             spec: cellText(row.cells[h.cols.spec]),
             quantity: cellText(row.cells[h.cols.quantity]),
@@ -188,43 +243,86 @@ export function ruleParseMixedSheets(rawSheets, forcedKind = '') {
             equipment: cellText(row.cells[h.cols.equipment]),
           };
           const explicit = h.cols.kind !== undefined ? normalizeKind(row.cells[h.cols.kind], '') : '';
-          const inferred = explicit
-            ? { kind: explicit, confidence: 'high' }
-            : sectionKind
-              ? { kind: sectionKind, confidence: explicit || forcedKind || kindBySheetName(sheet.name) ? 'high' : 'medium' }
-              : inferKindFromRow(name, vals);
-          if (items.length >= BOOKING_IMPORT_MAX) { truncated++; continue; }
-          items.push({ ...buildRuleItem(inferred.kind, { ...row, sheetName: sheet.name, sheetIndex: si }, h.cols), confidence: inferred.confidence });
+          let inferred;
+          if (explicit) {
+            inferred = { kind: explicit, confidence: 'high' };
+          } else if (h.cols.quantity !== undefined && h.cols.capacity === undefined) {
+            // 有数量列、无容量列且无显式类型：确定性判物品，避免被标题里的「实验室/会议室」带偏成空间
+            inferred = { kind: 'item', confidence: 'high' };
+          } else if (sectionKind) {
+            inferred = { kind: sectionKind, confidence: (forcedKind || kindBySheetName(sheet.name)) ? 'high' : 'medium' };
+          } else {
+            inferred = inferKindFromRow(name, vals);
+          }
+          pushItem({ ...buildRuleItem(inferred.kind, { ...row, sheetName: sheet.name, sheetIndex: si }, h.cols), confidence: inferred.confidence });
         }
       }
+      // 首个表头之前的孤立行（标题/分段标题）
+      for (const row of sheet.rows.filter((x) => x.r < stdHeaders[0].row)) {
+        if (isSectionTitleRow(row) || row.cells.filter(Boolean).length === 1) pushSkipped(sheet, si, row, '标题/分段行');
+      }
     } else {
-      // 无标准表头的弱兜底：AI 不可用时尽量给预览，不静默丢行
-      for (const row of sheet.rows) {
-        const isFirstRow = row.r === sheet.rows[0].r;
-        const headerLike = /名称|类型|类别|分类|数量|库存|容量|位置|地点|房间|地址|审批|规格|型号|设备或房间|在哪里|多少/.test(row.cells.join(' '));
-        if (isFirstRow && headerLike) {
-          skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason: '表头/字段说明行' });
-          continue;
+      // 无标准表头：优先按房间登记台账虚拟表头（品名/规格/登记数量三列）识别
+      const vh = virtualLedgerHeader(sheet);
+      if (!vh) {
+        // 完全无法识别：保留弱兜底，尽量给预览但不静默丢行
+        for (const row of sheet.rows) {
+          const isFirstRow = row.r === sheet.rows[0].r;
+          const headerLike = /名称|类型|类别|分类|数量|库存|容量|位置|地点|房间|教室|地址|审批|规格|型号|设备或房间|在哪里|多少/.test(row.cells.join(' '));
+          if (isFirstRow && headerLike) { pushSkipped(sheet, si, row, '表头/字段说明行'); continue; }
+          if (row.cells.filter(Boolean).length === 1) { pushSkipped(sheet, si, row, '标题/分段行'); continue; }
+          if (isAssetHeaderRow(row)) { pushSkipped(sheet, si, row, '资产编号明细表头'); continue; }
+          if (inAssetBlock(row.r)) { pushSkipped(sheet, si, row, '资产编号明细（按台件登记，与汇总行重复）'); continue; }
+          if (isSectionTitleRow(row)) { pushSkipped(sheet, si, row, '分段标题/分类行'); continue; }
+          const candidates = row.cells.filter((x) => x && x.length >= 2 && !/^(名称|类型|备注|说明)$/.test(x) && !/合计|总计/.test(x));
+          const name = candidates.find((x) => !/^\d+(\.\d+)?(人|台|件|把|套|个)?$/.test(x)) || '';
+          if (isSkipRow(name)) { pushSkipped(sheet, si, row, '标题/合计/非资源行'); continue; }
+          const numberCell = row.cells.find((x) => /^\d+(\.\d+)?$/.test(x));
+          const kind = forcedKind || kindBySheetName(sheet.name) || inferKindFromRow(name, {}).kind;
+          pushItem({
+            kind, name, spec: '', quantity: kind === 'item' ? (numberCell || '') : '',
+            unit: '', location: kind === 'space' ? name : '', capacity: kind === 'space' ? (numberCell || '') : '',
+            equipment: [], approve_mode: '', _sheet: sheet.name, _sheet_index: si, _row: row.r, confidence: 'low',
+          });
         }
-
-        const candidates = row.cells.filter((x) => x && x.length >= 2 && !/^(名称|类型|备注|说明)$/.test(x) && !/合计|总计/.test(x));
-        const name = candidates.find((x) => !/^\d+(\.\d+)?(人|台|件|把|套|个)?$/.test(x)) || '';
-        if (isSkipRow(name)) { skipped.push({ sheet: sheet.name, sheet_index: si, row: row.r, reason: '标题/合计/非资源行' }); continue; }
-        const numberCell = row.cells.find((x) => /^\d+(\.\d+)?$/.test(x));
-        const kind = forcedKind || kindBySheetName(sheet.name) || inferKindFromRow(name, {}).kind;
-        if (items.length >= BOOKING_IMPORT_MAX) { truncated++; continue; }
-        items.push({
-          kind, name, spec: '', quantity: kind === 'item' ? (numberCell || '') : '',
-          unit: '', location: kind === 'space' ? name : '', capacity: kind === 'space' ? (numberCell || '') : '',
-          equipment: [], approve_mode: '', _sheet: sheet.name, _sheet_index: si, _row: row.r, confidence: 'low',
-        });
+      } else {
+        for (const row of sheet.rows) {
+          if (row.r === sheet.rows[0].r) { pushSkipped(sheet, si, row, '房间标题行'); continue; }
+          if (isAssetHeaderRow(row)) { pushSkipped(sheet, si, row, '资产编号明细表头'); continue; }
+          if (inAssetBlock(row.r)) { pushSkipped(sheet, si, row, '资产编号明细（按台件登记，与汇总行重复）'); continue; }
+          if (isSectionTitleRow(row)) { pushSkipped(sheet, si, row, '分段标题/分类行'); continue; }
+          const name = cellText(row.cells[0]);
+          if (isSkipRow(name)) { pushSkipped(sheet, si, row, name ? '合计/序号行' : '空行'); continue; }
+          const spec = cellText(row.cells[1]);
+          const quantity = cellText(row.cells[2]);
+          if (!spec && !quantity) { pushSkipped(sheet, si, row, '无规格/数量的说明行'); continue; }
+          pushItem({
+            kind: 'item', name, spec, quantity: quantity || '', unit: '', location: '', capacity: '',
+            equipment: [], approve_mode: '', _sheet: sheet.name, _sheet_index: si, _row: row.r, confidence: 'high',
+          });
+        }
       }
     }
   }
 
   if (!items.length) warnings.push('规则解析未识别到有效资源行');
   if (truncated) warnings.push(`最多导入 ${BOOKING_IMPORT_MAX} 条，已截断后续 ${truncated} 行`);
-  return { items, skipped, truncated: truncated > 0, warnings: [`已使用规则解析 ${sheets.length} 个工作表`, ...warnings], source: 'rules' };
+  return {
+    items, skipped, truncated: truncated > 0,
+    warnings: [`已使用规则解析 ${sheets.length} 个工作表`, ...warnings],
+    source: 'rules',
+    groups: buildRuleGroups(sheets, items, skipped),
+  };
+}
+
+function buildRuleGroups(sheets, items, skipped) {
+  return sheets.map((s, si) => ({
+    name: s.name,
+    sheet_index: si,
+    items: items.filter((x) => x._sheet_index === si).length,
+    skipped: skipped.filter((x) => x.sheet_index === si).length,
+    excluded: false,
+  }));
 }
 
 
@@ -236,52 +334,74 @@ function detectStandardBookingSheets(rawSheets) {
   for (let si = 0; si < sheets.length; si++) {
     const sheet = sheets[si];
     if (!sheet.rows.length) continue;
+
+    // 允许表头前有标题行（前若干行内定位）；资产编号明细表头不计主表头
+    const stdHeaders = sheet.rows
+      .filter((row) => !isAssetHeaderRow(row))
+      .map((row) => ({ h: detectHeader(row), row }))
+      .filter((x) => x.h && x.h.score >= 11)
+      .map((x) => x.h)
+      .sort((a, b) => a.row - b.row);
+    const vh = stdHeaders.length ? null : virtualLedgerHeader(sheet);
+
+    if (!stdHeaders.length && !vh) {
+      // 只有标题/分段行的空表容忍跳过；存在无法归类的数据行则判非标，交给 AI/弱兜底
+      const dataRows = sheet.rows.filter((row) => row.cells.some(Boolean) && !isSectionTitleRow(row) && !isAssetHeaderRow(row));
+      if (dataRows.length <= 1) continue;
+      return null;
+    }
     nonEmpty++;
 
-    const first = sheet.rows[0];
-    const h = detectHeader(first);
-    if (!h || h.row !== first.r) return null;
-    const has = (key) => h.cols[key] !== undefined;
-
+    const headers = stdHeaders.length ? stdHeaders : [vh];
     let kind = '';
-    if (has('kind')) {
-      // 标准混合表：每一行的类型都必须能明确归一化；模糊类型交给 AI 理解。
-      for (const row of sheet.rows.slice(1)) {
-        const name = cellText(row.cells[h.cols.name]);
-        if (!name || isSkipRow(name)) continue;
-        if (!normalizeKind(row.cells[h.cols.kind], '')) return null;
-      }
-      kind = 'mixed';
-    } else {
-      const sheetKind = kindBySheetName(sheet.name);
-      const hasQuantity = has('quantity');
-      const hasCapacity = has('capacity');
-      if (hasQuantity && hasCapacity) {
-        if (!sheetKind) return null; // 同表同时有库存和容量但无类型列，属于歧义/非标表
-        kind = sheetKind;
-      } else if (hasQuantity) {
-        kind = 'item';
-      } else if (hasCapacity) {
-        kind = 'space';
-      } else if (sheetKind) {
-        kind = sheetKind;
+    for (const h of headers) {
+      const has = (key) => h.cols[key] !== undefined;
+      let hKind = '';
+      if (has('kind')) {
+        // 标准混合表：每个有名称的数据行类型都必须能明确归一化；模糊类型交给 AI 理解
+        for (const row of sheet.rows) {
+          if (row.r === h.row) continue;
+          const name = cellText(row.cells[h.cols.name]);
+          if (!name || isSkipRow(name)) continue;
+          if (!normalizeKind(row.cells[h.cols.kind], '')) return null;
+        }
+        hKind = 'mixed';
       } else {
-        return null;
+        const sheetKind = kindBySheetName(sheet.name);
+        const hasQuantity = has('quantity');
+        const hasCapacity = has('capacity');
+        if (hasQuantity && hasCapacity) {
+          if (!sheetKind) return null; // 同表同时有库存和容量但无类型列，属于歧义/非标表
+          hKind = sheetKind;
+        } else if (hasQuantity || vh) {
+          hKind = 'item'; // 房间设备登记表：有登记数量即物品台账
+        } else if (hasCapacity) {
+          hKind = 'space';
+        } else if (sheetKind) {
+          hKind = sheetKind;
+        } else {
+          return null;
+        }
+        if (hKind === 'item' && !hasQuantity && !vh) return null;
+        if (hKind === 'space' && !hasCapacity) return null;
       }
-      if (kind === 'item' && !hasQuantity) return null;
-      if (kind === 'space' && !hasCapacity) return null;
+      if (kind && kind !== hKind) kind = 'mixed';
+      else kind = hKind;
     }
 
-    const hasNamedData = sheet.rows.slice(1).some((row) => {
-      const name = cellText(row.cells[h.cols.name]);
+    const headerRows = new Set(headers.map((h) => h.row));
+    const hasNamedData = sheet.rows.some((row) => {
+      if (headerRows.has(row.r) || isAssetHeaderRow(row) || isSectionTitleRow(row)) return false;
+      const name = cellText(row.cells[headers[0].cols.name]);
       return name && !isSkipRow(name);
     });
-    if (!hasNamedData) return null;
+    if (!hasNamedData) continue;
     profiles[si] = { kind };
   }
 
   if (!nonEmpty) return null;
   const used = profiles.filter(Boolean).map((x) => x.kind);
+  if (!used.length) return null;
   const hasMixed = used.includes('mixed');
   const hasItem = used.includes('item');
   const hasSpace = used.includes('space');
@@ -304,9 +424,10 @@ export async function autoParseMixedBooking(buf, ext) {
     }[standard.strategy];
     const items = parsed.items.map((it) => {
       const profile = standard.profiles[it._sheet_index];
+      if (!profile) return it; // 空表/标题表无 profile，保留解析原值（正常情况下该表无资源行）
       return {
         ...it,
-        kind: profile && profile.kind !== 'mixed' ? profile.kind : it.kind,
+        kind: profile.kind !== 'mixed' ? profile.kind : it.kind,
         confidence: 'high',
         warnings: [],
       };
@@ -343,7 +464,7 @@ confidence 只能为 high/medium/low。`;
 function buildAiPayload(rawSheets) {
   const compact = compactSheets(rawSheets);
   let truncatedRows = 0;
-  let budget = BOOKING_IMPORT_MAX;
+  let budget = AI_PAYLOAD_MAX_ROWS;
   const sheets = compact.map((s) => {
     const rows = [];
     for (const row of s.rows) {
@@ -433,7 +554,7 @@ export async function aiParseMixedBooking(buf, ext) {
       `工作表：${payload.sheets.map((s) => s.name).join('、')}`,
       ...aiWarnings,
     ];
-    if (truncatedRows) warnings.push(`单次最多处理 ${BOOKING_IMPORT_MAX} 行，已截断后续 ${truncatedRows} 行`);
+    if (truncatedRows) warnings.push(`AI 单次最多整理 ${AI_PAYLOAD_MAX_ROWS} 行，已截断后续 ${truncatedRows} 行（可删除多余工作表后分批导入）`);
     return { items: ai.items.slice(0, BOOKING_IMPORT_MAX), skipped: ai.skipped || [], truncated: truncatedRows > 0, warnings, source: 'ai', ai_used: true };
   }
 
