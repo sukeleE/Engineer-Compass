@@ -60,7 +60,7 @@ const MAX_SPAN_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_HEADCOUNT = 100;
 const MAX_TEAM_MEMBERS = 30;
 
-// 表格导入：内存缓冲（不落盘），单文件 ≤10MB
+// 表格导入：内存缓冲（不落盘），单文件 ≤100MB（BOOKING_IMPORT_LIMIT_BYTES）
 const importMem = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: BOOKING_IMPORT_LIMIT_BYTES, files: 1 },
