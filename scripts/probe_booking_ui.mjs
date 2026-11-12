@@ -612,6 +612,50 @@ try {
     (await pageA.locator('.wg-grp.on .wg-grp-name').innerText()) === '全部' &&
     (await pageA.locator('.wg-track').count()) === 9);
 
+  // ===== 7f. 过去时段灰色遮罩替代当前时刻红线 + 表格内滚轮横滚 =====
+  await pageA.locator('.tabchip', { hasText: '周视图' }).click();
+  await pageA.locator('.wg-track').first().waitFor();
+  const trackCount7f = await pageA.locator('.wg-track').count();
+  ok('当前时刻红线已移除（无 .wg-now 元素、图例无「当前时刻」）',
+    (await pageA.locator('.wg-now').count()) === 0 &&
+    !(await pageA.locator('.wg-legend').innerText()).includes('当前时刻'));
+  ok('图例改为「过去时段（不可预约）」',
+    (await pageA.locator('.wg-legend').innerText()).includes('过去时段（不可预约）'));
+  // 本周含今天（?date=明天）：今天列序 = (dayIdx+6)%7；首日未开门前 pastCol=0 不渲染灰罩
+  const todayIdx7f = (dayIdx + 6) % 7;
+  const pastWidths = await pageA.locator('.wg-past').evaluateAll((els) =>
+    els.map((el) => parseFloat(el.style.width)));
+  if (pastWidths.length === 0) {
+    ok('边界：本周首日 07:00 前无过去灰罩', todayIdx7f === 0);
+  } else {
+    ok('每个资源行都渲染过去灰罩、宽度一致且未铺满整周',
+      pastWidths.length === trackCount7f &&
+      pastWidths.every((w) => w > 0 && w < 100) &&
+      Math.max(...pastWidths) - Math.min(...pastWidths) < 0.01, pastWidths.join(','));
+    // 灰罩吞掉 pointerdown：回到最左后点击灰罩内部，不出现拖选层/预约弹窗
+    await pageA.locator('.wg-scroll').evaluate((el) => { el.scrollLeft = 0; });
+    const maskBox = await pageA.locator('.wg-past').first().boundingBox();
+    await pageA.mouse.move(maskBox.x + 30, maskBox.y + maskBox.height / 2);
+    await pageA.mouse.down();
+    await sleep(60);
+    await pageA.mouse.up();
+    await sleep(150);
+    ok('过去灰区点击不可圈选（无拖选层、无预约弹窗）',
+      (await pageA.locator('.wg-select').count()) === 0 &&
+      (await pageA.locator('.el-dialog:visible').count()) === 0);
+  }
+  ok('日表头过去灰罩覆盖今天及之前各天',
+    (await pageA.locator('.wg-daypast').count()) === (pastWidths.length ? todayIdx7f + 1 : 0));
+  // 滚轮横滚：表格内纵向滚轮转成 scrollLeft
+  const scrollEl7f = pageA.locator('.wg-scroll');
+  const slBefore = await scrollEl7f.evaluate((el) => el.scrollLeft);
+  const sbBox = await scrollEl7f.boundingBox();
+  await pageA.mouse.move(sbBox.x + sbBox.width / 2, sbBox.y + sbBox.height / 2);
+  await pageA.mouse.wheel(0, 400);
+  await sleep(150);
+  const slAfter = await scrollEl7f.evaluate((el) => el.scrollLeft);
+  ok('表格内滚轮触发横向滚动（scrollLeft 增大）', slAfter > slBefore, `${slBefore} -> ${slAfter}`);
+  await scrollEl7f.evaluate((el) => { el.scrollLeft = 0; });
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   ok('无 /conflicts 之外的 4xx/5xx', badResp.length === 0, badResp.slice(0, 3).join(' | '));

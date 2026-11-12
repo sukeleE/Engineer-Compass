@@ -44,6 +44,7 @@
             <span v-for="hh in rulerHrs" :key="hh" class="wg-rtick" :class="{ first: hh === OPEN_HH }"
               :style="{ left: ((hh * 60 - 420) / 30 / 30) * 100 + '%' }">{{ hh }}</span>
           </div>
+          <div v-if="dayPastStyle(i)" class="wg-daypast" :style="dayPastStyle(i)"></div>
         </div>
 
         <template v-for="row in rows" :key="row.resource.id">
@@ -74,9 +75,10 @@
               <span class="wg-bk-meta">{{ row.resource.is_space ? `👥${b.booking.headcount}` : `×${b.booking.qty}` }}</span>
               <span v-if="b.span >= 5" class="wg-bk-dur">{{ durationLabel(b.booking.start_time, b.booking.end_time) }}</span>
             </div>
-            <!-- 当前时刻红线 -->
-            <div v-if="nowLineCol(row.resource) !== null" class="wg-now"
-              :style="{ left: (nowLineCol(row.resource) / TOTAL) * 100 + '%' }"></div>
+            <!-- 过去时段灰色遮罩：拦截 pointerdown 不可圈选；预约块 z-index 更高仍可点击查看 -->
+            <div v-if="pastCol > 0" class="wg-past"
+              :style="{ width: (Math.min(pastCol, TOTAL) / TOTAL) * 100 + '%' }"
+              @pointerdown.stop @click.stop></div>
             <!-- 拖选层 -->
             <div v-if="drag && drag.resourceId === row.resource.id" class="wg-select"
               :style="segStyle(drag.seg)"></div>
@@ -123,8 +125,8 @@
       <span><i class="lg-dead"></i>已取消/驳回</span>
       <span v-if="hasItems"><i class="lg-heat-a"></i>半占</span>
       <span v-if="hasItems"><i class="lg-heat-r"></i>约满</span>
-      <span><i class="lg-now"></i>当前时刻</span>
-      <span v-if="!isMobile" class="dim wg-tip">{{ project.status === 'open' ? '在资源行空白处按住拖动可跨天圈选时段（30 分钟/格）' : '项目已关闭，不再接受新预约' }}</span>
+      <span v-if="pastCol > 0"><i class="lg-past"></i>过去时段（不可预约）</span>
+      <span v-if="!isMobile" class="dim wg-tip">{{ project.status === 'open' ? '灰色区域为过去时段不可预约；在空白处按住拖动可跨天圈选时段（30 分钟/格）' : '项目已关闭，不再接受新预约' }}</span>
       <span v-else class="dim wg-tip">点开资源可查看当日占用并新建预约</span>
     </div>
   </div>
@@ -188,6 +190,27 @@ function scrollToToday() {
   // 今天列贴轨道左缘（留 16px 缝隙）：sticky 资源名列固定不参与滚动，
   // 贴左能让未来可见天数最大化（轨道区一屏约 1.4 天）
   el.scrollTo({ left: Math.min(max, Math.max(0, idx * dayW - 16)) });
+}
+
+// ---- 鼠标在表格内滚轮横滚：有横向溢出时把纵向滚轮 deltaY 转成 scrollLeft ----
+let wheelEl = null;
+function onWheel(e) {
+  const el = scrollEl.value;
+  if (!el || el.scrollWidth <= el.clientWidth) return; // 无横向溢出时保持原生（纵向）滚动
+  if (e.deltaY === 0) return;                          // 触控板横向手势 / shift+滚轮走原生
+  e.preventDefault();
+  const px = e.deltaMode === 1 ? 32 : 1;               // 按行滚动(deltaMode=1)时换算像素
+  el.scrollLeft += e.deltaY * px;
+}
+function bindWheel() {
+  const el = scrollEl.value;
+  if (!el || el === wheelEl) return;
+  unbindWheel();
+  el.addEventListener('wheel', onWheel, { passive: false });
+  wheelEl = el;
+}
+function unbindWheel() {
+  if (wheelEl) { wheelEl.removeEventListener('wheel', onWheel); wheelEl = null; }
 }
 
 const days = computed(() => {
@@ -318,14 +341,28 @@ function heat(resource) {
   return segs;
 }
 
-// ---- 当前时刻红线（仅当日 07:00–22:00） ----
-function nowLineCol() {
+// ---- 过去时段灰色遮罩边界（列坐标，允许小数；0=无遮罩，TOTAL=整周全在过去） ----
+const pastCol = computed(() => {
   const n = nowD.value;
-  if (!days.value.some((d) => isSameDay(d, n))) return null;
+  const ti = days.value.findIndex((d) => isSameDay(d, n));
+  if (ti < 0) {
+    // 本周不含今天：首日在今天之后=整周未来不灰；否则整周已过去=全灰
+    const todayMid = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+    const firstMid = new Date(days.value[0].getFullYear(), days.value[0].getMonth(), days.value[0].getDate()).getTime();
+    return firstMid > todayMid ? 0 : TOTAL;
+  }
   const mins = n.getHours() * 60 + n.getMinutes();
-  if (mins < OPEN_HH * 60 || mins > 22 * 60) return null;
-  const dayDiff = days.value.findIndex((d) => isSameDay(d, n));
-  return dayDiff * SLOTS_PER_DAY + (mins - OPEN_HH * 60) / 30;
+  if (mins <= OPEN_HH * 60) return ti * SLOTS_PER_DAY;      // 今日未开门：灰到昨天为止
+  if (mins >= 22 * 60) return (ti + 1) * SLOTS_PER_DAY;     // 今日已收档：今天整列灰
+  return ti * SLOTS_PER_DAY + (mins - OPEN_HH * 60) / 30;
+});
+// 可预约最小列：当前所在的 30 分钟格不可订，向上取整
+const minBookCol = computed(() => Math.max(0, Math.min(TOTAL, Math.ceil(pastCol.value))));
+// 日表头遮罩：按天把 pastCol 裁剪成 0–100% 宽度，整天在未来返回 null
+function dayPastStyle(i) {
+  const start = i * SLOTS_PER_DAY;
+  if (pastCol.value <= start) return null;
+  return { width: Math.min(1, (pastCol.value - start) / SLOTS_PER_DAY) * 100 + '%' };
 }
 let nowTimer = setInterval(() => { nowTick.value = Date.now(); nowD.value = new Date(); }, 60000);
 
@@ -339,8 +376,9 @@ function onDown(e, resource) {
   if (props.project.status !== 'open') return;
   if (e.button !== 0 || e.target.closest('.wg-block')) return;
   const track = e.currentTarget;
-  track.setPointerCapture?.(e.pointerId);
   const c0 = colFromEvent(e, track);
+  if (c0 < minBookCol.value) return; // 过去时段不可选（灰色遮罩已拦截，此处兜底）
+  track.setPointerCapture?.(e.pointerId);
   drag.value = { resourceId: resource.id, track, c0, seg: { cs: c0, ce: c0 + 1 } };
   track.addEventListener('pointermove', onMove);
   track.addEventListener('pointerup', onUp, { once: true });
@@ -349,7 +387,11 @@ function onDown(e, resource) {
 function onMove(e) {
   if (!drag.value) return;
   const c = colFromEvent(e, drag.value.track);
-  drag.value.seg = { cs: Math.min(drag.value.c0, c), ce: Math.max(drag.value.c0, c) + 1 };
+  // 向左回拖不得越过当前时刻：圈选起点钳制在可预约最小列
+  drag.value.seg = {
+    cs: Math.max(minBookCol.value, Math.min(drag.value.c0, c)),
+    ce: Math.max(drag.value.c0, c) + 1,
+  };
 }
 function onUp() {
   const d = drag.value;
@@ -430,7 +472,10 @@ onMounted(() => {
   syncMq();
   mq.addEventListener?.('change', syncMq);
   nextTick(scrollToToday);
+  nextTick(bindWheel);
 });
+// 桌面/窄屏切换会经 v-if 重建滚动容器，需要重新挂载滚轮监听
+watch(isMobile, () => nextTick(bindWheel));
 // timeline 数据到达/翻周/历史切换后重新定位（不监听用户纯滚动）
 watch(() => props.data, () => nextTick(scrollToToday));
 // 类型筛选变化或数据刷新后当前分组可能消失，回落「全部」
@@ -439,7 +484,7 @@ watch(groupTabs, (tabs) => {
     groupFilter.value = '__all__';
   }
 });
-onBeforeUnmount(() => { clearInterval(nowTimer); mq.removeEventListener?.('change', syncMq); cleanupDrag(); });
+onBeforeUnmount(() => { clearInterval(nowTimer); mq.removeEventListener?.('change', syncMq); cleanupDrag(); unbindWheel(); });
 </script>
 
 <style lang="scss" scoped>
@@ -541,8 +586,15 @@ $wg-name-w: 176px;
 .wg-block.mine { box-shadow: 0 0 0 2px var(--primary, #7c3aed) inset; }
 .wg-block.past { opacity: .5; }
 
-.wg-now { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 9; pointer-events: none;
-  &::after { content: ''; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+// 过去时段遮罩：z-index(4) 低于预约块(5)，历史预约仍可点击查看；右缘灰线标示当前时刻分界
+.wg-past {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 4;
+  background: rgba(100, 116, 139, .16); border-right: 1px solid rgba(100, 116, 139, .45);
+  cursor: not-allowed;
+}
+.wg-daypast {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 1;
+  background: rgba(100, 116, 139, .14); pointer-events: none;
 }
 .wg-select {
   position: absolute; top: 2px; bottom: 2px; z-index: 7; pointer-events: none;
@@ -571,7 +623,7 @@ $wg-name-w: 176px;
   .lg-dead { border: 1px dashed var(--border-2, #999); }
   .lg-heat-a { background: rgba(245, 158, 11, .4); }
   .lg-heat-r { background: rgba(239, 68, 68, .4); }
-  .lg-now { width: 2px; background: #ef4444; }
+  .lg-past { background: rgba(100, 116, 139, .35); }
 }
 .wg-tip { margin-left: auto; }
 .dim { color: var(--text-3); }
