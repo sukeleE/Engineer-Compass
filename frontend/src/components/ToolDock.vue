@@ -118,7 +118,7 @@ onBeforeUnmount(() => clearInterval(unreadTimer));
 .dock-tool {
   position: relative; width: 48px; height: 48px; border-radius: 50%;
   border: 1px solid var(--border); cursor: pointer; font-size: 22px;
-  background: var(--card-bg); color: #333;
+  background: var(--card-bg); color: var(--text);
   box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
   transition: transform .15s;
   &:hover { transform: scale(1.1); }

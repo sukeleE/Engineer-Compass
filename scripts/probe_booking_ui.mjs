@@ -14,6 +14,7 @@
 //   全程无 pageerror、无意外 4xx/5xx
 //   → 位置记忆下拉：首次手输建档、下次候选可点选并随卡回显
 //   → 暗夜黑主题：--bg-2 等补齐变量换肤、浅底浅字消失、甘特文字对比度/蓝块白字回归
+//   → 暗色壁纸压暗（暗底+multiply，浅色壁纸不再洗白整屏与标题）、损坏 ec_user 不白屏
 //
 // 沙盒：后端 cwd=临时目录（无 .env）+ 临时 DB + 临时上传目录，跑完即弃，绝不碰真实数据。
 // 运行：node scripts/probe_booking_ui.mjs
@@ -730,6 +731,50 @@ try {
   });
   ok('暗夜黑：已确认块保持中蓝底白字（亮蓝 primary 不直接配白字）',
     !!darkBlock && darkBlock.bg === 'rgb(37, 99, 235)' && darkBlock.fg === 'rgb(255, 255, 255)', JSON.stringify(darkBlock));
+
+  // ===== 7h. 暗色主题壁纸压暗（回归：浅色壁纸把整屏洗白、标题浅字不可见）=====
+  // has-wallpaper 时 html/body 让位透明，背后是浏览器默认白画布；修复后暗色主题补暗底 + multiply 压暗
+  const wallCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const wallPage = await wallCtx.newPage();
+  const whitePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  await wallPage.goto(WEB);
+  await wallPage.evaluate((wp) => localStorage.setItem('ec_theme_local', JSON.stringify(
+    { preset: 'dark', primary: '#60a5fa', wallpaper: wp, opacity: 0.6 })), whitePng);
+  await wallPage.goto(`${WEB}/login`);
+  await sleep(1200);
+  const wall = await wallPage.evaluate(() => {
+    const wpEl = document.getElementById('theme-wallpaper');
+    const bodyBg = getComputedStyle(document.body).backgroundColor;
+    const h1 = document.querySelector('.brand h1');
+    const lum = (c) => {
+      const m = c.match(/\d+/g).map(Number).slice(0, 3).map((v) => {
+        v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+      });
+      return .2126 * m[0] + .7152 * m[1] + .0722 * m[2];
+    };
+    const h1Color = h1 ? getComputedStyle(h1).color : '';
+    const ratio = h1Color ? (Math.max(lum(h1Color), lum(bodyBg)) + .05) / (Math.min(lum(h1Color), lum(bodyBg)) + .05) : 0;
+    return {
+      hasWp: document.documentElement.classList.contains('has-wallpaper'),
+      bodyBg, blend: wpEl ? getComputedStyle(wpEl).backgroundBlendMode : '', h1Color, ratio: Number(ratio.toFixed(2)),
+    };
+  });
+  ok('暗夜黑+浅色壁纸：body 暗色实底不透明白画布、壁纸 multiply 压暗',
+    wall.hasWp && wall.bodyBg === 'rgb(11, 16, 32)' && wall.blend === 'multiply', JSON.stringify(wall));
+  ok('暗夜黑+浅色壁纸：标题浅字对暗底对比度 ≥7（标题不再被洗白）', wall.ratio >= 7, `ratio=${wall.ratio}`);
+  await wallCtx.close();
+
+  // ===== 7i. ec_user 损坏不再白屏：auth.js 防御解析后应用照常挂载 =====
+  const crashCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const crashPage = await crashCtx.newPage();
+  await crashPage.goto(WEB);
+  await crashPage.evaluate(() => localStorage.setItem('ec_user', 'undefined'));
+  await crashPage.goto(`${WEB}/login`);
+  await sleep(1200);
+  const mounted = await crashPage.evaluate(
+    () => (document.getElementById('app')?.innerHTML.length || 0) > 100 && !!document.querySelector('.app-header'));
+  ok('ec_user 损坏时应用仍正常挂载（不白屏崩溃）', mounted);
+  await crashCtx.close();
 
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

@@ -305,7 +305,7 @@ onBeforeUnmount(() => timer && clearInterval(timer));
 }
 .msg-main { max-width: 68%; display: flex; flex-direction: column; .mine & { align-items: flex-end; } }
 .msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
-  .msg-sender { font-size: 12.5px; color: #475569; font-weight: 600; }
+  .msg-sender { font-size: 12.5px; color: var(--text-2); font-weight: 600; }
   .msg-time { font-size: 11px; color: #94a3b8; }
   .msg-del { padding: 0; font-size: 11px; opacity: 0; transition: opacity 0.15s; } }
 .msg-row:hover .msg-del { opacity: 1; }
@@ -320,14 +320,14 @@ onBeforeUnmount(() => timer && clearInterval(timer));
   .img-preview { display: flex; gap: 8px; width: 100%;
     .ip-item { position: relative; img { height: 56px; border-radius: 6px; border: 1px solid var(--border); }
       .el-button { position: absolute; top: -8px; right: -8px; padding: 2px 5px; } } } }
-.info-body { .info-line { font-size: 13px; color: #475569; margin-bottom: 8px; span { color: #94a3b8; } } }
+.info-body { .info-line { font-size: 13px; color: var(--text-2); margin-bottom: 8px; span { color: #94a3b8; } } }
 .member-head { font-weight: 700; font-size: 13.5px; margin: 12px 0 8px; }
 .member-grid { display: flex; flex-wrap: wrap; gap: 10px; max-height: 220px; overflow-y: auto; }
 .member-cell { width: 96px; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative;
   .member-avatar { width: 46px; height: 46px; border-radius: 50%; overflow: hidden; background: var(--primary); color: #fff;
     display: flex; align-items: center; justify-content: center; font-weight: 700;
     img { width: 100%; height: 100%; object-fit: cover; } }
-  .member-name { font-size: 12px; color: #334155; text-align: center; word-break: break-all; .crown { margin-left: 2px; } } }
+  .member-name { font-size: 12px; color: var(--text); text-align: center; word-break: break-all; .crown { margin-left: 2px; } } }
 .manage-block { margin-top: 16px; .manage-title { font-size: 12.5px; color: #64748b; margin-bottom: 6px; } }
 .manage-row { display: flex; gap: 8px; }
 .leave-row { margin-top: 20px; text-align: center; }

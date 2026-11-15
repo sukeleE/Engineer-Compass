@@ -342,7 +342,8 @@ watch(() => [props.blob, props.name], () => parse(props.blob), { immediate: true
   justify-content: center;
   gap: 10px;
   color: var(--text-2, #475569);
-  background: rgba(255, 255, 255, 0.78);
+  // 浅色模式 = 原白 78%；暗夜黑/幽灵模式随 --card-bg 变暗，不再白色蒙版糊脸
+  background: color-mix(in srgb, var(--card-bg, #fff) 78%, transparent);
   font-size: 13px;
 }
 .office-spinner {

@@ -202,6 +202,16 @@ td, th {
 /* 有壁纸时 html/body 底色让位，露出壁纸；卡片自身仍是实心底，可读性不受影响 */
 html.has-wallpaper,
 html.has-wallpaper body { background: transparent; }
+/* 暗色主题壁纸压暗（2026-11-15 修复）：透明的 html/body 后面是浏览器默认白画布，浅色壁纸在暗夜黑/幽灵
+   模式下会让整屏泛白、近白色标题文字被洗白（用户反馈"背景半透明蒙版是白色的、标题也是白色的"）。
+   ① 暗色主题给 html/body 补回暗色实底，壁纸只在暗底上按浓度叠加；
+   ② multiply 把壁纸与暗底混合，浅色壁纸只留纹理不抢亮度（与手机系统深色模式压暗壁纸同思路）。 */
+html[data-theme='dark'].has-wallpaper,
+html[data-theme='dark'].has-wallpaper body { background: #0b1020; }
+html[data-theme='dark'] #theme-wallpaper { background-color: #0b1020; background-blend-mode: multiply; }
+html.ghost-mode.has-wallpaper,
+html.ghost-mode.has-wallpaper body { background: #0b0b0e; }
+html.ghost-mode #theme-wallpaper { background-color: #0b0b0e; background-blend-mode: multiply; }
 
 // —— 配色预设（ocean 海洋蓝即 :root 默认值，不另写；色值与 lib/themes.js derivePalette 同规则） ——
 html[data-theme='forest'] {

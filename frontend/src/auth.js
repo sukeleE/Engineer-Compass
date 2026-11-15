@@ -4,9 +4,20 @@ import { reactive } from 'vue';
 const TOKEN_KEY = 'ec_token';
 const USER_KEY = 'ec_user';
 
+// 防御：ec_user 被写坏（旧版本/隐私模式异常/手工篡改）时 JSON.parse 会抛错并导致整站白屏，
+// 解析失败按未登录处理并清掉坏值，保证应用仍能挂载
+function readStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+  } catch {
+    try { localStorage.removeItem(USER_KEY); } catch { /* 存储不可用忽略 */ }
+    return null;
+  }
+}
+
 const auth = reactive({
   token: localStorage.getItem(TOKEN_KEY) || '',
-  user: JSON.parse(localStorage.getItem(USER_KEY) || 'null'),
+  user: readStoredUser(),
 });
 
 export function setAuth(token, user) {
