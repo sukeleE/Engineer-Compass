@@ -11,7 +11,12 @@
         <el-input v-model="f.name" maxlength="30" show-word-limit :placeholder="meta.space ? '如：工程训练中心 301' : '如：大疆 RoboMaster S1'" />
       </el-form-item>
       <el-form-item label="位置">
-        <el-input v-model="f.location" maxlength="60" :placeholder="meta.space ? '楼栋/房间号' : '存放位置'" />
+        <!-- 项目内历史位置记忆：可选已有位置，也可直接输入新位置（allow-create），保存后进入下次候选 -->
+        <el-select v-model="f.location" filterable allow-create default-first-option clearable
+          :reserve-keyword="false" style="width: 100%"
+          :placeholder="meta.space ? '楼栋/房间号' : '存放位置'">
+          <el-option v-for="loc in locationChoices" :key="loc" :value="loc" :label="loc" />
+        </el-select>
       </el-form-item>
       <el-form-item label="分组（可选，对应导入时的工作表）">
         <el-select v-model="f.group_name" filterable allow-create clearable default-first-option
@@ -84,6 +89,8 @@ const props = defineProps({
   project: { type: Object, required: true },
   resource: { type: Object, default: null },
   groupOptions: { type: Array, default: () => [] },
+  // 项目内已保存过的存放位置（记忆候选，由父组件从资源列表聚合）
+  locationOptions: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['close', 'saved']);
 
@@ -95,6 +102,8 @@ const f = ref(empty());
 const saving = ref(false);
 const shotRef = ref(null);
 const meta = computed(() => KIND_MAP[f.value.kind]);
+// 候选 = 项目历史位置 + 当前值：编辑旧资源时即使其位置已不在候选里也能正常回显
+const locationChoices = computed(() => [...new Set([...props.locationOptions, f.value.location].filter(Boolean))]);
 
 watch(() => props.modelValue, (v) => {
   if (!v) return;
@@ -147,7 +156,7 @@ async function submit() {
   if (isSpace && !(f.value.capacity >= 1)) return ElMessage.warning('请填写可容纳人数');
   if (!isSpace && !(f.value.quantity >= 1)) return ElMessage.warning('请填写库存数量');
   const body = {
-    kind: f.value.kind, name: f.value.name.trim(), location: f.value.location,
+    kind: f.value.kind, name: f.value.name.trim(), location: (f.value.location || '').trim().slice(0, 60),
     group_name: (f.value.group_name || '').trim().slice(0, 30),
     image: f.value.image || '', approve_mode: f.value.approve_mode,
     ...(isSpace

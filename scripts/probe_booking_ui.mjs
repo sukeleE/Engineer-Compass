@@ -12,6 +12,8 @@
 //   → 整组排除含重名红行的「总表」：排除前拦截、排除后红点红标消失并放行
 //   → 周视图分组标签：分组切换过滤资源行、类型筛选联动与分组失效兜底
 //   全程无 pageerror、无意外 4xx/5xx
+//   → 位置记忆下拉：首次手输建档、下次候选可点选并随卡回显
+//   → 暗夜黑主题：--bg-2 等补齐变量换肤、浅底浅字消失、甘特文字对比度/蓝块白字回归
 //
 // 沙盒：后端 cwd=临时目录（无 .env）+ 临时 DB + 临时上传目录，跑完即弃，绝不碰真实数据。
 // 运行：node scripts/probe_booking_ui.mjs
@@ -204,7 +206,14 @@ try {
   await pageA.locator('.tabchip', { hasText: '可用资源' }).click();
   await pageA.getByRole('button', { name: '＋ 添加资源' }).click();
   await dlg(pageA).locator('input[placeholder*="工程训练中心"]').fill('机房401');
-  await dlg(pageA).locator('input[placeholder="楼栋/房间号"]').fill('工程楼401');
+  // 位置字段已改为记忆下拉（el-select allow-create）：首次无候选，聚焦后输入新值回车建档
+  // （EP 的 el-select 占位文字渲染在独立 span 上，input 不带 placeholder 属性，按表单项定位）
+  const locFormItem = dlg(pageA).locator('.el-form-item', { hasText: '位置' });
+  await locFormItem.locator('.el-select').first().click();
+  // 与 createTag 同口径：真实键入触发 EP 查询态，回车把 allow-create 新值建档选中
+  await pageA.keyboard.type('工程楼401', { delay: 30 });
+  await sleep(150);
+  await pageA.keyboard.press('Enter');
   // 室内设备两个 allow-create tag
   await createTag(pageA, '室内设备', '投影仪');
   await createTag(pageA, '室内设备', '白板');
@@ -217,6 +226,13 @@ try {
   await pageA.getByRole('button', { name: '＋ 添加资源' }).click();
   await dlg(pageA).locator('.el-radio-button', { hasText: '物品资源' }).click();
   await dlg(pageA).locator('input[placeholder*="RoboMaster"]').fill('工具箱');
+  // 位置记忆：上一个资源保存的「工程楼401」已进入项目候选，下拉直接选用
+  const locItem = dlg(pageA).locator('.el-form-item', { hasText: '位置' }).locator('.el-select').first();
+  await locItem.click();
+  const locMemOpt = pageA.locator('.el-select-dropdown:visible .el-select-dropdown__item', { hasText: '工程楼401' }).first();
+  await locMemOpt.waitFor({ timeout: 5000 });
+  ok('位置记忆下拉列出上次填写的「工程楼401」', await locMemOpt.count() >= 1);
+  await locMemOpt.click();
   await dlg(pageA).locator('.el-input-number input').fill('3');
   await pageA.keyboard.press('Tab');
   await dlg(pageA).locator('input[placeholder*="单位"]').fill('个');
@@ -227,6 +243,7 @@ try {
   const itemCardText = await itemCard.innerText();
   ok('物品卡：库存3 + 先到先得', itemCardText.includes('库存 3') && itemCardText.includes('先到先得'),
     itemCardText.replace(/\n/g, ' '));
+  ok('物品卡回显所选记忆位置', itemCardText.includes('工程楼401'), itemCardText.replace(/\n/g, ' '));
 
   await pageA.locator('.tabchip', { hasText: '周视图' }).click();
   await pageA.locator('.wg-track').nth(1).waitFor();
@@ -656,6 +673,64 @@ try {
   const slAfter = await scrollEl7f.evaluate((el) => el.scrollLeft);
   ok('表格内滚轮触发横向滚动（scrollLeft 增大）', slAfter > slBefore, `${slBefore} -> ${slAfter}`);
   await scrollEl7f.evaluate((el) => { el.scrollLeft = 0; });
+
+  // ===== 7g. 深色主题（暗夜黑）：资源预约页表面/文字随主题换肤，杜绝浅底浅字 =====
+  // 登录用户主题以服务端 user.theme 为准（本地 ec_theme_local 不生效）：走真实 PUT /auth/theme，
+  // 再把返回的新用户卡回写 localStorage（App 启动不重新拉 /auth/me），刷新后由 syncThemeFromUser 换肤
+  const darkUser = (await api('/auth/theme', { method: 'PUT', token: A.token, body: { preset: 'dark' } })).user;
+  await pageA.evaluate((u) => localStorage.setItem('ec_user', JSON.stringify(u)), darkUser);
+  // reload 会丢掉 ?date 查询串导致甘特默认回本周（明天恰在下周时块全消失），显式 goto 锚定明天所在周
+  await pageA.goto(`${WEB}/booking/${pid}?date=${D}`);
+  await pageA.locator('.tabchip', { hasText: '周视图' }).click();
+  await pageA.locator('.wg-scroll').first().waitFor();
+  const darkCss = await pageA.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const corner = document.querySelector('.wg-corner');
+    // 非选中胶囊才是纯 --bg-2 底色；选中态叠了 color-mix 主色淡底，浏览器会序列化成 color(srgb ...)
+    const grp = document.querySelector('.wg-grp:not(.on)');
+    const cs = corner ? getComputedStyle(corner) : null;
+    const gs = grp ? getComputedStyle(grp) : null;
+    return {
+      theme: document.documentElement.getAttribute('data-theme'),
+      bg2: root.getPropertyValue('--bg-2').trim(),
+      bg3: root.getPropertyValue('--bg-3').trim(),
+      border3: root.getPropertyValue('--border-3').trim(),
+      dangerFg: root.getPropertyValue('--danger-fg').trim(),
+      cornerBg: cs ? cs.backgroundColor : '',
+      grpBg: gs ? gs.backgroundColor : '',
+    };
+  });
+  // 自定义属性按 SCSS 里的书写值（hex）返回
+  ok('暗夜黑：data-theme=dark 且 --bg-2/--bg-3/--border-3/--danger-fg 换肤生效',
+    darkCss.theme === 'dark' && darkCss.bg2 === '#1b2438' && darkCss.bg3 === '#0f1524' &&
+    darkCss.border3 === '#20283c' && darkCss.dangerFg === '#f87171', JSON.stringify(darkCss));
+  ok('暗夜黑：甘特表头角/分组胶囊底色变暗（不再漏成浅灰 #f6f8fa）',
+    darkCss.cornerBg === 'rgb(27, 36, 56)' && darkCss.grpBg === 'rgb(27, 36, 56)',
+    `corner=${darkCss.cornerBg} grp=${darkCss.grpBg}`);
+  // WCAG 相对亮度对比度：资源行主文字 ≥7，表头三级文字 ≥3
+  const ratioOf = (sel) => pageA.evaluate((s) => {
+    const el = document.querySelector(s);
+    if (!el) return 0;
+    const pick = (c) => { const m = getComputedStyle(el)[c].match(/\d+/g).map(Number); return [m[0], m[1], m[2]]; };
+    const lum = ([r, g, b]) => { const a = [r, g, b].map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }); return .2126 * a[0] + .7152 * a[1] + .0722 * a[2]; };
+    const L1 = lum(pick('color')), L2 = lum(pick('backgroundColor'));
+    return (Math.max(L1, L2) + .05) / (Math.min(L1, L2) + .05);
+  }, sel);
+  const nameRatio = await ratioOf('.wg-name');
+  const cornerRatio = await ratioOf('.wg-corner');
+  ok('暗夜黑：甘特资源名对比度 ≥7、表头角文字对比度 ≥3（浅字暗底可读）',
+    nameRatio >= 7 && cornerRatio >= 3, `name=${nameRatio.toFixed(2)} corner=${cornerRatio.toFixed(2)}`);
+  // 数据异步回来，先等预约块渲染再取色
+  await pageA.locator('.wg-block.st-confirmed').first().waitFor({ timeout: 8000 });
+  const darkBlock = await pageA.evaluate(() => {
+    const el = document.querySelector('.wg-block.st-confirmed');
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, fg: cs.color };
+  });
+  ok('暗夜黑：已确认块保持中蓝底白字（亮蓝 primary 不直接配白字）',
+    !!darkBlock && darkBlock.bg === 'rgb(37, 99, 235)' && darkBlock.fg === 'rgb(255, 255, 255)', JSON.stringify(darkBlock));
+
   // ===== 8. 全局洁净度 =====
   ok('全程无 pageerror', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   ok('无 /conflicts 之外的 4xx/5xx', badResp.length === 0, badResp.slice(0, 3).join(' | '));

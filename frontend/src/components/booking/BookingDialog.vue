@@ -243,7 +243,7 @@ onMounted(async () => {
 .bd-time { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bd-sep { color: var(--text-3); }
 .bd-rule { font-size: 12px; margin: 6px 0 0; }
-.bd-err { color: #b91c1c; font-size: 12.5px; margin-left: 10px; }
+.bd-err { color: var(--danger-fg); font-size: 12.5px; margin-left: 10px; }
 .bd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .dim { color: var(--text-3); font-size: 12.5px; margin-left: 8px; }
 </style>

@@ -225,6 +225,9 @@
           <view class="f-label">规格 / 位置（选填）</view>
           <input v-model="resForm.spec" class="modal-input" maxlength="40" placeholder="规格型号" />
           <input v-model="resForm.location" class="modal-input" maxlength="60" placeholder="存放位置" />
+          <scroll-view v-if="locationOptions.length" scroll-x class="rg-quick">
+            <text v-for="loc in locationOptions" :key="loc" class="rg-chip" @click="resForm.location = loc">{{ loc }}</text>
+          </scroll-view>
           <view v-if="kindIndex === 1" class="f-label">可容纳人数</view>
           <input v-if="kindIndex === 1" v-model.number="resForm.capacity" class="modal-input" type="number" placeholder="人数（1-9999）" />
           <template v-else>
@@ -357,6 +360,8 @@ const resourceGroups = computed(() => {
   return [...map.values()];
 });
 const groupOptions = computed(() => [...new Set(resources.value.map((r) => r.group_name).filter(Boolean))]);
+// 存放位置记忆：项目内已保存过的位置去重，输入框下方快捷点选；首次无候选时手动输入，保存后即进入候选
+const locationOptions = computed(() => [...new Set(resources.value.map((r) => r.location).filter(Boolean))]);
 const today = new Date().toISOString().slice(0, 10);
 
 function bkLabel(s) { return { pending: '待审批', confirmed: '已确认', rejected: '已驳回', canceled: '已取消' }[s] || s; }

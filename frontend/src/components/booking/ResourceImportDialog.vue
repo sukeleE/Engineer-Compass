@@ -108,7 +108,12 @@
                   <td><el-input-number v-model="row.quantity" :min="1" :max="9999" size="small" controls-position="right"
                     style="width: 96px" :disabled="row.kind === 'space'" /></td>
                   <td><el-input v-model="row.unit" size="small" maxlength="8" placeholder="件" :disabled="row.kind === 'space'" /></td>
-                  <td><el-input v-model="row.location" size="small" placeholder="存放位置/房间号" /></td>
+                  <td>
+                    <el-select v-model="row.location" size="small" filterable allow-create default-first-option
+                      :reserve-keyword="false" style="width: 100%" placeholder="存放位置/房间号">
+                      <el-option v-for="loc in rowLocationOptions" :key="loc" :value="loc" :label="loc" />
+                    </el-select>
+                  </td>
                   <td><el-input-number v-model="row.capacity" :min="1" :max="9999" size="small" controls-position="right"
                     style="width: 96px" :disabled="row.kind === 'item'" /></td>
                   <td><el-input v-model="row.equipment_text" size="small" placeholder="投影、白板…"
@@ -154,6 +159,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   project: { type: Object, required: true },
   existingNames: { type: Array, default: () => [] },
+  // 项目内已保存过的存放位置（记忆候选，由父组件聚合）
+  locationOptions: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['close', 'saved']);
 
@@ -172,6 +179,10 @@ const autoImport = ref(true);
 const parseInfo = ref({ strategy: '', aiUsed: false, canAuto: false });
 let uidSeq = 0;
 const activeIndex = ref(0); // 当前查看的分组（按索引追踪，组改名不影响）
+// 位置候选 = 项目历史位置 + 本表各行已解析/已填位置：历史之外的解析值也能正常回显与复用
+const rowLocationOptions = computed(() => [
+  ...new Set([...(props.locationOptions || []), ...rows.value.map((r) => r.location).filter(Boolean)]),
+]);
 
 const STRATEGY_ZH = {
   standard_item: '标准物品资源表',
@@ -462,11 +473,11 @@ async function downloadTpl(kind = 'mixed') {
   padding: 38px 24px;
   text-align: center;
   cursor: pointer;
-  background: var(--bg-2, #f8fafc);
+  background: var(--surface-3, #f8fafc);
   transition: all .18s ease;
   b { display: block; margin: 10px 0 6px; font-size: 15px; }
   p { margin: 4px 0; font-size: 12.5px; }
-  &:hover, &.dragover { border-color: var(--el-color-primary, #409eff); background: color-mix(in srgb, #409eff 6%, white); }
+  &:hover, &.dragover { border-color: var(--el-color-primary, #409eff); background: color-mix(in srgb, var(--el-color-primary, #409eff) 6%, var(--el-bg-color-overlay, #fff)); }
 }
 .ri-drop-icon { font-size: 42px; line-height: 1; }
 .ri-auto-check { display: block; margin: 12px 0 6px; }
@@ -485,13 +496,13 @@ async function downloadTpl(kind = 'mixed') {
 .ri-tab:hover { border-color: var(--el-color-primary, #409eff); }
 .ri-tab.active {
   border-color: var(--el-color-primary, #409eff); color: var(--el-color-primary, #409eff);
-  background: color-mix(in srgb, #409eff 8%, white); font-weight: 600;
+  background: color-mix(in srgb, var(--el-color-primary, #409eff) 8%, var(--el-bg-color-overlay, #fff)); font-weight: 600;
 }
 .ri-tab.excluded { opacity: .5; }
 .ri-tab.excluded .ri-tab-name { text-decoration: line-through; }
 .ri-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
-.ri-tab-badge { background: rgba(15, 23, 42, .08); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
-.ri-tab.active .ri-tab-badge { background: color-mix(in srgb, #409eff 18%, white); }
+.ri-tab-badge { background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.ri-tab.active .ri-tab-badge { background: color-mix(in srgb, var(--el-color-primary, #409eff) 18%, var(--el-bg-color-overlay, #fff)); }
 .ri-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--el-color-danger, #ef4444); flex: none; }
 .ri-group { border: 1px solid var(--border-2, #d8dee8); border-radius: 10px; overflow: hidden; }
 .ri-group.excluded { opacity: .55; background: var(--bg-2, #f6f8fa); }
@@ -508,8 +519,8 @@ async function downloadTpl(kind = 'mixed') {
   width: 100%; border-collapse: collapse; min-width: 1080px;
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border-2); font-size: 12.5px; text-align: left; vertical-align: middle; }
   th { background: var(--bg-2, #f6f8fa); color: var(--text-3); font-weight: 500; white-space: nowrap; }
-  tbody tr.low { background: color-mix(in srgb, #f59e0b 7%, white); }
-  tbody tr.invalid { background: color-mix(in srgb, #ef4444 7%, white); }
+  tbody tr.low { background: color-mix(in srgb, var(--el-color-warning, #f59e0b) 7%, var(--el-bg-color-overlay, #fff)); }
+  tbody tr.invalid { background: color-mix(in srgb, var(--el-color-danger, #ef4444) 7%, var(--el-bg-color-overlay, #fff)); }
 }
 .source-cell { font-size: 11.5px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 .issue-tag { width: 18px; height: 18px; padding: 0; margin-left: 4px; line-height: 17px; text-align: center; cursor: help; }

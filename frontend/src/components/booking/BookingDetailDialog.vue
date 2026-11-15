@@ -169,7 +169,7 @@ defineExpose({ reload: load });
 }
 .bd-dur { color: var(--text-3); font-size: 12.5px; }
 .bd-src { color: var(--text-3); margin-left: 6px; font-size: 12px; }
-.bd-reject { color: #b91c1c; }
+.bd-reject { color: var(--danger-fg); }
 .bd-people { margin-top: 14px; }
 .bp-label { font-size: 12.5px; color: var(--text-3); }
 .bp-list { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 8px; }

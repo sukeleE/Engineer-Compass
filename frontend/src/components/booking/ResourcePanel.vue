@@ -67,9 +67,10 @@
     </div>
 
     <ResourceFormDialog v-if="formOpen" :model-value="formOpen" :project="project" :resource="editing"
-      :group-options="groupOptions" @close="formOpen = false" @saved="onSaved" />
+      :group-options="groupOptions" :location-options="locationOptions" @close="formOpen = false" @saved="onSaved" />
     <ResourceImportDialog v-if="importOpen" :model-value="importOpen" :project="project"
-      :existing-names="resources.map((r) => r.name)" @close="importOpen = false" @saved="onSaved" />
+      :existing-names="resources.map((r) => r.name)" :location-options="locationOptions"
+      @close="importOpen = false" @saved="onSaved" />
     <ResourceDetailDialog v-if="detailRes" :resource="detailRes" @close="detailRes = null" />
   </div>
 </template>
@@ -118,6 +119,8 @@ const resourceGroups = computed(() => {
 });
 // 手动新建/编辑资源时的分组候选（项目内已有分组名）
 const groupOptions = computed(() => [...new Set(resources.value.map((r) => r.group_name).filter(Boolean))]);
+// 存放位置记忆：项目内已保存过的位置去重后作为下拉候选；首次没有候选时手动输入，保存后下次即可选
+const locationOptions = computed(() => [...new Set(resources.value.map((r) => r.location).filter(Boolean))]);
 
 async function load() {
   loading.value = true;

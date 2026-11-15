@@ -232,7 +232,7 @@ onMounted(() => { if (auth.token) loadAll(); });
 }
 .bp-foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 12.5px; color: var(--text-3); }
 .bp-stat { display: inline-flex; align-items: center; gap: 3px;
-  &.warn { color: #b45309; font-weight: 600; }
+  &.warn { color: var(--badge-fg); font-weight: 600; }
 }
 .bp-go { margin-left: auto; color: var(--primary); font-weight: 600; }
 @media (max-width: 768px) {

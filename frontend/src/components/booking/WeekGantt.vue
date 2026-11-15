@@ -501,12 +501,12 @@ onBeforeUnmount(() => { clearInterval(nowTimer); mq.removeEventListener?.('chang
   &:hover { border-color: var(--primary, #2563eb); }
   &.on {
     border-color: var(--primary, #2563eb); color: var(--primary, #2563eb);
-    background: color-mix(in srgb, #2563eb 8%, white); font-weight: 600;
+    background: color-mix(in srgb, var(--primary, #2563eb) 8%, var(--card-bg, #fff)); font-weight: 600;
   }
 }
 .wg-grp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.wg-grp-badge { background: rgba(15, 23, 42, .08); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
-.wg-grp.on .wg-grp-badge { background: color-mix(in srgb, #2563eb 16%, white); }
+.wg-grp-badge { background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 10px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.wg-grp.on .wg-grp-badge { background: color-mix(in srgb, var(--primary, #2563eb) 16%, var(--card-bg, #fff)); }
 
 .wg-scroll { overflow: auto; border: 1px solid var(--border-2); border-radius: 10px; background: var(--card-bg); max-height: 70vh; }
 // 列数必须与脚本里 TOTAL = 7 * SLOTS_PER_DAY 一致；首列 = 资源名列宽
@@ -533,7 +533,8 @@ $wg-name-w: 176px;
   &.today .wg-dh-top { color: var(--primary, #2563eb); }
 }
 .wg-dh-top { font-size: 12.5px; font-weight: 600; padding: 3px 8px 0; display: flex; gap: 6px; align-items: center; }
-.wg-today-tag { font-size: 10px; background: var(--primary, #2563eb); color: #fff; border-radius: 4px; padding: 0 4px; font-weight: 400; }
+.wg-today-tag { font-size: 10px; background: var(--primary, #2563eb); color: #fff; border-radius: 4px; padding: 0 4px; font-weight: 400;
+  html[data-theme='dark'] & { background: #2563eb; } }
 .wg-ruler { position: relative; flex: 1; }
 .wg-rtick { position: absolute; top: 3px; font-size: 10px; color: var(--text-3); transform: translateX(-50%); }
 .wg-rtick.first { transform: translateX(2px); } // 07:00 落在日界线上，右偏避免与日期/竖线挤在一起
@@ -577,10 +578,15 @@ $wg-name-w: 176px;
   .wg-bk-meta { flex: none; opacity: .9; }
   .wg-bk-dur { flex: none; opacity: .8; font-size: 10.5px; }
 }
-.st-confirmed { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+.st-confirmed {
+  background: var(--primary, #2563eb); color: #fff; border-color: var(--primary-dark, #1d4ed8);
+  // 暗夜黑 primary 是亮蓝 #60a5fa，白字对比不足；块身回落到中蓝保证文字可读（幽灵红 #dc2626 本身够深，无需覆盖）
+  html[data-theme='dark'] & { background: #2563eb; border-color: #1d4ed8; }
+}
 .st-pending {
-  background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 5px, #fde68a 5px, #fde68a 10px);
-  color: #92400e; border-color: #f59e0b;
+  // 浅底深字 → 徽章语义变量：浅色模式取值与原硬编码一致，深色模式自动转暗底亮字
+  background: repeating-linear-gradient(45deg, var(--badge-tint), var(--badge-tint) 5px, var(--badge-border) 5px, var(--badge-border) 10px);
+  color: var(--badge-fg); border-color: var(--el-color-warning, #f59e0b);
 }
 .st-rejected, .st-canceled { background: transparent; color: var(--text-3); border: 1px dashed var(--border-2, #c0c6cc); }
 .wg-block.mine { box-shadow: 0 0 0 2px var(--primary, #7c3aed) inset; }
@@ -598,7 +604,7 @@ $wg-name-w: 176px;
 }
 .wg-select {
   position: absolute; top: 2px; bottom: 2px; z-index: 7; pointer-events: none;
-  background: rgba(37, 99, 235, .22); border: 1.5px solid #2563eb; border-radius: 4px;
+  background: color-mix(in srgb, var(--primary, #2563eb) 22%, transparent); border: 1.5px solid var(--primary, #2563eb); border-radius: 4px;
 }
 
 // 窄屏
@@ -608,8 +614,8 @@ $wg-name-w: 176px;
   display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px;
   border: 1px solid var(--border-2); font-size: 12.5px; cursor: pointer; background: var(--card-bg);
   &.mine { border-color: var(--primary, #2563eb); }
-  &.st-confirmed { border-left: 3px solid #2563eb; }
-  &.st-pending { border-left: 3px solid #f59e0b; }
+  &.st-confirmed { border-left: 3px solid var(--primary, #2563eb); }
+  &.st-pending { border-left: 3px solid var(--el-color-warning, #f59e0b); }
   &.st-rejected, &.st-canceled { opacity: .6; border-left: 3px solid var(--text-3); }
 }
 .wg-m-time { font-weight: 600; white-space: nowrap; }
@@ -618,8 +624,8 @@ $wg-name-w: 176px;
 
 .wg-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-2);
   i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
-  .lg-confirm { background: #2563eb; }
-  .lg-pending { background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 3px, #fde68a 3px, #fde68a 6px); border: 1px solid #f59e0b; }
+  .lg-confirm { background: var(--primary, #2563eb); }
+  .lg-pending { background: repeating-linear-gradient(45deg, var(--badge-tint), var(--badge-tint) 3px, var(--badge-border) 3px, var(--badge-border) 6px); border: 1px solid var(--el-color-warning, #f59e0b); }
   .lg-dead { border: 1px dashed var(--border-2, #999); }
   .lg-heat-a { background: rgba(245, 158, 11, .4); }
   .lg-heat-r { background: rgba(239, 68, 68, .4); }
