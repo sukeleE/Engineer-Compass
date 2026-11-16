@@ -606,6 +606,37 @@ r.put('/projects/:id', ah((req, res) => {
   res.json({ project: projectOut(getProject(p.id), req), message: '已保存（模式调整只影响新预约，历史单不追溯）' });
 }));
 
+// 删除整个预约项目：负责人（含协同负责人）/超管可用。booking 与 booking_resource 对项目是 RESTRICT 外键，
+// 不能直接删项目行，必须在事务内按「预约轨迹/参与人 → 预约 → 组队成员/组队 → 资源 → 协同负责人 → 项目」显式清表。
+r.delete('/projects/:id', ah((req, res) => {
+  const p = getProject(req.params.id);
+  if (!p) throw new HttpError(404, '项目不存在');
+  if (!canManageProject(req, p)) throw new HttpError(403, '只有项目负责人可以删除项目');
+
+  const bookingIds = db.prepare('SELECT id FROM booking WHERE project_id = ?').all(p.id).map((x) => x.id);
+  const teamIds = db.prepare('SELECT id FROM booking_team WHERE project_id = ?').all(p.id).map((x) => x.id);
+  const resourceCount = db.prepare('SELECT COUNT(*) AS n FROM booking_resource WHERE project_id = ?').get(p.id).n;
+  const bookingCount = bookingIds.length;
+  const delIn = (table, col, ids) => {
+    if (!ids.length) return;
+    const ph = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM ${table} WHERE ${col} IN (${ph})`).run(...ids);
+  };
+
+  tx(() => {
+    delIn('booking_log', 'booking_id', bookingIds);
+    delIn('booking_participant', 'booking_id', bookingIds);
+    delIn('booking', 'id', bookingIds);
+    delIn('booking_team_member', 'team_id', teamIds);
+    delIn('booking_team', 'id', teamIds);
+    db.prepare('DELETE FROM booking_resource WHERE project_id = ?').run(p.id);
+    db.prepare('DELETE FROM booking_project_manager WHERE project_id = ?').run(p.id);
+    const info = db.prepare('DELETE FROM booking_project WHERE id = ?').run(p.id);
+    if (!info.changes) throw new HttpError(404, '项目不存在');
+  });
+  logAudit(req, 'booking-project-delete', p.name, { project_id: p.id, resources: resourceCount, bookings: bookingCount });
+  res.json({ ok: true, message: `已删除项目「${p.name}」及其 ${resourceCount} 项资源、${bookingCount} 条预约记录` });
+}));
 // ==================== 协同负责人（主负责人 created_by 不可移除；副负责人拥有同等管理权） ====================
 r.post('/projects/:id/managers', ah((req, res) => {
   const p = getProject(req.params.id);
@@ -1199,8 +1230,11 @@ function createBooking(req, p, body, { conflictsOnly = false, excludeId = 0 } = 
   const link = bookingLink(p.id, b);
   const span = `${b.start_time} ~ ${b.end_time}`;
   if (status === 'pending') {
-    if (p.created_by && p.created_by !== req.user.id) {
-      notify([p.created_by], `bk_submit_${bId}`, `📋 新预约待审批：${rs.name}`,
+    // 待审批提醒发给全体负责人（主负责人 created_by + 协同负责人），提交者本人在名单内则不打扰自己
+    const approverIds = [...new Set([p.created_by, ...managerIdSet(req, p.id)])]
+      .filter((uid) => uid && uid !== req.user.id);
+    if (approverIds.length) {
+      notify(approverIds, `bk_submit_${bId}`, `📋 新预约待审批：${rs.name}`,
         `${b.booker_name} 申请预约 ${span}（${b.headcount} 人${rs.is_space ? '' : `，借 ${b.qty} ${rs.unit || '件'}`}）`, link);
     }
   } else {

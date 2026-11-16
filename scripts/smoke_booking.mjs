@@ -669,6 +669,71 @@ try {
   const uc = await req('/notifications/unread-count', { token: tA });
   ok('unread-count 含 notices 计数', uc.status === 200 && uc.data.notices >= 1 && uc.data.total >= uc.data.notices);
 
+  // ---------- 11b. 协同负责人审批权限 + 待审批通知 fan-out + 项目级联删除（独立项目，不污染主项目 RESTRICT 断言） ----------
+  const PX = (await api('/booking/projects', { method: 'POST', token: tA,
+    body: { name: `协同负责人删除试点-${stamp}`, default_approve_mode: 'approval' } })).project;
+  await api(`/booking/projects/${PX.id}/managers`, { method: 'POST', token: tA, body: { user_id: B.id } });
+  const roomX = (await api(`/booking/projects/${PX.id}/resources`, { method: 'POST', token: tA,
+    body: { kind: 'space', name: '试点审批教室', capacity: 10, approve_mode: 'approval' } })).resource;
+  const itemX = (await api(`/booking/projects/${PX.id}/resources`, { method: 'POST', token: tA,
+    body: { kind: 'item', name: '试点器材', quantity: 5, unit: '件', approve_mode: 'approval' } })).resource;
+  const tmX = (await api(`/booking/projects/${PX.id}/teams`, { method: 'POST', token: tA,
+    body: { name: '试点小队', member_ids: [C.id] } })).team;
+  // 丙下单两条：bX 由协同负责人乙通过；bY 带参与人由乙驳回，顺带造出 participant/log 级联数据
+  const bX = (await api(`/booking/projects/${PX.id}/bookings`, { method: 'POST', token: tC,
+    body: { resource_id: roomX.id, start_time: slot(5, 9), end_time: slot(5, 10), source: 'solo', purpose: '协同审批试点' } })).booking;
+  const bY = (await api(`/booking/projects/${PX.id}/bookings`, { method: 'POST', token: tC,
+    body: { resource_id: roomX.id, start_time: slot(6, 9), end_time: slot(6, 10), source: 'custom', participant_ids: [A.id], purpose: '驳回与级联试点' } })).booking;
+  ok('试点项目两条下单均为 pending', bX.status === 'pending' && bY.status === 'pending');
+  // 待审批通知 fan-out：主负责人甲 + 协同负责人乙都收到，提交人丙不收自己的待办
+  const nBX = await req('/notifications/personal', { token: tB });
+  ok('协同负责人乙收到 bk_submit 待审批通知（fan-out 修复）',
+    nBX.data.rows.some((x) => x.type === `bk_submit_${bX.id}`) && nBX.data.rows.some((x) => x.type === `bk_submit_${bY.id}`),
+    nBX.data.rows.filter((x) => String(x.type).startsWith('bk_submit')).map((x) => x.type));
+  const nAX = await req('/notifications/personal', { token: tA });
+  ok('主负责人甲同样收到试点单 bk_submit 通知', nAX.data.rows.some((x) => x.type === `bk_submit_${bX.id}`));
+  const nCX = await req('/notifications/personal', { token: tC });
+  ok('提交人丙不收自己单子的 bk_submit 通知',
+    !nCX.data.rows.some((x) => x.type === `bk_submit_${bX.id}` || x.type === `bk_submit_${bY.id}`));
+  // 协同负责人审批权限：详情 perm 放行，路人 404 防探测，乙可通过也可驳回
+  g = await req(`/booking/bookings/${bX.id}`, { token: tB });
+  ok('协同负责人乙视角 perm.canApprove/canReject/isManager 全放行',
+    g.data.booking.perm?.canApprove === true && g.data.booking.perm?.canReject === true && g.data.booking.perm?.isManager === true,
+    g.data.booking.perm);
+  g = await expect(`/booking/bookings/${bX.id}/approve`, 404, { method: 'POST', token: tC, body: {} });
+  ok('路人丙审批他项目预约 → 404 防探测', g.ok);
+  await api(`/booking/bookings/${bX.id}/approve`, { method: 'POST', token: tB, body: {} });
+  g = await req(`/booking/bookings/${bX.id}`, { token: tC });
+  ok('协同负责人乙审批通过：confirmed', g.data.booking.status === 'confirmed');
+  await api(`/booking/bookings/${bY.id}/reject`, { method: 'POST', token: tB, body: { reason: '试点驳回' } });
+  g = await req(`/booking/bookings/${bY.id}`, { token: tC });
+  ok('协同负责人乙可驳回：rejected 且轨迹落 rejected 日志',
+    g.data.booking.status === 'rejected' && g.data.logs.some((l) => l.action === 'rejected'),
+    g.data.logs?.map((l) => l.action));
+  // 删除整个项目：路人 403、未登录 401、协同负责人 200
+  g = await expect(`/booking/projects/${PX.id}`, 403, { method: 'DELETE', token: tC });
+  ok('非负责人删除项目 403（只有项目负责人可以删除项目）', g.ok && /负责人/.test(g.data.error || ''), g.data);
+  g = await expect(`/booking/projects/${PX.id}`, 401, { method: 'DELETE' });
+  ok('未登录删除项目 401', g.ok);
+  g = await req(`/booking/projects/${PX.id}`, { method: 'DELETE', token: tB });
+  ok('协同负责人删除整个项目 200，回执含资源/预约计数', g.status === 200 && g.data.ok === true
+    && /2 项资源/.test(g.data.message) && /2 条预约/.test(g.data.message), g.data);
+  g = await expect(`/booking/projects/${PX.id}`, 404, { token: tA });
+  ok('删后 GET 项目 404', g.ok);
+  const leftover = {
+    project: db.prepare('SELECT COUNT(*) AS n FROM booking_project WHERE id=?').get(PX.id).n,
+    resource: db.prepare('SELECT COUNT(*) AS n FROM booking_resource WHERE project_id=?').get(PX.id).n,
+    booking: db.prepare('SELECT COUNT(*) AS n FROM booking WHERE project_id=?').get(PX.id).n,
+    team: db.prepare('SELECT COUNT(*) AS n FROM booking_team WHERE project_id=?').get(PX.id).n,
+    teamMember: db.prepare('SELECT COUNT(*) AS n FROM booking_team_member WHERE team_id=?').get(tmX.id).n,
+    manager: db.prepare('SELECT COUNT(*) AS n FROM booking_project_manager WHERE project_id=?').get(PX.id).n,
+    log: db.prepare('SELECT COUNT(*) AS n FROM booking_log WHERE booking_id IN (?,?)').get(bX.id, bY.id).n,
+    participant: db.prepare('SELECT COUNT(*) AS n FROM booking_participant WHERE booking_id=?').get(bY.id).n,
+  };
+  ok('级联清表无残留（项目/资源/预约/组队/成员/负责人/轨迹/参与人全 0）',
+    Object.values(leftover).every((x) => x === 0), leftover);
+  g = await expect(`/booking/projects/${PX.id}`, 404, { method: 'DELETE', token: tA });
+  ok('重复删除已不存在项目 404', g.ok);
   // ---------- 12. 外键级联 ----------
   let fkBlocked = false;
   try { db.prepare('DELETE FROM booking_project WHERE id = ?').run(P.id); } catch { fkBlocked = true; }

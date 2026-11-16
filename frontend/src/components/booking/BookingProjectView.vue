@@ -151,8 +151,12 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="settingsOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveSettings">保存</el-button>
+        <div class="bpv-footer">
+          <el-button type="danger" plain :loading="deleting" @click="deleteProject">🗑 删除项目</el-button>
+          <span class="bpv-footer-spacer"></span>
+          <el-button @click="settingsOpen = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveSettings">保存</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -170,7 +174,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import auth from '../../auth.js';
 import { api } from '../../api.js';
@@ -185,6 +189,7 @@ import BorrowRegisterPanel from './BorrowRegisterPanel.vue';
 import { MODE_ZH, STATUS_META, KIND_MAP, REG_KIND_META, isRegBooking, fmtDate, mondayOf, parseLocal } from '../../utils/booking.js';
 
 const route = useRoute();
+const router = useRouter();
 
 const SRC_ZH = { solo: '', team: ' · 组队', custom: ' · 临时多人' };
 
@@ -205,6 +210,7 @@ const actingId = ref(null);
 
 const settingsOpen = ref(false);
 const saving = ref(false);
+const deleting = ref(false);
 const sf = ref({ name: '', description: '', default_approve_mode: 'approval', status: 'open', managers: [] });
 const managerPick = ref(null);
 const managerOptions = ref([]);
@@ -392,6 +398,27 @@ async function saveSettings() {
     saving.value = false;
   }
 }
+async function deleteProject() {
+  const name = project.value.name;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目「${name}」？该项目下全部资源、固定组队与所有预约记录（含审批轨迹、参与人）将被一并删除，且不可恢复。`,
+      '删除项目',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    );
+  } catch { return; }
+  deleting.value = true;
+  try {
+    const d = await api.bookingProjectDelete(project.value.id);
+    ElMessage.success(d.message || '项目已删除');
+    settingsOpen.value = false;
+    router.push('/booking');
+  } catch (e) {
+    ElMessage.error(e.message);
+  } finally {
+    deleting.value = false;
+  }
+}
 
 onMounted(async () => {
   if (!auth.token) return;
@@ -416,6 +443,8 @@ onMounted(async () => {
 .sf-mgr-tag { font-size: 13px; }
 .sf-mgr-select { width: 260px; }
 .sf-mgr-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.bpv-footer { display: flex; align-items: center; gap: 8px; }
+.bpv-footer-spacer { flex: 1; }
 .bpv-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .bpv-title {
   h2 { margin: 6px 0 8px; font-size: 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

@@ -580,6 +580,7 @@ export const api = {
   bookingProjectCreate: (b) => req('/booking/projects', { method: 'POST', body: JSON.stringify(b) }),
   bookingProject: (id) => req(`/booking/projects/${id}`),
   bookingProjectUpdate: (id, b) => req(`/booking/projects/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  bookingProjectDelete: (id) => req(`/booking/projects/${id}`, { method: 'DELETE' }),
 bookingManagerAdd: (id, userId) => req(`/booking/projects/${id}/managers`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
 bookingManagerRemove: (id, userId) => req(`/booking/projects/${id}/managers/${userId}`, { method: 'DELETE' }),
   bookingUserSearch: (q) => req(`/booking/users/search${qs({ q })}`),
