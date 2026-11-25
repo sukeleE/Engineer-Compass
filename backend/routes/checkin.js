@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired, teamCtx, requirePerm, hasPerm } from './middleware.js';
-import { sanitizeAttachments } from './teamCollab.js';
+import { sanitizeAttachments, publicAttachments } from './teamCollab.js';
 import { buildZip } from '../lib/zipStore.js';
 import { sanitizeName } from '../lib/expenseMeta.js';
 import {
@@ -539,6 +539,7 @@ r.get('/:id/checkin/featured', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
   const schedId = Number(req.query.schedule_id || 0);
+  const metaOnly = String(req.query.meta || '') === '1';
   const where = ['l.team_id = ?', 'l.featured = 1'];
   const args = [ctx.team.id];
   if (schedId) { where.push('l.schedule_id = ?'); args.push(schedId); }
@@ -553,7 +554,8 @@ r.get('/:id/checkin/featured', (req, res) => {
      WHERE ${where.join(' AND ')}
      ORDER BY l.score DESC, l.create_time DESC LIMIT 30`
   ).all(...args).map((l) => ({
-    ...l, attachments: safeParse(l.attachments), is_late: !!l.is_late,
+    ...l, attachments: metaOnly ? publicAttachments(safeParse(l.attachments)) : safeParse(l.attachments),
+    is_late: !!l.is_late,
   }));
   res.json({ reports: rows });
 });

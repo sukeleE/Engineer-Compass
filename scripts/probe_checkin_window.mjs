@@ -68,10 +68,14 @@ try {
   await waitUp(WEB);
 
   const stamp = Date.now().toString().slice(-8);
-  const own = await api('/auth/register', {
+  const ownReg = await api('/auth/register', {
     method: 'POST',
     body: { email: `ciw_${stamp}@test.dev`, password: 'pass123456', nickname: '窗口化组长' },
   });
+  const ownReal = await api('/auth/real-name', {
+    method: 'PUT', token: ownReg.token, body: { real_name: '窗口化组长' },
+  });
+  const own = { ...ownReg, user: ownReal.user };
   const team = await api('/team', {
     method: 'POST', token: own.token, body: { name: `打卡窗口化组${stamp}` },
   });
@@ -79,17 +83,34 @@ try {
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
+  const dowMap = { Sun: 7, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const dow = dowMap[new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', weekday: 'short',
+  }).format(new Date())];
+  const isoWeekKey = (dateStr) => {
+    const [Y, M, D] = dateStr.split('-').map(Number);
+    const d = new Date(Date.UTC(Y, M - 1, D));
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3);
+    const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+    const week = 1 + Math.round((d - firstThu) / (7 * 864e5));
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+  };
   let firstScheduleId = 0;
+  let weeklyScheduleId = 0;
   for (let i = 1; i <= 25; i++) {
+    const weekly = i === 25;
     const created = await api(`/team/${TID}/checkin/schedules`, {
       method: 'POST', token: own.token,
       body: {
         title: `打卡任务 ${String(i).padStart(2, '0')}`,
-        kind: 'recurring', freq: 'daily', due_time: '23:59',
+        kind: 'recurring', freq: weekly ? 'weekly' : 'daily',
+        ...(weekly ? { weekdays: [dow] } : {}), due_time: '23:59',
         start_date: today, allow_late: 1,
       },
     });
     if (i === 1) firstScheduleId = created.id;
+    if (weekly) weeklyScheduleId = created.id;
   }
   await api(`/team/${TID}/checkin/submit`, {
     method: 'POST', token: own.token,
@@ -98,6 +119,23 @@ try {
       content: '成员进度汇报窗口化验收',
     },
   });
+  const WEEK_ATT = Buffer.from('weekly report fixture').toString('base64');
+  await api(`/team/${TID}/checkin/submit`, {
+    method: 'POST', token: own.token,
+    body: {
+      schedule_id: weeklyScheduleId, period_key: isoWeekKey(today),
+      content: '',
+      attachments: [{
+        name: '周报附件验收.docx',
+        size: Buffer.from('weekly report fixture').length,
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        data: WEEK_ATT,
+      }],
+    },
+  });
+  const metaLogs = await api(`/team/${TID}/logs?limit=300&meta=1`, { token: own.token });
+  const metaAtt = metaLogs.find((x) => x.schedule_id === weeklyScheduleId)?.attachments?.[0];
+  ok('时间线周报附件走元数据懒加载', metaAtt?.lazy === true && !metaAtt.data && metaAtt.size > 0, metaAtt);
   await api(`/team/${TID}/log`, {
     method: 'POST', token: own.token,
     body: { content: '<b>自由进度汇报窗口化验收</b>' },
@@ -106,6 +144,15 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on('pageerror', (e) => pageErrors.push(e.message));
+  let releaseBoard;
+  let boardBlocked = false;
+  await page.route(`**/api/team/${TID}/checkin/schedules/*/board*`, async (route) => {
+    if (!boardBlocked) {
+      boardBlocked = true;
+      await new Promise((resolve) => { releaseBoard = resolve; });
+    }
+    try { await route.continue(); } catch { /* 页面关闭时忽略 */ }
+  });
   const scheduleRequests = [];
   page.on('request', (req) => {
     if (req.url().includes(`/api/team/${TID}/checkin/schedules?`)) scheduleRequests.push(req.url());
@@ -133,6 +180,22 @@ try {
   const logText = await page.locator('.tp-logs').textContent();
   ok('成员进度汇报仍正常显示', logText.includes('成员进度汇报窗口化验收'), logText.slice(0, 300));
   ok('自由进度汇报默认直接显示', logText.includes('自由进度汇报窗口化验收'), logText.slice(0, 300));
+  ok('周报附件内容为空时仍显示附件入口', logText.includes('周报附件验收.docx'), logText.slice(0, 500));
+  ok('周报附件提交时显示附件说明', (await page.locator('.ci-att-report-note').count()) > 0);
+  await page.getByText('周报附件验收.docx').first().click();
+  await page.waitForSelector('.att-office-dlg', { timeout: 5000 });
+  ok('点击周报附件后按需加载原文', true);
+  await page.keyboard.press('Escape');
+  await sleep(200);
+
+  await page.locator('.ci-card').first().getByText('看板').click();
+  await page.waitForSelector('.board-loading-state', { timeout: 1200 });
+  ok('周报看板先打开并显示加载态', true);
+  releaseBoard?.();
+  await page.waitForSelector('.board-wrap', { timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await sleep(200);
+  await page.unroute(`**/api/team/${TID}/checkin/schedules/*/board*`);
 
   await page.waitForFunction(() => {
     const raw = Object.keys(localStorage)

@@ -168,7 +168,7 @@ export const api = {
   // AI 智能分组：按成员信息+部门+竞赛建议分组（仅建议，应用复用 teamMemberRole）
   teamAiGrouping: (id) => req(`/team/${id}/ai-grouping`, { method: 'POST' }),
   teamLog: (id, card) => req(`/team/${id}/log`, { method: 'POST', body: JSON.stringify(card) }),
-  teamLogs: (id) => req(`/team/${id}/logs`),
+  teamLogs: (id, p) => req(`/team/${id}/logs${qs(p)}`),
   teamLogUpdate: (id, lid, card) => req(`/team/${id}/log/${lid}`, { method: 'PUT', body: JSON.stringify(card) }),
   teamLogDelete: (id, lid) => req(`/team/${id}/log/${lid}`, { method: 'DELETE' }),
   // 周期打卡 / 定时汇报
@@ -201,7 +201,8 @@ export const api = {
   teamCheckinReview: (id, lid, b) => req(`/team/${id}/checkin/logs/${lid}/review`, { method: 'POST', body: JSON.stringify(b) }),
   teamCheckinLeaderboard: (id, range, sid) =>
     req(`/team/${id}/checkin/leaderboard?range=${range || 'month'}${sid ? `&schedule_id=${sid}` : ''}`),
-  teamCheckinFeatured: (id, sid) => req(`/team/${id}/checkin/featured${sid ? `?schedule_id=${sid}` : ''}`),
+  teamCheckinFeatured: (id, sid, meta) =>
+    req(`/team/${id}/checkin/featured${qs({ schedule_id: sid || undefined, meta: meta ? 1 : undefined })}`),
   // 小组考勤：规则/打卡/签到码/请假/看板统计
   attendanceSettings: (id) => req(`/team/${id}/attendance/settings`),
   attendanceSaveSettings: (id, b) => req(`/team/${id}/attendance/settings`, { method: 'PUT', body: JSON.stringify(b) }),

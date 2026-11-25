@@ -225,6 +225,12 @@ try {
     && byDaily.period_key === today && byDaily.schedule_title, { pid: byDaily?.period_key, st: byDaily?.schedule_title });
   ok('by-ids 挂评论（组员可读）', Array.isArray(byDaily?.comments) && byDaily.comments.some((x) => /看板详情/.test(x.content)), byDaily?.comments);
   ok('by-ids 返回附件 base64', byAtt?.attachments?.length === 1 && byAtt.attachments[0].data === ATT, byAtt?.attachments);
+  const timelineMeta = await api(`/team/${TID}/logs?limit=300&meta=1`, { token: tA });
+  const metaAtt = timelineMeta.find((x) => x.id === LID_ATT)?.attachments?.[0];
+  ok('时间线 meta=1 只传附件元数据并标记 lazy', metaAtt?.lazy === true && !metaAtt.data && metaAtt.size > 0, metaAtt);
+  const timelineFull = await api(`/team/${TID}/logs?limit=300`, { token: tA });
+  const fullAtt = timelineFull.find((x) => x.id === LID_ATT)?.attachments?.[0];
+  ok('时间线默认仍返回完整附件（兼容小程序）', fullAtt?.data === ATT, fullAtt);
   g = await exp(`/team/${TID}/checkin/logs/by-ids?ids=`, 400, { token: tA });
   ok('by-ids 空 id 列表 400', g.ok);
 

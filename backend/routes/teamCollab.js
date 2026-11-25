@@ -44,6 +44,19 @@ export function sanitizeAttachments(attachments) {
 }
 
 const parseAtt = (s) => { try { return JSON.parse(s || '[]'); } catch { return []; } };
+// 时间线先传附件元数据；点击附件时再按 log id 取原文，避免列表响应携带数十 MB base64。
+export function publicAttachments(value) {
+  const list = Array.isArray(value) ? value : parseAtt(value);
+  return list.map((a) => {
+    const { data, ...rest } = a || {};
+    const raw = String(data || '');
+    return {
+      ...rest,
+      size: Number(rest.size) || (raw ? Math.floor(raw.length * 3 / 4) : 0),
+      lazy: !!raw,
+    };
+  });
+}
 // 旧版前端把 {content, attachments} 整个对象存库串化为 "[object Object]"（文字已不可恢复），读取时清洗为空串
 export const cleanContent = (s) => (String(s || '') === '[object Object]' ? '' : String(s || ''));
 
@@ -170,6 +183,8 @@ r.post('/:id/log', mutedGuard, (req, res) => {
 r.get('/:id/logs', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
+  const limit = Math.min(500, Math.max(1, Math.trunc(Number(req.query.limit || 100)) || 100));
+  const metaOnly = String(req.query.meta || '') === '1';
   const rows = db.prepare(
     `SELECT l.id, l.content, l.attachments, l.create_time, u.id AS user_id,
             COALESCE(u.nickname, u.username) AS nickname, u.avatar,
@@ -182,9 +197,9 @@ r.get('/:id/logs', (req, res) => {
      LEFT JOIN user ru ON ru.id = l.reviewer_id
      LEFT JOIN checkin_schedule cs ON cs.id = l.schedule_id
      LEFT JOIN feishu_doc_map m ON m.biz_type = 'progress_log' AND m.biz_id = l.id
-     WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT 100`
-  ).all(ctx.team.id).map((l) => ({
-    ...l, content: cleanContent(l.content), attachments: parseAtt(l.attachments),
+     WHERE l.team_id = ? ORDER BY l.create_time DESC LIMIT ?`
+  ).all(ctx.team.id, limit).map((l) => ({
+    ...l, content: cleanContent(l.content), attachments: metaOnly ? publicAttachments(l.attachments) : parseAtt(l.attachments),
     featured: !!l.featured, is_late: !!l.is_late,
   }));
   res.json(attachComments(ctx.team.id, 'log', rows));

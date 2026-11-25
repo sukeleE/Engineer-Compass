@@ -16,7 +16,7 @@
     <template v-else>
       <view v-for="g in logGroups" :key="g.key" class="week-group">
         <view class="week-head" @click="toggleWeek(g)">
-          <text class="week-arrow" :class="{ open: weekOpen(g) }">▸</text>
+          <text v-if="g.collapsible" class="week-arrow" :class="{ open: weekOpen(g) }">▸</text>
           <text class="week-title">{{ g.free ? '✍️ 自由汇报' : '📅 ' + g.label }}</text>
           <text class="week-count">{{ g.count }}份</text>
           <text v-if="g.late" class="tag tag-red">迟交{{ g.late }}</text>
@@ -37,6 +37,9 @@
               </view>
             </view>
             <Markdown v-if="stripHtml(l.content)" :content="stripHtml(l.content)" clamp />
+            <view v-if="l.schedule_id && !stripHtml(l.content) && l.attachments && l.attachments.length" class="att-note">
+              本周周报以附件形式提交，点击下方文件查看
+            </view>
             <AttachmentList v-if="l.attachments && l.attachments.length" :attachments="l.attachments" />
             <view v-if="l.review" class="review">组长点评：{{ l.review }}<text v-if="l.score">（{{ l.score }} 分）</text></view>
 
@@ -159,7 +162,7 @@ const logGroups = computed(() => {
   const groups = [];
   const free = logs.value.filter((l) => !l.schedule_id);
   if (free.length) {
-    groups.push({ key: 'free', free: true, collapsible: true, label: '自由汇报', logs: free,
+    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
       count: free.length, late: 0, featured: free.filter((l) => l.featured).length });
   }
   const map = new Map();
@@ -304,6 +307,7 @@ onShow(() => { if (id.value) load(); });
 .edit-file-name { flex: 1; min-width: 0; font-size: 25rpx; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-file-del { position: static; width: 36rpx; height: 36rpx; line-height: 34rpx; font-size: 24rpx; flex-shrink: 0; }
 .review { margin-top: 14rpx; background: #eff6ff; color: #1e40af; border-radius: 10rpx; padding: 12rpx 18rpx; font-size: 24rpx; }
+.att-note { margin-top: 12rpx; padding: 12rpx 16rpx; border-radius: 10rpx; background: #f8fafc; color: #64748b; font-size: 23rpx; }
 .log-ops { display: flex; gap: 24rpx; margin-top: 14rpx; justify-content: flex-end; }
 .link-btn { font-size: 24rpx; color: #2563eb; }
 .link-btn.danger { color: #ef4444; }

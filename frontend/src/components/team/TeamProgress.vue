@@ -38,7 +38,7 @@ async function reload({ includeTeam = false } = {}) {
   const checkinP = loadCheckin();
   const [detailR, logsR] = await Promise.allSettled([
     includeTeam ? api.teamDetail(props.teamId) : Promise.resolve(null),
-    api.teamLogs(props.teamId),
+    api.teamLogs(props.teamId, { limit: 300, meta: 1 }),
   ]);
   if (includeTeam && detailR.status === 'fulfilled') tasks.value = detailR.value.tasks;
   if (logsR.status === 'fulfilled') logs.value = logsR.value;
@@ -131,13 +131,14 @@ async function loadCheckin({ autoRetry = true } = {}) {
     schedulesComplete.value = !r.has_more;
     checkinStatus.value = 'ok';
     if (r.has_more) void loadRemainingSchedules(seq, Number(r.offset || 0) + schedules.value.length);
+    prefetchBoard(schedules.value.find((s) => s.active) || schedules.value[0]);
     return r;
   });
   const mineP = api.teamCheckinMine(props.teamId).then((r) => {
     if (seq === checkinSeq) myDues.value = r.dues || [];
     return r;
   });
-  const ftP = api.teamCheckinFeatured(props.teamId, '').then((r) => {
+  const ftP = api.teamCheckinFeatured(props.teamId, '', true).then((r) => {
     if (seq === checkinSeq) featured.value = r.reports || [];
     return r;
   });
@@ -408,6 +409,18 @@ async function openReport(preset = {}) {
     const presetLog = preset.log
       ? (logs.value.find((x) => Number(x.id) === Number(preset.log.id)) || preset.log)
       : null;
+    if (presetLog && normAtts(presetLog.attachments).some((a) => a.lazy && !a.data && !a.url)) {
+      try {
+        const rows = await api.teamCheckinLogsByIds(props.teamId, [presetLog.id]);
+        if (rows?.[0]) {
+          Object.assign(presetLog, rows[0]);
+          const idx = logs.value.findIndex((x) => Number(x.id) === Number(presetLog.id));
+          if (idx >= 0) logs.value[idx] = presetLog;
+        }
+      } catch {
+        ElMessage.warning('周报附件仍在加载，请稍后再修改或预览');
+      }
+    }
     const targets = buildReportTargets({ log: presetLog });
     reportTargets.value = targets;
     const preferred = targets.find((t) => preset.due && t.kind === 'checkin'
@@ -627,16 +640,50 @@ const boardDlg = ref(false);
 const board = ref(null);
 const boardSched = ref(null);
 const boardRole = ref('');
-async function loadBoard(role) {
+const boardLoading = ref(false);
+const boardError = ref('');
+const boardPrefetching = new Set();
+const boardCacheKey = (sid, role) => `team:${props.teamId}:board:${sid}:${role || 'all'}`;
+async function loadBoard(role, { keepCurrent = false } = {}) {
+  if (!boardSched.value?.id) return;
   boardRole.value = role;
+  if (!keepCurrent) board.value = readCache(boardCacheKey(boardSched.value.id, role), 60 * 60 * 1000)?.value || null;
+  boardLoading.value = true;
+  boardError.value = '';
   try {
     board.value = await api.teamCheckinBoard(props.teamId, boardSched.value.id, role);
-  } catch (e) { ElMessage.error(e.message); }
+    writeCache(boardCacheKey(boardSched.value.id, role), board.value);
+  } catch (e) {
+    boardError.value = e.message;
+    if (!board.value) ElMessage.error(e.message);
+  } finally {
+    boardLoading.value = false;
+  }
 }
 async function openBoard(s) {
   boardSched.value = s;
-  await loadBoard('');
+  boardRole.value = '';
+  board.value = readCache(boardCacheKey(s.id, ''), 60 * 60 * 1000)?.value || null;
   boardDlg.value = true;
+  await loadBoard('', { keepCurrent: !!board.value });
+}
+function prefetchBoard(s) {
+  if (!s?.id) return;
+  const key = boardCacheKey(s.id, '');
+  if (readCache(key, 60 * 60 * 1000) || boardPrefetching.has(key)) return;
+  boardPrefetching.add(key);
+  const run = async () => {
+    try {
+      const data = await api.teamCheckinBoard(props.teamId, s.id, '');
+      writeCache(key, data);
+    } catch {
+      // 预取失败不影响用户点击后再加载。
+    } finally {
+      boardPrefetching.delete(key);
+    }
+  };
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 1800 });
+  else setTimeout(run, 900);
 }
 const boardCellType = { on: 'success', late: 'warning', miss: 'danger', wait: 'info' };
 const boardCellText = { on: '✓', late: '迟', miss: '缺', wait: '待' };
@@ -1253,7 +1300,12 @@ reload().catch((e) => ElMessage.error(e.message));
 
     <!-- ============ 提交看板弹窗（成员 × 周期） ============ -->
     <el-dialog v-model="boardDlg" :title="board ? `提交看板 · ${board.schedule.title}` : '提交看板'" width="900px"
-      top="8vh" append-to-body>
+      top="8vh" append-to-body v-loading="boardLoading && !board">
+      <div v-if="boardLoading && !board" class="board-loading-state">正在加载周报看板，请稍候…</div>
+      <div v-else-if="boardError && !board" class="board-loading-state error">
+        <span>看板加载失败：{{ boardError }}</span>
+        <el-button size="small" type="primary" plain @click="loadBoard(boardRole)">重试</el-button>
+      </div>
       <div v-if="board" class="board-wrap">
         <div class="board-filter">
           <div class="board-role-tags">
@@ -1362,7 +1414,11 @@ reload().catch((e) => ElMessage.error(e.message));
                   size="small" text type="primary" @click="openBoardLog(row)">✏️ 修改汇报</el-button>
               </div>
               <div v-if="row.log.content" class="log-rich" v-html="row.log.content" @click="(e) => onRichClick(e, row.log)"></div>
-              <AttachmentList v-if="row.log.attachments?.length" :attachments="row.log.attachments" />
+              <div v-if="row.log.schedule_id && !htmlToText(row.log.content) && row.log.attachments?.length" class="ci-att-report-note">
+                本周周报以附件形式提交，点击下方文件查看或预览
+              </div>
+              <AttachmentList v-if="row.log.attachments?.length" :attachments="row.log.attachments"
+                :team-id="teamId" :log-id="row.log.id" />
               <div v-if="row.log.schedule_id" class="ci-review">
                 <template v-if="perms.task">
                   <el-rate :model-value="row.log.score || 0" :max="5" size="small" @change="(v) => reviewScore(row.log, v)" />
@@ -1511,7 +1567,8 @@ reload().catch((e) => ElMessage.error(e.message));
           </div>
           <div class="ft-body log-rich" :class="{ clamp: !expandedFt.has(f.id) }" v-html="f.content"
             @click="(e) => onRichClick(e, f)"></div>
-          <AttachmentList v-if="f.attachments?.length" :attachments="f.attachments" />
+          <AttachmentList v-if="f.attachments?.length" :attachments="f.attachments"
+            :team-id="teamId" :log-id="f.id" />
           <div v-if="f.review" class="ft-review">组长评语：{{ f.review }}</div>
           <el-button v-if="(f.content || '').replace(/<[^>]*>/g, '').length > 120" link size="small"
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
@@ -1539,7 +1596,8 @@ reload().catch((e) => ElMessage.error(e.message));
           </div>
           <div class="ft-body log-rich" :class="{ clamp: !expandedFt.has(f.id) }" v-html="f.content"
             @click="(e) => onRichClick(e, f)"></div>
-          <AttachmentList v-if="f.attachments?.length" :attachments="f.attachments" />
+          <AttachmentList v-if="f.attachments?.length" :attachments="f.attachments"
+            :team-id="teamId" :log-id="f.id" />
           <div v-if="f.review" class="ft-review">组长评语：{{ f.review }}</div>
           <el-button v-if="(f.content || '').replace(/<[^>]*>/g, '').length > 120" link size="small"
             @click="toggleFt(f.id)">{{ expandedFt.has(f.id) ? '收起' : '展开全文' }}</el-button>
@@ -1606,7 +1664,11 @@ reload().catch((e) => ElMessage.error(e.message));
               </div>
               <div v-if="l.content" class="log-rich" :class="{ 'log-clamp': logLong(l) && !expandedLogs.has(l.id) }" v-html="l.content" @click="(e) => onRichClick(e, l)"></div>
               <el-button v-if="logLong(l)" link size="small" class="log-toggle" @click="toggleLog(l.id)">{{ expandedLogs.has(l.id) ? '收起' : '展开全文' }}</el-button>
-              <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments" />
+              <div v-if="l.schedule_id && !htmlToText(l.content) && l.attachments?.length" class="ci-att-report-note">
+                本周周报以附件形式提交，点击下方文件查看或预览
+              </div>
+              <AttachmentList v-if="l.attachments?.length" :attachments="l.attachments"
+                :team-id="teamId" :log-id="l.id" />
               <!-- 组长评价区：评分 / 评语 / 优秀（task 权限者可操作） -->
               <div v-if="l.schedule_id" class="ci-review">
                 <template v-if="perms.task">
@@ -1735,6 +1797,15 @@ reload().catch((e) => ElMessage.error(e.message));
   &.log-clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 }
 .log-toggle { margin-top: 2px; padding: 0; height: auto; }
+.ci-att-report-note {
+  margin-top: 6px; padding: 7px 10px; border-radius: 8px;
+  color: var(--text-2); background: var(--surface-2); font-size: 12.5px;
+}
+.board-loading-state {
+  min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--text-2); font-size: 13px;
+  &.error { color: #b45309; }
+}
 
 // ==================== 周期打卡 ====================
 .ci-due { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 8px; }
