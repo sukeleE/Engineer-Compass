@@ -170,6 +170,13 @@
         <button class="btn btn-ghost btn-block" @click="groupOpen = false">关闭</button>
       </view>
     </view>
+
+    <CompetitionPicker
+      :visible="planPickerOpen"
+      title="选择小组备赛竞赛"
+      @close="planPickerOpen = false"
+      @select="selectPlanCompetition"
+    />
   </view>
   <view v-else class="empty"><view class="empty-text">加载中…</view></view>
 </template>
@@ -181,12 +188,15 @@ import { api } from '../../../utils/api.js';
 import { confirm, toast } from '../../../utils/guard.js';
 import Tabs from '../../../components/Tabs.vue';
 import EmptyState from '../../../components/EmptyState.vue';
+import CompetitionPicker from '../../../components/CompetitionPicker.vue';
 import { displayName, teamDisplayName } from '../../../utils/displayName.js';
 
 const id = ref(null);
 const data = ref(null);
 const tab = ref('tasks');
 const plans = ref([]);
+const planPickerOpen = ref(false);
+const planPickerMode = ref('dialog');
 const createOpen = ref(false);
 const form = ref({ title: '', desc: '', deadline: '', assignee_id: null });
 const splitPlaceholder = '子任务 1\n子任务 2\n子任务 3';
@@ -244,31 +254,26 @@ async function completeOnce(p, pi, ti) {
 }
 
 // ---------- AI 编写计划：对话编写 / 一键编写 ----------
-async function pickCompetition(onPick) {
-  const comps = await api.competitions();
-  if (!comps || !comps.length) return toast('暂无已转正竞赛，无法生成计划');
-  const names = comps.map((c) => c.name);
-  uni.showActionSheet({
-    itemList: names.slice(0, 30),
-    success: (res) => onPick(comps[res.tapIndex]),
-  });
-}
 function openPlanMenu() {
   uni.showActionSheet({
     itemList: ['💬 对话编写', '⚡ 一键编写'],
     success: (res) => {
-      if (res.tapIndex === 0) {
-        pickCompetition((comp) => {
-          uni.navigateTo({
-            url: `/packagePlan/pages/planchat/main?mode=team-generate&team_id=${id.value}`
-              + `&comp_id=${comp.id}&comp_name=${encodeURIComponent(comp.name)}`,
-          });
-        });
-      } else {
-        pickCompetition(generate);
-      }
+      planPickerMode.value = res.tapIndex === 0 ? 'dialog' : 'one';
+      planPickerOpen.value = true;
     },
   });
+}
+function selectPlanCompetition(comp) {
+  planPickerOpen.value = false;
+  if (!comp) return;
+  if (planPickerMode.value === 'dialog') {
+    uni.navigateTo({
+      url: `/packagePlan/pages/planchat/main?mode=team-generate&team_id=${id.value}`
+        + `&comp_id=${comp.id}&comp_name=${encodeURIComponent(comp.name)}`,
+    });
+    return;
+  }
+  generate(comp);
 }
 async function generate(comp) {
   uni.showLoading({ title: 'AI 编写中…', mask: true });

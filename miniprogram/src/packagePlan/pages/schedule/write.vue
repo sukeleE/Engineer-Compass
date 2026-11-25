@@ -5,8 +5,8 @@
       <text class="writer-sub">选择适合你的方式，后续都可以继续修改</text>
     </view>
 
-    <view v-if="!importPlan" class="mode-list">
-      <view class="mode-item" @click="startAi('dialog')">
+    <view v-if="!importPlan && !converting" class="mode-list">
+      <view class="mode-item" @click="openCompetitionPicker('dialog')">
         <view class="mode-icon ai">💬</view>
         <view class="mode-main">
           <text class="mode-title">AI 对话编写</text>
@@ -14,7 +14,7 @@
         </view>
         <text class="mode-arrow">›</text>
       </view>
-      <view class="mode-item" @click="startAi('one')">
+      <view class="mode-item" @click="openCompetitionPicker('one')">
         <view class="mode-icon ai">⚡</view>
         <view class="mode-main">
           <text class="mode-title">AI 一键编写</text>
@@ -71,6 +71,13 @@
         {{ savingImport ? '保存中…' : '确认并保存计划' }}
       </button>
     </view>
+
+    <CompetitionPicker
+      :visible="competitionPickerOpen"
+      title="选择备赛竞赛"
+      @close="competitionPickerOpen = false"
+      @select="selectCompetition"
+    />
   </view>
 </template>
 
@@ -79,31 +86,30 @@ import { ref } from 'vue';
 import { api } from '../../../utils/api.js';
 import { toast } from '../../../utils/guard.js';
 import { uploadFile } from '../../../utils/upload.js';
+import CompetitionPicker from '../../../components/CompetitionPicker.vue';
 
 const converting = ref(false);
 const importPlan = ref(null);
 const savingImport = ref(false);
+const competitionPickerOpen = ref(false);
+const aiKind = ref('dialog');
 
-function pickCompetition(onPick) {
-  return api.competitions().then((comps) => {
-    if (!comps?.length) return toast('暂无可生成计划的竞赛');
-    uni.showActionSheet({
-      itemList: comps.map((c) => c.name).slice(0, 30),
-      success: (res) => onPick(comps[res.tapIndex]),
-    });
-  });
+function openCompetitionPicker(kind) {
+  aiKind.value = kind;
+  competitionPickerOpen.value = true;
 }
-function startAi(kind) {
-  pickCompetition((comp) => {
-    if (kind === 'dialog') {
-      uni.navigateTo({
-        url: `/packagePlan/pages/planchat/main?mode=schedule&comp_id=${comp.id}`
-          + `&comp_name=${encodeURIComponent(comp.name)}`,
-      });
-      return;
-    }
-    generateOneClick(comp);
-  });
+
+function selectCompetition(comp) {
+  competitionPickerOpen.value = false;
+  if (!comp) return;
+  if (aiKind.value === 'dialog') {
+    uni.navigateTo({
+      url: `/packagePlan/pages/planchat/main?mode=schedule&comp_id=${comp.id}`
+        + `&comp_name=${encodeURIComponent(comp.name)}`,
+    });
+    return;
+  }
+  generateOneClick(comp);
 }
 async function generateOneClick(comp) {
   uni.showLoading({ title: 'AI 编写中…', mask: true });

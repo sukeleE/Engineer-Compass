@@ -12,24 +12,7 @@
           <button class="btn btn-ghost half" @click="openCalendar">📅 月历</button>
         </view>
 
-        <block v-if="viewTab === 'team'">
-          <EmptyState v-if="!teamTasks.length" icon="🏗️" text="还没有加入项目小组" />
-          <view v-for="team in teamTasks" :key="team.team_id" class="card group-card" @click="openTeamTasks(team)">
-            <view class="group-head">
-              <text class="group-name ellipsis">{{ team.team_name }}</text>
-              <text class="tag tag-blue">{{ (team.plans || []).length }} 个计划</text>
-            </view>
-            <view v-for="plan in team.plans || []" :key="plan.id" class="group-plan">
-              <view class="group-plan-main">
-                <text class="group-plan-name ellipsis">{{ plan.title }}</text>
-                <text class="group-plan-meta">{{ teamPlanStats(plan).done }}/{{ teamPlanStats(plan).total }} 任务 · {{ teamPlanStats(plan).percent }}%</text>
-              </view>
-              <view class="mini-progress"><view :style="{ width: teamPlanStats(plan).percent + '%' }"></view></view>
-            </view>
-          </view>
-        </block>
-
-        <block v-else-if="viewTab === 'comp'">
+        <block v-if="viewTab === 'comp'">
         <EmptyState v-if="!list.length" icon="🗓️" text="还没有备赛计划，去竞赛页选择比赛加入日程" btn-text="去看竞赛" @action="goTimeline" />
         <view v-for="s in list" :key="s.id" class="card schedule-card">
           <view class="sched-head" @click="toggle(s.id)">
@@ -72,10 +55,7 @@
         </block>
 
         <block v-else>
-          <view class="study-head">
-            <button class="btn btn-primary study-create" @click="createStudyPlan">＋ 编写计划</button>
-          </view>
-          <EmptyState v-if="!studies.length" icon="📚" text="还没有学习计划" btn-text="立即编写" @action="createStudyPlan" />
+          <EmptyState v-if="!studies.length" icon="📚" text="还没有学习计划" btn-text="立即编写" @action="openPlanWriter" />
           <view v-for="study in studies" :key="study.id" class="card study-card" @click="openStudy(study)">
             <view class="study-head-row">
               <text class="study-name ellipsis">{{ study.topic || '学习计划' }}</text>
@@ -127,8 +107,7 @@ import Tabs from '../../components/Tabs.vue';
 
 const list = ref([]);
 const studies = ref([]);
-const teamTasks = ref([]);
-const viewTab = ref('comp');
+const viewTab = ref('study');
 const loading = ref(true);
 const expanded = reactive({});
 const saveTimers = {};
@@ -136,9 +115,8 @@ const rollbackSnap = {};
 
 const loggedIn = computed(() => isLoggedIn() && !!auth.user);
 const tabs = computed(() => [
-  { key: 'team', label: '小组任务', badge: teamTaskCount() || '' },
-  { key: 'comp', label: '竞赛日程', badge: list.value.length || '' },
   { key: 'study', label: '学习日程', badge: studies.value.length || '' },
+  { key: 'comp', label: '竞赛日程', badge: list.value.length || '' },
 ]);
 
 function progressOf(s) {
@@ -153,41 +131,23 @@ async function load() {
   if (!isLoggedIn()) { loading.value = false; return; }
   loading.value = true;
   try {
-    const [rowsR, studiesR, teamR] = await Promise.allSettled([
+    const [rowsR, studiesR] = await Promise.allSettled([
       api.scheduleList(),
       api.studyList(),
-      api.teamMyTasks(),
     ]);
     if (rowsR.status === 'fulfilled') {
       list.value = rowsR.value.map((r) => ({ ...r, plan: r.plan || { phases: [] } }));
     }
     if (studiesR.status === 'fulfilled') studies.value = studiesR.value || [];
-    if (teamR.status === 'fulfilled') teamTasks.value = teamR.value || [];
   } finally {
     loading.value = false;
   }
 }
 
-function taskStats(tasks) {
-  const all = tasks || [];
-  const done = all.filter((t) => t.done).length;
-  return { done, total: all.length, percent: all.length ? Math.round(done / all.length * 100) : 0 };
-}
-function teamPlanStats(plan) {
-  return taskStats((plan.phases || []).flatMap((p) => p.tasks || []));
-}
-function teamTaskCount() {
-  return teamTasks.value.reduce((n, team) => n + (team.plans || []).length, 0);
-}
-function openTeamTasks(team) {
-  uni.navigateTo({ url: `/packageTeam/pages/tasks/main?id=${team.team_id}&tab=plans` });
-}
 function openStudy(study) {
   uni.navigateTo({ url: `/packagePlan/pages/study/detail?id=${study.id}` });
 }
-function createStudyPlan() {
-  uni.navigateTo({ url: '/packagePlan/pages/study/write' });
-}
+
 
 function toggleTask(s, pi, ti) {
   const task = s.plan.phases[pi].tasks[ti];
@@ -225,7 +185,10 @@ function remove(s) {
 // ============ AI 编写 / 修改 / 自编计划 ============
 const optimizingId = ref(null);
 function openPlanWriter() {
-  uni.navigateTo({ url: '/packagePlan/pages/schedule/write' });
+  const url = viewTab.value === 'study'
+    ? '/packagePlan/pages/study/write'
+    : '/packagePlan/pages/schedule/write';
+  uni.navigateTo({ url });
 }
 function openAiModify(s) {
   uni.navigateTo({ url: `/packagePlan/pages/planchat/main?mode=schedule-edit&schedule_id=${s.id}` });
@@ -350,17 +313,7 @@ onPullDownRefresh(async () => {
 .btn.mini { width: 180rpx; height: 64rpx; font-size: 25rpx; }
 .top-ops { display: flex; gap: 16rpx; margin-bottom: 18rpx; }
 .half { flex: 1; height: 80rpx; font-size: 27rpx; }
-.group-card { padding: 24rpx 28rpx; }
-.group-head { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; margin-bottom: 14rpx; }
-.group-name { flex: 1; min-width: 0; font-size: 29rpx; font-weight: 700; color: #1e293b; }
-.group-plan { padding: 14rpx 0; border-top: 1rpx solid #f1f5f9; }
-.group-plan-main { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
-.group-plan-name { flex: 1; min-width: 0; font-size: 25rpx; color: #334155; }
-.group-plan-meta { flex-shrink: 0; font-size: 21rpx; color: #94a3b8; }
-.mini-progress { height: 8rpx; margin-top: 10rpx; border-radius: 4rpx; background: #f1f5f9; overflow: hidden; }
-.mini-progress view { height: 100%; border-radius: 4rpx; background: #2563eb; }
-.study-head { margin-bottom: 16rpx; }
-.study-create { height: 76rpx; font-size: 25rpx; }
+
 .study-card { padding: 24rpx 28rpx; }
 .study-head-row { display: flex; align-items: center; gap: 14rpx; }
 .study-name { flex: 1; min-width: 0; font-size: 28rpx; font-weight: 700; color: #1e293b; }
