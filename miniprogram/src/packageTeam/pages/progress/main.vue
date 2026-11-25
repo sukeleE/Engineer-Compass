@@ -1,14 +1,7 @@
 <template>
   <view class="page-wrap">
-    <view v-if="canProgress" class="card composer">
-      <textarea v-model="draft" class="textarea" placeholder="记录今天的进展、问题与下一步…" maxlength="3000" />
-      <view class="composer-actions">
-        <view class="mini-btn" @click="addImage">📷 附图{{ images.length ? '(' + images.length + ')' : '' }}</view>
-        <button class="btn btn-primary send" :disabled="submitting" @click="submit">{{ submitting ? '提交中…' : '提交汇报' }}</button>
-      </view>
-      <view v-if="images.length" class="img-preview">
-        <image v-for="(img, i) in images" :key="i" :src="img.temp" class="thumb" mode="aspectFill" @click="preview(img.temp)" />
-      </view>
+    <view v-if="canProgress" class="report-entry">
+      <button class="report-entry-btn" @click="openReportEditor">✍️ 提交进度汇报</button>
     </view>
 
     <view v-if="loading" class="empty"><view class="empty-text">加载中…</view></view>
@@ -64,43 +57,18 @@
       </view>
     </template>
 
-    <!-- 编辑汇报弹窗 -->
-    <view v-if="editOpen" class="modal-mask" @click="editOpen = false">
-      <view class="modal" @click.stop>
-        <view class="modal-title">编辑汇报</view>
-        <textarea v-model="editContent" class="textarea tall" placeholder="进展内容…" maxlength="3000" />
-        <view v-if="editImageEntries.length" class="img-preview">
-          <view v-for="e in editImageEntries" :key="e.idx" class="thumb-wrap">
-            <image :src="e.att.temp" class="thumb" mode="aspectFill" @click="preview(e.att.temp)" />
-            <text class="thumb-del" @click="removeEditImage(e.idx)">×</text>
-          </view>
-        </view>
-        <view v-for="e in editFileEntries" :key="'f' + e.idx" class="edit-file">
-          <text class="edit-file-icon">📄</text>
-          <text class="edit-file-name" @click="openEditFile(e.att)">{{ e.att.name || '附件' }}</text>
-          <text class="thumb-del edit-file-del" @click="removeEditImage(e.idx)">×</text>
-        </view>
-        <view class="mini-btn add-btn" @click="addEditImage">📷 追加附图</view>
-        <view class="modal-actions">
-          <button class="btn btn-ghost modal-btn" @click="editOpen = false">取消</button>
-          <button class="btn btn-primary modal-btn" :disabled="editBusy" @click="saveEdit">{{ editBusy ? '保存中…' : '保存' }}</button>
-        </view>
-      </view>
-    </view>
   </view>
 </template>
 
 <script setup>
 import { ref, reactive, computed } from 'vue';
-import { onLoad, onShow } from '@dcloudio/uni-app';
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import { api } from '../../../utils/api.js';
 import { confirm, toast } from '../../../utils/guard.js';
-import { chooseImageAsBase64, isImage } from '../../../utils/fileBase64.js';
 import auth from '../../../utils/auth.js';
 import Markdown from '../../../components/Markdown.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import AttachmentList from '../../../components/AttachmentList.vue';
-import { previewAttachment } from '../../../utils/preview.js';
 import { teamDisplayName } from '../../../utils/displayName.js';
 import { readCache, writeCache } from '../../../utils/swrCache.js';
 
@@ -108,9 +76,6 @@ const id = ref(null);
 const detail = ref(null);
 const logs = ref([]);
 const loading = ref(true);
-const draft = ref('');
-const images = ref([]);
-const submitting = ref(false);
 const commentDrafts = reactive({});
 const myId = auth.user ? auth.user.id : null;
 let loadingAll = null;
@@ -135,12 +100,6 @@ function commentName(c) { return teamDisplayName(c, members()) || c.nickname || 
 function stripHtml(html) {
   return String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
 }
-function attUrl(a) {
-  if (a.data) return 'data:' + (a.mime || 'image/jpeg') + ';base64,' + a.data;
-  return a.url || '';
-}
-function preview(url) { uni.previewImage({ urls: [url] }); }
-
 // ==================== 汇报按周折叠（历史周期打包，默认只展开最新一周；自由汇报置顶常显） ====================
 function isoWeekOf(dateStr) {
   const [Y, M, D] = String(dateStr).split('-').map(Number);
@@ -205,6 +164,17 @@ function toggleWeek(g) {
 }
 function weekOpen(g) { return !g.collapsible || !!expandedWeeks[g.key]; }
 
+function openReportEditor() {
+  uni.navigateTo({ url: `/packageTeam/pages/progress/edit?teamId=${id.value}` });
+}
+function openEdit(l) {
+  uni.navigateTo({ url: `/packageTeam/pages/progress/edit?teamId=${id.value}&logId=${l.id}` });
+}
+function onProgressRefresh(payload = {}) {
+  if (Number(payload.teamId) !== Number(id.value)) return;
+  load(true);
+}
+
 function restoreCache() {
   const cachedDetail = readCache(cacheKey('detail'))?.value;
   const cachedLogs = readCache(cacheKey('logs'))?.value;
@@ -237,74 +207,8 @@ async function load(force = false) {
     loading.value = false;
   }
 }
-async function addImage() {
-  try {
-    const att = await chooseImageAsBase64(7);
-    images.value.push({ ...att, temp: attUrl(att) });
-  } catch (e) { /* 用户取消 */ }
-}
-async function submit() {
-  if (!draft.value.trim() && !images.value.length) return toast('内容或附件至少填写一项');
-  submitting.value = true;
-  try {
-    const attachments = images.value.map(({ temp, ...rest }) => rest);
-    await api.collabLogCreate(id.value, { content: draft.value, attachments });
-    draft.value = '';
-    images.value = [];
-    toast('已提交', 'success');
-    load(true);
-  } finally {
-    submitting.value = false;
-  }
-}
 
-// ---------- 编辑 / 删除 ----------
-const editOpen = ref(false);
-const editContent = ref('');
-const editAtts = ref([]);
-const editBusy = ref(false);
-let editLog = null;
-const editImageEntries = computed(() => editAtts.value.map((a, idx) => ({ att: a, idx })).filter((e) => isImage(e.att)));
-const editFileEntries = computed(() => editAtts.value.map((a, idx) => ({ att: a, idx })).filter((e) => !isImage(e.att)));
-async function ensureFullLog(l) {
-  const hasLazy = (l.attachments || []).some((a) => a.lazy && !a.data && !a.url);
-  if (!hasLazy) return l;
-  const rows = await api.checkinLogsByIds(id.value, [l.id]);
-  if (rows?.[0]) Object.assign(l, rows[0]);
-  return l;
-}
-async function openEditFile(a) {
-  const l = editLog ? await ensureFullLog(editLog) : null;
-  const idx = l?.attachments?.findIndex((x) => x.name === a.name) ?? -1;
-  previewAttachment(idx >= 0 ? l.attachments[idx] : a);
-}
-async function openEdit(l) {
-  await ensureFullLog(l);
-  editLog = l;
-  editContent.value = stripHtml(l.content);
-  editAtts.value = (l.attachments || []).map((a) => ({ ...a, temp: attUrl(a) }));
-  editOpen.value = true;
-}
-async function addEditImage() {
-  try {
-    const att = await chooseImageAsBase64(7);
-    editAtts.value.push({ ...att, temp: attUrl(att) });
-  } catch (e) { /* 用户取消 */ }
-}
-function removeEditImage(i) { editAtts.value.splice(i, 1); }
-async function saveEdit() {
-  if (!editContent.value.trim() && !editAtts.value.length) return toast('内容或附件至少填写一项');
-  editBusy.value = true;
-  try {
-    const attachments = editAtts.value.map(({ temp, ...rest }) => rest);
-    await api.collabLogUpdate(id.value, editLog.id, { content: editContent.value, attachments });
-    toast('已更新', 'success');
-    editOpen.value = false;
-    load(true);
-  } finally {
-    editBusy.value = false;
-  }
-}
+// ---------- 删除 ----------
 async function removeLog(l) {
   if (!(await confirm('删除这条进度汇报？'))) return;
   await api.collabLogDelete(id.value, l.id);
@@ -330,23 +234,30 @@ async function removeComment(l, c) {
 
 onLoad((o) => {
   id.value = Number(o.id);
+  uni.$on('team:progress:refresh', onProgressRefresh);
   restoreCache();
   load();
 });
 onShow(() => { if (id.value) load(); });
+onUnload(() => {
+  uni.$off('team:progress:refresh', onProgressRefresh);
+});
 </script>
 
 <style lang="scss" scoped>
-.composer { padding: 24rpx 28rpx; }
-.textarea { width: 100%; box-sizing: border-box; min-height: 180rpx; background: #f8fafc; border: 1rpx solid #e2e8f0; border-radius: 14rpx; padding: 18rpx 22rpx; font-size: 27rpx; }
-.textarea.tall { min-height: 260rpx; margin-bottom: 16rpx; }
-.composer-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16rpx; }
+.report-entry { margin-bottom: 20rpx; }
+.report-entry-btn {
+  height: 92rpx;
+  line-height: 92rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #fff;
+  font-size: 29rpx;
+  font-weight: 700;
+  box-shadow: 0 10rpx 24rpx rgba(37, 99, 235, .2);
+}
+.report-entry-btn::after { border: none; }
 .mini-btn { background: #eff6ff; color: #2563eb; font-size: 24rpx; border-radius: 26rpx; padding: 12rpx 28rpx; }
-.send { width: 240rpx; height: 72rpx; font-size: 26rpx; padding: 0; }
-.img-preview { display: flex; gap: 14rpx; margin-top: 16rpx; flex-wrap: wrap; }
-.thumb { width: 140rpx; height: 140rpx; border-radius: 12rpx; }
-.thumb-wrap { position: relative; }
-.thumb-del { position: absolute; top: -12rpx; right: -12rpx; width: 40rpx; height: 40rpx; border-radius: 50%; background: #ef4444; color: #fff; font-size: 28rpx; text-align: center; line-height: 38rpx; }
 .log { padding: 24rpx 28rpx; }
 .log-head { display: flex; align-items: center; gap: 14rpx; }
 .avatar { width: 68rpx; height: 68rpx; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #60a5fa); color: #fff; text-align: center; line-height: 68rpx; font-weight: 700; flex-shrink: 0; }
@@ -354,10 +265,6 @@ onShow(() => { if (id.value) load(); });
 .nick { font-weight: 700; color: #1e293b; font-size: 27rpx; display: block; }
 .time { font-size: 22rpx; color: #94a3b8; }
 .badges { display: flex; gap: 8rpx; flex-wrap: wrap; justify-content: flex-end; }
-.edit-file { display: flex; align-items: center; gap: 12rpx; background: #f8fafc; border: 1rpx solid #e2e8f0; border-radius: 12rpx; padding: 14rpx 18rpx; margin-top: 12rpx; }
-.edit-file-icon { font-size: 34rpx; flex-shrink: 0; }
-.edit-file-name { flex: 1; min-width: 0; font-size: 25rpx; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.edit-file-del { position: static; width: 36rpx; height: 36rpx; line-height: 34rpx; font-size: 24rpx; flex-shrink: 0; }
 .review { margin-top: 14rpx; background: #eff6ff; color: #1e40af; border-radius: 10rpx; padding: 12rpx 18rpx; font-size: 24rpx; }
 .att-note { margin-top: 12rpx; padding: 12rpx 16rpx; border-radius: 10rpx; background: #f8fafc; color: #64748b; font-size: 23rpx; }
 .log-ops { display: flex; gap: 24rpx; margin-top: 14rpx; justify-content: flex-end; }
@@ -370,12 +277,6 @@ onShow(() => { if (id.value) load(); });
 .c-del { color: #ef4444; font-size: 22rpx; flex-shrink: 0; padding: 0 10rpx; }
 .comment-bar { display: flex; gap: 14rpx; align-items: center; margin-top: 12rpx; }
 .comment-input { flex: 1; height: 68rpx; background: #f8fafc; border: 1rpx solid #e2e8f0; border-radius: 34rpx; padding: 0 24rpx; font-size: 25rpx; }
-.add-btn { margin-top: 16rpx; display: inline-block; }
-.modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { width: 660rpx; background: #fff; border-radius: 24rpx; padding: 32rpx; }
-.modal-title { font-size: 31rpx; font-weight: 700; margin-bottom: 18rpx; color: #1e293b; }
-.modal-actions { display: flex; gap: 18rpx; margin-top: 12rpx; }
-.modal-btn { flex: 1; height: 80rpx; font-size: 27rpx; }
 .week-group { margin-bottom: 18rpx; }
 .week-head { display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap; background: #eff6ff; border: 1rpx solid #dbeafe; border-radius: 14rpx; padding: 16rpx 22rpx; }
 .week-arrow { font-size: 26rpx; color: #64748b; transition: transform .2s; }

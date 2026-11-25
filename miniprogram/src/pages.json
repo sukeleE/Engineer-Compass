@@ -36,6 +36,7 @@
         { "path": "pages/members/main", "style": { "navigationBarTitleText": "成员与角色" } },
         { "path": "pages/tasks/main", "style": { "navigationBarTitleText": "小组任务" } },
         { "path": "pages/progress/main", "style": { "navigationBarTitleText": "进度汇报" } },
+        { "path": "pages/progress/edit", "style": { "navigationBarTitleText": "编辑进度汇报" } },
         { "path": "pages/chat/list", "style": { "navigationBarTitleText": "群聊" } },
         { "path": "pages/chat/room", "style": { "navigationBarTitleText": "群聊" } },
         { "path": "pages/chat/info", "style": { "navigationBarTitleText": "群信息" } },
