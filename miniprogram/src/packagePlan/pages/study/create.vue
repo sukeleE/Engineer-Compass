@@ -1,8 +1,8 @@
 <template>
   <view class="page-wrap">
-    <view class="seg">
-      <view class="seg-item" :class="{ on: mode === 'ai' }" @click="mode = 'ai'">AI 生成</view>
-      <view class="seg-item" :class="{ on: mode === 'manual' }" @click="mode = 'manual'">自编计划</view>
+    <view v-if="!fixedMode" class="seg">
+      <view class="seg-item" :class="{ on: mode === 'ai' }" @click="mode = 'ai'">AI 一键编写</view>
+      <view class="seg-item" :class="{ on: mode === 'manual' }" @click="mode = 'manual'">手动编写</view>
     </view>
 
     <view class="card">
@@ -46,17 +46,19 @@
     <button class="btn btn-primary btn-block" :disabled="submitting" @click="submit">
       {{ submitting ? '提交中…' : (mode === 'ai' ? '生成学习计划（可能等待约 1 分钟）' : '保存自编学习计划') }}
     </button>
-    <view class="tip text-muted">AI 不可用时系统自动降级为通用学习路径模板，不影响使用。</view>
+    <view v-if="mode === 'ai'" class="tip text-muted">AI 不可用时系统自动降级为通用学习路径模板，不影响使用。</view>
   </view>
 </template>
 
 <script setup>
 import { reactive, ref } from 'vue';
+import { onLoad } from '@dcloudio/uni-app';
 import { api } from '../../../utils/api.js';
 import { toast } from '../../../utils/guard.js';
 
 const levels = ['零基础', '入门', '进阶'];
 const mode = ref('ai');
+const fixedMode = ref(false);
 const form = reactive({ topic: '', level: '零基础', goal: '', hours: 10 });
 const phases = reactive([{ phase: '', date: '', tasksText: '', check_standard: '' }]);
 const submitting = ref(false);
@@ -68,6 +70,15 @@ function addPhase() {
   phases.push({ phase: '', date: '', tasksText: '', check_standard: '' });
 }
 function removePhase(pi) { phases.splice(pi, 1); }
+
+onLoad((options) => {
+  if (!['ai', 'manual'].includes(options?.mode)) return;
+  mode.value = options.mode;
+  fixedMode.value = true;
+  uni.setNavigationBarTitle({
+    title: mode.value === 'ai' ? 'AI 一键编写学习计划' : '手动编写学习计划',
+  });
+});
 
 async function submit() {
   if (!form.topic.trim()) return toast('请输入学习主题');
@@ -99,7 +110,7 @@ async function submit() {
         phases: normPhases,
       });
     }
-    uni.showToast({ title: '计划已生成', icon: 'success' });
+    uni.showToast({ title: mode.value === 'ai' ? '计划已生成' : '计划已保存', icon: 'success' });
     uni.redirectTo({ url: '/packagePlan/pages/study/detail?id=' + res.id });
   } catch (e) {
     /* request 层已 toast */

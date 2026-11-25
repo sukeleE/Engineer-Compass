@@ -21,7 +21,8 @@
       "pages": [
         { "path": "pages/study/list", "style": { "navigationBarTitleText": "学习日程" } },
         { "path": "pages/study/detail", "style": { "navigationBarTitleText": "学习计划详情" } },
-        { "path": "pages/study/create", "style": { "navigationBarTitleText": "新建学习计划" } },
+        { "path": "pages/study/write", "style": { "navigationBarTitleText": "编写学习计划" } },
+        { "path": "pages/study/create", "style": { "navigationBarTitleText": "学习计划编写" } },
         { "path": "pages/notes/main", "style": { "navigationBarTitleText": "学习笔记" } },
         { "path": "pages/notes/edit", "style": { "navigationBarTitleText": "当日笔记" } },
         { "path": "pages/schedule/edit", "style": { "navigationBarTitleText": "自编备赛计划" } },

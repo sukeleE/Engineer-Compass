@@ -1,8 +1,8 @@
 <template>
   <view class="page-wrap">
-    <button class="btn btn-primary btn-block" @click="goCreate">＋ 新建学习计划</button>
+    <button class="btn btn-primary btn-block" @click="goCreate">＋ 编写计划</button>
     <view v-if="loading" class="empty"><view class="empty-text">加载中…</view></view>
-    <EmptyState v-else-if="!list.length" icon="📚" text="还没有学习计划，告诉 AI 你想学什么" btn-text="立即创建" @action="goCreate" />
+    <EmptyState v-else-if="!list.length" icon="📚" text="还没有学习计划，先规划一个清晰的学习路径" btn-text="立即编写" @action="goCreate" />
     <view v-else>
       <view v-for="s in list" :key="s.id" class="card study-card" @click="open(s.id)">
         <view class="row1">
@@ -31,7 +31,7 @@ const list = ref([]);
 const loading = ref(true);
 
 function percent(s) { return s.total ? Math.round((s.done / s.total) * 100) : 0; }
-function goCreate() { if (ensureLogin()) uni.navigateTo({ url: '/packagePlan/pages/study/create' }); }
+function goCreate() { if (ensureLogin()) uni.navigateTo({ url: '/packagePlan/pages/study/write' }); }
 function open(id) { uni.navigateTo({ url: '/packagePlan/pages/study/detail?id=' + id }); }
 
 onShow(async () => {

@@ -73,9 +73,9 @@
 
         <block v-else>
           <view class="study-head">
-            <button class="btn btn-primary study-create" @click="createStudyPlan">＋ AI 编写学习计划</button>
+            <button class="btn btn-primary study-create" @click="createStudyPlan">＋ 编写计划</button>
           </view>
-          <EmptyState v-if="!studies.length" icon="📚" text="还没有学习计划" btn-text="立即创建" @action="createStudyPlan" />
+          <EmptyState v-if="!studies.length" icon="📚" text="还没有学习计划" btn-text="立即编写" @action="createStudyPlan" />
           <view v-for="study in studies" :key="study.id" class="card study-card" @click="openStudy(study)">
             <view class="study-head-row">
               <text class="study-name ellipsis">{{ study.topic || '学习计划' }}</text>
@@ -186,7 +186,7 @@ function openStudy(study) {
   uni.navigateTo({ url: `/packagePlan/pages/study/detail?id=${study.id}` });
 }
 function createStudyPlan() {
-  uni.navigateTo({ url: '/packagePlan/pages/study/create' });
+  uni.navigateTo({ url: '/packagePlan/pages/study/write' });
 }
 
 function toggleTask(s, pi, ti) {
