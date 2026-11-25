@@ -11,8 +11,16 @@
         @click="previewImageAt(e.idx)"
       />
     </view>
+    <view v-for="e in lazyImageEntries" :key="'li' + e.idx" class="al-file" @click="openLazyImage(e)">
+      <text class="al-icon">🖼️</text>
+      <view class="al-meta">
+        <text class="al-name">{{ e.att.name || '图片附件' }}</text>
+        <text v-if="e.att.size" class="al-size">{{ fmtSize(e.att.size) }}</text>
+      </view>
+      <text class="al-open">加载</text>
+    </view>
     <!-- 非图片附件（Word/Excel/PDF/压缩包等）：文件行，点击下载或打开 -->
-    <view v-for="e in fileEntries" :key="'f' + e.idx" class="al-file" @click="openFile(e.att)">
+    <view v-for="e in fileEntries" :key="'f' + e.idx" class="al-file" @click="openFile(e.att, e.idx)">
       <text class="al-icon">{{ iconOf(e.att) }}</text>
       <view class="al-meta">
         <text class="al-name">{{ e.att.name || '附件' }}</text>
@@ -24,23 +32,35 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { isImage } from '../utils/fileBase64.js';
 import { previewAttachment, authedUrl, inlineImageUrl } from '../utils/preview.js';
+import { api } from '../utils/api.js';
 
 const props = defineProps({
   attachments: { type: Array, default: () => [] },
   hideImages: { type: Boolean, default: false },
+  teamId: { type: Number, default: 0 },
+  logId: { type: Number, default: 0 },
 });
 
-const atts = computed(() => (Array.isArray(props.attachments) ? props.attachments : []));
+const remoteAtts = ref(null);
+const fetching = ref(false);
+const atts = computed(() => remoteAtts.value || (Array.isArray(props.attachments) ? props.attachments : []));
+watch(() => [props.logId, props.attachments], () => { remoteAtts.value = null; });
 const imageEntries = computed(() => {
   if (props.hideImages) return [];
   const out = [];
   atts.value.forEach((a, idx) => {
-    if (isImage(a)) out.push({ idx, src: inlineImageUrl(a) || authedUrl(a.url || '') });
+    const src = inlineImageUrl(a) || authedUrl(a.url || '');
+    if (isImage(a) && src) out.push({ idx, att: a, src });
   });
   return out;
+});
+const lazyImageEntries = computed(() => {
+  if (props.hideImages) return [];
+  return atts.value.map((att, idx) => ({ att, idx }))
+    .filter(({ att }) => isImage(att) && !inlineImageUrl(att) && !att.url);
 });
 const fileEntries = computed(() => {
   const out = [];
@@ -49,13 +69,38 @@ const fileEntries = computed(() => {
   });
   return out;
 });
-function previewImageAt(idx) {
+async function ensureFullAttachments() {
+  if (remoteAtts.value) return remoteAtts.value;
+  if (!props.teamId || !props.logId || fetching.value) return atts.value;
+  fetching.value = true;
+  uni.showLoading({ title: '加载附件…', mask: true });
+  try {
+    const rows = await api.checkinLogsByIds(props.teamId, [props.logId]);
+    remoteAtts.value = Array.isArray(rows?.[0]?.attachments) ? rows[0].attachments : [];
+    return remoteAtts.value;
+  } catch (e) {
+    uni.showToast({ title: e.message || '附件加载失败', icon: 'none' });
+    return atts.value;
+  } finally {
+    fetching.value = false;
+    uni.hideLoading();
+  }
+}
+function fullAtt(list, idx, att) {
+  return list?.[idx] || list?.find((x) => x.name === att.name) || att;
+}
+async function previewImageAt(idx) {
   const urls = imageEntries.value.map((e) => e.src);
   const cur = imageEntries.value.find((e) => e.idx === idx);
   uni.previewImage({ urls, current: cur ? cur.src : urls[0] });
 }
-function openFile(a) {
-  previewAttachment(a);
+async function openLazyImage(e) {
+  const full = fullAtt(await ensureFullAttachments(), e.idx, e.att);
+  previewAttachment(full);
+}
+async function openFile(a, idx) {
+  const full = (a.data || a.url) ? a : fullAtt(await ensureFullAttachments(), idx, a);
+  previewAttachment(full);
 }
 function fmtSize(n) {
   const v = Number(n) || 0;

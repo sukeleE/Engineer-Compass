@@ -40,7 +40,8 @@
             <view v-if="l.schedule_id && !stripHtml(l.content) && l.attachments && l.attachments.length" class="att-note">
               本周周报以附件形式提交，点击下方文件查看
             </view>
-            <AttachmentList v-if="l.attachments && l.attachments.length" :attachments="l.attachments" />
+            <AttachmentList v-if="l.attachments && l.attachments.length" :attachments="l.attachments"
+              :team-id="id" :log-id="l.id" />
             <view v-if="l.review" class="review">组长点评：{{ l.review }}<text v-if="l.score">（{{ l.score }} 分）</text></view>
 
             <view v-if="canModify(l)" class="log-ops">
@@ -101,6 +102,7 @@ import EmptyState from '../../../components/EmptyState.vue';
 import AttachmentList from '../../../components/AttachmentList.vue';
 import { previewAttachment } from '../../../utils/preview.js';
 import { teamDisplayName } from '../../../utils/displayName.js';
+import { readCache, writeCache } from '../../../utils/swrCache.js';
 
 const id = ref(null);
 const detail = ref(null);
@@ -111,6 +113,14 @@ const images = ref([]);
 const submitting = ref(false);
 const commentDrafts = reactive({});
 const myId = auth.user ? auth.user.id : null;
+let loadingAll = null;
+let lastLoadedAt = 0;
+function cacheKey(kind) {
+  return `team-progress:${auth.user?.id || 'anon'}:${id.value}:${kind}`;
+}
+function compactDetail(d) {
+  return d ? { me: d.me, perms: d.perms, members: d.members || [] } : null;
+}
 
 const canProgress = computed(() => !detail.value || detail.value.me.is_owner || detail.value.perms.progress);
 function canModify(l) { return l.user_id === myId || (detail.value && detail.value.me.is_owner); }
@@ -195,11 +205,37 @@ function toggleWeek(g) {
 }
 function weekOpen(g) { return !g.collapsible || !!expandedWeeks[g.key]; }
 
-async function load() {
-  detail.value = await api.teamDetail(id.value);
-  logs.value = await api.collabLogs(id.value);
-  loading.value = false;
+function restoreCache() {
+  const cachedDetail = readCache(cacheKey('detail'))?.value;
+  const cachedLogs = readCache(cacheKey('logs'))?.value;
+  if (cachedDetail) detail.value = cachedDetail;
+  if (Array.isArray(cachedLogs)) logs.value = cachedLogs;
+  if (detail.value || logs.value.length) loading.value = false;
+}
+async function loadDetail() {
+  const d = await api.teamDetail(id.value);
+  detail.value = d;
+  writeCache(cacheKey('detail'), compactDetail(d));
+}
+async function loadLogs() {
+  const rows = await api.collabLogs(id.value, { limit: 200, meta: 1 });
+  logs.value = Array.isArray(rows) ? rows : [];
+  writeCache(cacheKey('logs'), logs.value);
   ensureLatestWeek();
+  loading.value = false;
+}
+async function load(force = false) {
+  if (!id.value) return;
+  if (loadingAll) return loadingAll;
+  if (!force && Date.now() - lastLoadedAt < 10000) return;
+  lastLoadedAt = Date.now();
+  loadingAll = Promise.allSettled([loadDetail(), loadLogs()]);
+  try {
+    await loadingAll;
+  } finally {
+    loadingAll = null;
+    loading.value = false;
+  }
 }
 async function addImage() {
   try {
@@ -216,7 +252,7 @@ async function submit() {
     draft.value = '';
     images.value = [];
     toast('已提交', 'success');
-    load();
+    load(true);
   } finally {
     submitting.value = false;
   }
@@ -230,8 +266,20 @@ const editBusy = ref(false);
 let editLog = null;
 const editImageEntries = computed(() => editAtts.value.map((a, idx) => ({ att: a, idx })).filter((e) => isImage(e.att)));
 const editFileEntries = computed(() => editAtts.value.map((a, idx) => ({ att: a, idx })).filter((e) => !isImage(e.att)));
-function openEditFile(a) { previewAttachment(a); }
-function openEdit(l) {
+async function ensureFullLog(l) {
+  const hasLazy = (l.attachments || []).some((a) => a.lazy && !a.data && !a.url);
+  if (!hasLazy) return l;
+  const rows = await api.checkinLogsByIds(id.value, [l.id]);
+  if (rows?.[0]) Object.assign(l, rows[0]);
+  return l;
+}
+async function openEditFile(a) {
+  const l = editLog ? await ensureFullLog(editLog) : null;
+  const idx = l?.attachments?.findIndex((x) => x.name === a.name) ?? -1;
+  previewAttachment(idx >= 0 ? l.attachments[idx] : a);
+}
+async function openEdit(l) {
+  await ensureFullLog(l);
   editLog = l;
   editContent.value = stripHtml(l.content);
   editAtts.value = (l.attachments || []).map((a) => ({ ...a, temp: attUrl(a) }));
@@ -252,7 +300,7 @@ async function saveEdit() {
     await api.collabLogUpdate(id.value, editLog.id, { content: editContent.value, attachments });
     toast('已更新', 'success');
     editOpen.value = false;
-    load();
+    load(true);
   } finally {
     editBusy.value = false;
   }
@@ -261,7 +309,7 @@ async function removeLog(l) {
   if (!(await confirm('删除这条进度汇报？'))) return;
   await api.collabLogDelete(id.value, l.id);
   toast('已删除', 'success');
-  load();
+  load(true);
 }
 
 // ---------- 评论 ----------
@@ -271,16 +319,20 @@ async function sendComment(l) {
   await api.collabComment(id.value, 'log', l.id, { content });
   commentDrafts[l.id] = '';
   toast('评论成功', 'success');
-  load();
+  load(true);
 }
 async function removeComment(l, c) {
   if (!(await confirm('删除这条评论？'))) return;
   await api.collabCommentDelete(id.value, c.id);
   toast('已删除', 'success');
-  load();
+  load(true);
 }
 
-onLoad((o) => { id.value = Number(o.id); });
+onLoad((o) => {
+  id.value = Number(o.id);
+  restoreCache();
+  load();
+});
 onShow(() => { if (id.value) load(); });
 </script>
 
