@@ -79,8 +79,9 @@ try {
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
+  let firstScheduleId = 0;
   for (let i = 1; i <= 25; i++) {
-    await api(`/team/${TID}/checkin/schedules`, {
+    const created = await api(`/team/${TID}/checkin/schedules`, {
       method: 'POST', token: own.token,
       body: {
         title: `打卡任务 ${String(i).padStart(2, '0')}`,
@@ -88,7 +89,19 @@ try {
         start_date: today, allow_late: 1,
       },
     });
+    if (i === 1) firstScheduleId = created.id;
   }
+  await api(`/team/${TID}/checkin/submit`, {
+    method: 'POST', token: own.token,
+    body: {
+      schedule_id: firstScheduleId, period_key: today,
+      content: '成员进度汇报窗口化验收',
+    },
+  });
+  await api(`/team/${TID}/log`, {
+    method: 'POST', token: own.token,
+    body: { content: '<b>自由进度汇报窗口化验收</b>' },
+  });
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -116,6 +129,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.ci-card').length > 8, null, { timeout: 10000 });
   const afterScroll = await page.locator('.ci-card').count();
   ok('滚动到尾部后自动追加下一窗口', afterScroll > 8, afterScroll);
+  await page.waitForSelector('.tp-logs .week-group', { timeout: 10000 });
+  const logText = await page.locator('.tp-logs').textContent();
+  ok('成员进度汇报仍正常显示', logText.includes('成员进度汇报窗口化验收'), logText.slice(0, 300));
+  ok('自由进度汇报默认直接显示', logText.includes('自由进度汇报窗口化验收'), logText.slice(0, 300));
 
   await page.waitForFunction(() => {
     const raw = Object.keys(localStorage)

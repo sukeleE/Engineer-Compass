@@ -795,7 +795,7 @@ const logGroups = computed(() => {
   const groups = [];
   const free = logs.value.filter((l) => !l.schedule_id);
   if (free.length) {
-    groups.push({ key: 'free', free: true, collapsible: true, label: '自由汇报', logs: free,
+    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
       count: free.length, late: 0, featured: free.filter((l) => l.featured).length, avatars: bucketAvatars(free) });
   }
   const map = new Map();
@@ -1563,8 +1563,8 @@ reload().catch((e) => ElMessage.error(e.message));
       </div>
       <template v-if="logs.length">
         <div v-for="g in logGroups" :key="g.key" class="week-group" :class="{ open: weekOpen(g) }">
-          <div class="week-head" @click="toggleWeek(g.key)">
-            <span class="week-arrow">▾</span>
+          <div class="week-head" :class="{ static: !g.collapsible }" @click="g.collapsible && toggleWeek(g.key)">
+            <span v-if="g.collapsible" class="week-arrow">▾</span>
             <span class="week-title">{{ g.free ? '✍️ 自由汇报' : '📅 ' + g.label }}</span>
             <span class="week-meta">
               <span class="week-count">{{ g.count }} 份汇报</span>
@@ -1705,6 +1705,7 @@ reload().catch((e) => ElMessage.error(e.message));
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 14px; cursor: pointer; user-select: none;
   background: color-mix(in srgb, var(--primary) 6%, white);
+  &.static { cursor: default; }
   .week-arrow { display: inline-flex; font-size: 12px; color: var(--text-2); transition: transform .2s ease; }
   .week-title { font-size: 13.5px; font-weight: 700; }
   .week-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
