@@ -6,12 +6,32 @@
     <block v-else>
       <view v-if="loading" class="empty"><view class="empty-text">加载中…</view></view>
       <block v-else>
+        <Tabs v-model="viewTab" :tabs="tabs" />
         <view class="top-ops">
-          <button class="btn btn-primary half" @click="goManual">＋ 自编计划</button>
-          <button class="btn btn-ghost half" @click="openCalendar">📅 月历视图</button>
+          <button class="btn btn-primary third" @click="openAiPlanMenu">✨ AI 编写计划</button>
+          <button class="btn btn-ghost third" @click="goManual">＋ 自编计划</button>
+          <button class="btn btn-ghost third" @click="openCalendar">📅 月历</button>
         </view>
-        <EmptyState v-if="!list.length" icon="🗓️" text="还没有备赛计划，去竞赛页选择比赛加入日程" btn-text="去看竞赛" @action="goTimeline" />
 
+        <block v-if="viewTab === 'team'">
+          <EmptyState v-if="!teamTasks.length" icon="🏗️" text="还没有加入项目小组" />
+          <view v-for="team in teamTasks" :key="team.team_id" class="card group-card" @click="openTeamTasks(team)">
+            <view class="group-head">
+              <text class="group-name ellipsis">{{ team.team_name }}</text>
+              <text class="tag tag-blue">{{ (team.plans || []).length }} 个计划</text>
+            </view>
+            <view v-for="plan in team.plans || []" :key="plan.id" class="group-plan">
+              <view class="group-plan-main">
+                <text class="group-plan-name ellipsis">{{ plan.title }}</text>
+                <text class="group-plan-meta">{{ teamPlanStats(plan).done }}/{{ teamPlanStats(plan).total }} 任务 · {{ teamPlanStats(plan).percent }}%</text>
+              </view>
+              <view class="mini-progress"><view :style="{ width: teamPlanStats(plan).percent + '%' }"></view></view>
+            </view>
+          </view>
+        </block>
+
+        <block v-else-if="viewTab === 'comp'">
+        <EmptyState v-if="!list.length" icon="🗓️" text="还没有备赛计划，去竞赛页选择比赛加入日程" btn-text="去看竞赛" @action="goTimeline" />
         <view v-for="s in list" :key="s.id" class="card schedule-card">
           <view class="sched-head" @click="toggle(s.id)">
             <view class="sched-title-wrap">
@@ -44,11 +64,28 @@
             </view>
 
             <view class="card-actions">
+              <button class="btn btn-ghost mini" @click.stop="openAiModify(s)">💬 AI 修改</button>
               <button class="btn btn-ghost mini" :disabled="optimizingId === s.id" @click.stop="optimize(s)">{{ optimizingId === s.id ? 'AI 优化中…' : 'AI 优化' }}</button>
               <button class="btn btn-danger mini" @click.stop="remove(s)">删除计划</button>
             </view>
           </view>
         </view>
+        </block>
+
+        <block v-else>
+          <view class="study-head">
+            <button class="btn btn-primary study-create" @click="createStudyPlan">＋ AI 编写学习计划</button>
+          </view>
+          <EmptyState v-if="!studies.length" icon="📚" text="还没有学习计划" btn-text="立即创建" @action="createStudyPlan" />
+          <view v-for="study in studies" :key="study.id" class="card study-card" @click="openStudy(study)">
+            <view class="study-head-row">
+              <text class="study-name ellipsis">{{ study.topic || '学习计划' }}</text>
+              <text class="tag tag-green">{{ progressOf(study).percent }}%</text>
+            </view>
+            <text class="study-meta">{{ progressOf(study).done }}/{{ progressOf(study).total }} 任务</text>
+            <view class="progress-track"><view class="progress-fill study-fill" :style="{ width: progressOf(study).percent + '%' }"></view></view>
+          </view>
+        </block>
       </block>
     </block>
 
@@ -87,14 +124,23 @@ import { api } from '../../utils/api.js';
 import { isLoggedIn, auth } from '../../utils/auth.js';
 import { planProgress } from '../../utils/format.js';
 import EmptyState from '../../components/EmptyState.vue';
+import Tabs from '../../components/Tabs.vue';
 
 const list = ref([]);
+const studies = ref([]);
+const teamTasks = ref([]);
+const viewTab = ref('comp');
 const loading = ref(true);
 const expanded = reactive({});
 const saveTimers = {};
 const rollbackSnap = {};
 
 const loggedIn = computed(() => isLoggedIn() && !!auth.user);
+const tabs = computed(() => [
+  { key: 'team', label: '小组任务', badge: teamTaskCount() || '' },
+  { key: 'comp', label: '竞赛日程', badge: list.value.length || '' },
+  { key: 'study', label: '学习日程', badge: studies.value.length || '' },
+]);
 
 function progressOf(s) {
   return planProgress(s.plan);
@@ -108,11 +154,40 @@ async function load() {
   if (!isLoggedIn()) { loading.value = false; return; }
   loading.value = true;
   try {
-    const rows = await api.scheduleList();
-    list.value = rows.map((r) => ({ ...r, plan: r.plan || { phases: [] } }));
+    const [rowsR, studiesR, teamR] = await Promise.allSettled([
+      api.scheduleList(),
+      api.studyList(),
+      api.teamMyTasks(),
+    ]);
+    if (rowsR.status === 'fulfilled') {
+      list.value = rowsR.value.map((r) => ({ ...r, plan: r.plan || { phases: [] } }));
+    }
+    if (studiesR.status === 'fulfilled') studies.value = studiesR.value || [];
+    if (teamR.status === 'fulfilled') teamTasks.value = teamR.value || [];
   } finally {
     loading.value = false;
   }
+}
+
+function taskStats(tasks) {
+  const all = tasks || [];
+  const done = all.filter((t) => t.done).length;
+  return { done, total: all.length, percent: all.length ? Math.round(done / all.length * 100) : 0 };
+}
+function teamPlanStats(plan) {
+  return taskStats((plan.phases || []).flatMap((p) => p.tasks || []));
+}
+function teamTaskCount() {
+  return teamTasks.value.reduce((n, team) => n + (team.plans || []).length, 0);
+}
+function openTeamTasks(team) {
+  uni.navigateTo({ url: `/packageTeam/pages/tasks/main?id=${team.team_id}&tab=plans` });
+}
+function openStudy(study) {
+  uni.navigateTo({ url: `/packagePlan/pages/study/detail?id=${study.id}` });
+}
+function createStudyPlan() {
+  uni.navigateTo({ url: '/packagePlan/pages/study/create' });
 }
 
 function toggleTask(s, pi, ti) {
@@ -148,8 +223,47 @@ function remove(s) {
   });
 }
 
-// ============ 自编计划 / AI 优化 ============
+// ============ AI 编写 / 修改 / 自编计划 ============
 const optimizingId = ref(null);
+async function pickCompetition(onPick) {
+  const comps = await api.competitions();
+  if (!comps?.length) return uni.showToast({ title: '暂无可生成计划的竞赛', icon: 'none' });
+  uni.showActionSheet({
+    itemList: comps.map((c) => c.name).slice(0, 30),
+    success: (res) => onPick(comps[res.tapIndex]),
+  });
+}
+function openAiPlanMenu() {
+  uni.showActionSheet({
+    itemList: ['💬 对话编写', '⚡ 一键编写'],
+    success: (res) => {
+      pickCompetition((comp) => {
+        if (res.tapIndex === 0) {
+          uni.navigateTo({
+            url: `/packagePlan/pages/planchat/main?mode=schedule&comp_id=${comp.id}`
+              + `&comp_name=${encodeURIComponent(comp.name)}`,
+          });
+          return;
+        }
+        createAiPlan(comp);
+      });
+    },
+  });
+}
+async function createAiPlan(comp) {
+  uni.showLoading({ title: 'AI 编写中…', mask: true });
+  try {
+    await api.scheduleAdd(comp.id);
+    uni.hideLoading();
+    uni.showToast({ title: '计划已生成', icon: 'success' });
+    load();
+  } catch (e) {
+    uni.hideLoading();
+  }
+}
+function openAiModify(s) {
+  uni.navigateTo({ url: `/packagePlan/pages/planchat/main?mode=schedule-edit&schedule_id=${s.id}` });
+}
 function goManual() {
   uni.navigateTo({ url: '/packagePlan/pages/schedule/edit' });
 }
@@ -269,10 +383,27 @@ onPullDownRefresh(async () => {
 .task-text { font-size: 26rpx; color: #334155; line-height: 1.5; flex: 1; }
 .task-text.done { color: #94a3b8; text-decoration: line-through; }
 .check-std { font-size: 23rpx; color: #15803d; background: #f0fdf4; border-radius: 10rpx; padding: 10rpx 16rpx; margin-top: 8rpx; }
-.card-actions { display: flex; justify-content: flex-end; margin-top: 18rpx; }
+.card-actions { display: flex; justify-content: flex-end; gap: 10rpx; flex-wrap: wrap; margin-top: 18rpx; }
 .btn.mini { width: 180rpx; height: 64rpx; font-size: 25rpx; }
 .top-ops { display: flex; gap: 16rpx; margin-bottom: 18rpx; }
 .half { flex: 1; height: 80rpx; font-size: 27rpx; }
+.third { flex: 1; height: 76rpx; font-size: 24rpx; padding: 0 10rpx; }
+.group-card { padding: 24rpx 28rpx; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; margin-bottom: 14rpx; }
+.group-name { flex: 1; min-width: 0; font-size: 29rpx; font-weight: 700; color: #1e293b; }
+.group-plan { padding: 14rpx 0; border-top: 1rpx solid #f1f5f9; }
+.group-plan-main { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
+.group-plan-name { flex: 1; min-width: 0; font-size: 25rpx; color: #334155; }
+.group-plan-meta { flex-shrink: 0; font-size: 21rpx; color: #94a3b8; }
+.mini-progress { height: 8rpx; margin-top: 10rpx; border-radius: 4rpx; background: #f1f5f9; overflow: hidden; }
+.mini-progress view { height: 100%; border-radius: 4rpx; background: #2563eb; }
+.study-head { margin-bottom: 16rpx; }
+.study-create { height: 76rpx; font-size: 25rpx; }
+.study-card { padding: 24rpx 28rpx; }
+.study-head-row { display: flex; align-items: center; gap: 14rpx; }
+.study-name { flex: 1; min-width: 0; font-size: 28rpx; font-weight: 700; color: #1e293b; }
+.study-meta { display: block; margin-top: 8rpx; font-size: 22rpx; color: #94a3b8; }
+.study-fill { background: linear-gradient(90deg, #16a34a, #4ade80); }
 .modal-mask { position: fixed; inset: 0; background: rgba(15,23,42,0.45); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 48rpx; }
 .modal { width: 100%; background: #fff; border-radius: 24rpx; padding: 32rpx; }
 .modal-lg { max-height: 82vh; display: flex; flex-direction: column; }
