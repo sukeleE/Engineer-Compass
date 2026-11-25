@@ -132,7 +132,7 @@ export const api = {
   collabBookingUpdate: (id, bid, card) => request('/team/' + id + '/booking/' + bid, { method: 'PUT', data: card }),
 
   // ============ 打卡 checkin ============
-  checkinSchedules: (id) => request('/team/' + id + '/checkin/schedules'),
+  checkinSchedules: (id, p) => request('/team/' + id + '/checkin/schedules' + qs(p)),
   checkinScheduleCreate: (id, card) => request('/team/' + id + '/checkin/schedules', { method: 'POST', data: card }),
   checkinScheduleUpdate: (id, sid, card) => request('/team/' + id + '/checkin/schedules/' + sid, { method: 'PUT', data: card }),
   checkinScheduleDelete: (id, sid) => request('/team/' + id + '/checkin/schedules/' + sid, { method: 'DELETE' }),

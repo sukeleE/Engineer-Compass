@@ -129,6 +129,12 @@ try {
   ok('组员可见任务列表 can_manage=false', sc.schedules.length >= 5 && sc.can_manage === false, { n: sc.schedules.length, cm: sc.can_manage });
   const scO = await api(`/team/${TID}/checkin/schedules`, { token: tO });
   ok('组长 can_manage=true', scO.can_manage === true);
+  const scP1 = await api(`/team/${TID}/checkin/schedules?limit=2&offset=0`, { token: tA });
+  const scP2 = await api(`/team/${TID}/checkin/schedules?limit=2&offset=2`, { token: tA });
+  ok('打卡任务分页：首屏 2 条 + total/has_more', scP1.schedules.length === 2 && scP1.total >= 5
+    && scP1.has_more === true && scP1.offset === 0, { n: scP1.schedules.length, total: scP1.total });
+  ok('打卡任务分页：第二页不重复且可继续', scP2.schedules.length === 2 && scP2.offset === 2
+    && scP2.schedules.every((s) => !scP1.schedules.some((p) => p.id === s.id)), scP2.schedules.map((s) => s.id));
   g = await exp(`/team/${TID}/checkin/schedules/999999`, 403, { method: 'PUT', token: tC, body: { title: 'x' } });
   ok('非成员改任务 403', g.ok);
 

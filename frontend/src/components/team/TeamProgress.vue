@@ -1,7 +1,7 @@
 <script setup>
 // 进度对齐：任务列表（组长建任务/分配负责人/进度跟踪）+ 成员进度汇报时间线（富文本 + 附件 + 评论）
 // 编写汇报独立成弹窗，与时间线浏览区区分
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../../api.js';
@@ -14,6 +14,7 @@ import ResourcePicker from '../ResourcePicker.vue';
 import DocPicker from './DocPicker.vue';
 import LiteEditor from './LiteEditor.vue';
 import { displayName, teamDisplayName } from '../../utils/displayName.js';
+import { readCache, writeCache } from '../../utils/swrCache.js';
 
 const router = useRouter();
 // 点击作者头像/昵称 → 进入其公开主页（只读）；自己 → 我的管理界面
@@ -32,16 +33,17 @@ const MAX_ATT_TOTAL = 25 * 1024 * 1024;
 
 const STATUS = { todo: { label: '待开始', tag: 'info' }, doing: { label: '进行中', tag: 'warning' }, done: { label: '已完成', tag: 'success' } };
 
-async function reload() {
-  // 三个数据域独立加载、互不连坐：tasks/logs 失败也不阻断打卡区，失败仍向上抛错供调用方提示
+async function reload({ includeTeam = false } = {}) {
+  // 三个数据域同时起步，打卡首屏不必等待任务/汇报时间线。
+  const checkinP = loadCheckin();
   const [detailR, logsR] = await Promise.allSettled([
-    api.teamDetail(props.teamId),
+    includeTeam ? api.teamDetail(props.teamId) : Promise.resolve(null),
     api.teamLogs(props.teamId),
   ]);
-  if (detailR.status === 'fulfilled') tasks.value = detailR.value.tasks;
+  if (includeTeam && detailR.status === 'fulfilled') tasks.value = detailR.value.tasks;
   if (logsR.status === 'fulfilled') logs.value = logsR.value;
-  await loadCheckin();
-  if (detailR.status === 'rejected') throw detailR.reason;
+  await checkinP;
+  if (includeTeam && detailR.status === 'rejected') throw detailR.reason;
   if (logsR.status === 'rejected') throw logsR.reason;
 }
 
@@ -49,29 +51,111 @@ async function reload() {
 const schedules = ref([]);
 const myDues = ref([]);
 const featured = ref([]);
+const scheduleTotal = ref(0);
+const schedulesComplete = ref(false);
+const scheduleLoadingMore = ref(false);
+const checkinRefreshing = ref(false);
+const visibleScheduleCount = ref(8);
+const visibleDueCount = ref(6);
+const checkinCacheKey = `team:${props.teamId}:user:${auth.user?.id || 'anon'}:checkin`;
+const visibleSchedules = computed(() => schedules.value.slice(0, visibleScheduleCount.value));
+const visibleDues = computed(() => myDues.value.slice(0, visibleDueCount.value));
+const hiddenDueCount = computed(() => Math.max(0, myDues.value.length - visibleDues.value.length));
+const hasMoreSchedules = computed(() =>
+  visibleScheduleCount.value < schedules.value.length || !schedulesComplete.value);
 // 打卡加载状态 loading/ok/error：加载失败不再伪装成「还没有打卡任务」，支持自动重试一次 + 手动重试
 const checkinStatus = ref('loading');
+let checkinSeq = 0;
+let cacheTimer = null;
+let scheduleLoadingSeq = 0;
+
+function persistCheckinCache() {
+  writeCache(checkinCacheKey, {
+    schedules: schedules.value,
+    myDues: myDues.value,
+    total: scheduleTotal.value,
+  });
+}
+function scheduleCacheWrite() {
+  clearTimeout(cacheTimer);
+  cacheTimer = setTimeout(persistCheckinCache, 180);
+}
+function restoreCheckinCache() {
+  const row = readCache(checkinCacheKey, 7 * 24 * 60 * 60 * 1000);
+  const value = row?.value;
+  if (!value) return false;
+  if (Array.isArray(value.schedules)) schedules.value = value.schedules;
+  if (Array.isArray(value.myDues)) myDues.value = value.myDues;
+  scheduleTotal.value = Number(value.total || schedules.value.length);
+  visibleScheduleCount.value = Math.max(8, Math.min(schedules.value.length, 12));
+  if (schedules.value.length || myDues.value.length) checkinStatus.value = 'ok';
+  return schedules.value.length > 0 || myDues.value.length > 0;
+}
+
+async function loadRemainingSchedules(seq, startOffset) {
+  if (scheduleLoadingMore.value && scheduleLoadingSeq === seq) return;
+  scheduleLoadingSeq = seq;
+  scheduleLoadingMore.value = true;
+  try {
+    let offset = Math.max(0, Number(startOffset) || 0);
+    while (seq === checkinSeq && offset < scheduleTotal.value) {
+      const r = await api.teamCheckinSchedules(props.teamId, { limit: 60, offset });
+      if (seq !== checkinSeq) return;
+      const rows = r.schedules || [];
+      if (!rows.length) break;
+      const seen = new Set(schedules.value.map((s) => Number(s.id)));
+      schedules.value = schedules.value.concat(rows.filter((s) => !seen.has(Number(s.id))));
+      scheduleTotal.value = Number(r.total ?? scheduleTotal.value);
+      offset = Number(r.offset ?? offset) + rows.length;
+      if (!r.has_more) break;
+      // 让出一帧，避免多页数据连续反序列化/渲染阻塞滚动。
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (seq === checkinSeq) schedulesComplete.value = offset >= scheduleTotal.value;
+  } catch {
+    // 首屏保留已显示任务；滚动到末尾时会再次触发补页。
+  } finally {
+    if (scheduleLoadingSeq === seq) scheduleLoadingMore.value = false;
+  }
+}
+
 async function loadCheckin({ autoRetry = true } = {}) {
-  checkinStatus.value = 'loading';
-  const [scR, mineR, ftR] = await Promise.allSettled([
-    api.teamCheckinSchedules(props.teamId),
-    api.teamCheckinMine(props.teamId),
-    api.teamCheckinFeatured(props.teamId, ''),
-  ]);
-  // 三路独立兜底：单个接口失败不连坐，成功的部分照常渲染（allSettled 不抛错，不阻断 reload）
-  if (scR.status === 'fulfilled') schedules.value = scR.value.schedules || [];
-  if (mineR.status === 'fulfilled') myDues.value = mineR.value.dues || [];
-  if (ftR.status === 'fulfilled') featured.value = ftR.value.reports || [];
-  // 核心打卡任务接口失败且本地无缓存时，延迟自动重试一次，弱网抖动可自愈
+  const seq = ++checkinSeq;
+  checkinRefreshing.value = true;
+  if (!schedules.value.length) checkinStatus.value = 'loading';
+  const firstLimit = Math.max(8, Math.min(20, schedules.value.length || 8));
+  const scP = api.teamCheckinSchedules(props.teamId, { limit: firstLimit, offset: 0 }).then((r) => {
+    if (seq !== checkinSeq) return r;
+    schedules.value = r.schedules || [];
+    scheduleTotal.value = Number(r.total ?? schedules.value.length);
+    schedulesComplete.value = !r.has_more;
+    checkinStatus.value = 'ok';
+    if (r.has_more) void loadRemainingSchedules(seq, Number(r.offset || 0) + schedules.value.length);
+    return r;
+  });
+  const mineP = api.teamCheckinMine(props.teamId).then((r) => {
+    if (seq === checkinSeq) myDues.value = r.dues || [];
+    return r;
+  });
+  const ftP = api.teamCheckinFeatured(props.teamId, '').then((r) => {
+    if (seq === checkinSeq) featured.value = r.reports || [];
+    return r;
+  });
+  const [scR] = await Promise.allSettled([scP, mineP, ftP]);
+  if (seq !== checkinSeq) return;
+  // 核心接口失败且本地无缓存时，延迟自动重试一次；有旧缓存则继续显示旧数据。
   if (scR.status === 'rejected' && !schedules.value.length) {
     if (autoRetry) {
+      checkinRefreshing.value = false;
       await new Promise((r) => setTimeout(r, 1500));
       return loadCheckin({ autoRetry: false });
     }
     checkinStatus.value = 'error';
+    checkinRefreshing.value = false;
     return;
   }
   checkinStatus.value = 'ok';
+  checkinRefreshing.value = false;
 }
 // 错误态手动重试
 async function retryCheckin() {
@@ -785,6 +869,48 @@ const featuredPastCount = computed(() => featuredGroups.value.pastPeriods.reduce
 const pastFtOpen = ref(false);
 watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; });
 
+// 打卡卡片分块进入 DOM；滚动接近尾部时自动追加，数据未到齐时同时请求下一页。
+const scheduleMore = ref(null);
+let scheduleObserver = null;
+let revealTimer = null;
+function ensureSchedulePage() {
+  if (!schedulesComplete.value && !scheduleLoadingMore.value) {
+    void loadRemainingSchedules(checkinSeq, schedules.value.length);
+  }
+}
+function revealMoreSchedules() {
+  ensureSchedulePage();
+  if (visibleScheduleCount.value < schedules.value.length) {
+    visibleScheduleCount.value = Math.min(schedules.value.length, visibleScheduleCount.value + 12);
+  }
+  clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => {
+    const el = scheduleMore.value;
+    if (!el || !hasMoreSchedules.value) return;
+    if (el.getBoundingClientRect().top < window.innerHeight + 240) revealMoreSchedules();
+  }, 80);
+}
+function observeScheduleMore() {
+  if (!scheduleObserver || !scheduleMore.value) return;
+  scheduleObserver.disconnect();
+  scheduleObserver.observe(scheduleMore.value);
+}
+watch(scheduleMore, observeScheduleMore, { flush: 'post' });
+watch(visibleSchedules, () => nextTick(observeScheduleMore), { flush: 'post' });
+onMounted(() => {
+  if (!('IntersectionObserver' in window)) return;
+  scheduleObserver = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) revealMoreSchedules();
+  }, { rootMargin: '240px 0px' });
+  observeScheduleMore();
+});
+onBeforeUnmount(() => {
+  scheduleObserver?.disconnect();
+  clearTimeout(revealTimer);
+  clearTimeout(cacheTimer);
+  if (cacheTimer) persistCheckinCache();
+});
+
 function canEditTask(t) {
   return t.assignee_id === props.me.user_id || props.perms.task;
 }
@@ -796,7 +922,7 @@ async function createTask() {
     ElMessage.success('任务已创建');
     newTask.value = { title: '', desc: '', deadline: '', assignee_id: null };
     showNew.value = false;
-    await reload();
+    await reload({ includeTeam: true });
   } catch (e) { ElMessage.error(e.message); }
 }
 
@@ -932,6 +1058,8 @@ const overall = computed(() => {
   return Math.round(all.reduce((s, t) => s + (t.progress || 0), 0) / all.length);
 });
 
+watch([schedules, myDues, scheduleTotal], scheduleCacheWrite, { deep: true });
+restoreCheckinCache();
 reload().catch((e) => ElMessage.error(e.message));
 </script>
 
@@ -948,7 +1076,7 @@ reload().catch((e) => ElMessage.error(e.message));
 
     <!-- 今日打卡待办：应交未交/可补交醒目提示，已交显示自评与评分入口 -->
     <div v-if="myDues.length" class="ci-due">
-      <div v-for="d in myDues" :key="d.schedule.id + '-' + d.period_key + (d.overdue ? '-ov' : '')" class="due-card" :class="d.status">
+      <div v-for="d in visibleDues" :key="d.schedule.id + '-' + d.period_key + (d.overdue ? '-ov' : '')" class="due-card" :class="d.status">
         <div class="due-main">
           <span class="due-icon">{{ d.status === 'submitted' ? '✅' : (d.status === 'missed' ? '⛔' : (d.status === 'late_window' ? '⏰' : '📌')) }}</span>
           <div class="due-text">
@@ -969,6 +1097,8 @@ reload().catch((e) => ElMessage.error(e.message));
             @click="openReport({ due: d })">{{ d.status === 'submitted' ? '查看/修改' : (d.status === 'late_window' ? '去补交' : '写汇报') }}</el-button>
         </div>
       </div>
+      <el-button v-if="hiddenDueCount" link type="primary" class="ci-more-link"
+        @click="visibleDueCount += 6">还有 {{ hiddenDueCount }} 项待办，继续显示</el-button>
     </div>
 
     <!-- 统一汇报弹窗：系统自动分流到当前打卡或自由汇报，飞书只作为内容来源/高级工具 -->
@@ -1321,7 +1451,10 @@ reload().catch((e) => ElMessage.error(e.message));
     <!-- ============ 周期打卡 / 定时汇报 ============ -->
     <div class="ci-sec">
       <div class="tp-tools">
-        <h4>🗓️ 打卡任务（{{ schedules.length }}）</h4>
+        <h4>
+          🗓️ 打卡任务（{{ visibleSchedules.length }}<template v-if="scheduleTotal > visibleSchedules.length"> / {{ scheduleTotal }}</template>）
+          <span v-if="checkinRefreshing || scheduleLoadingMore" class="ci-sync">后台同步中</span>
+        </h4>
         <el-button v-if="perms.task" size="small" type="primary" plain @click="openSchedCreate">＋ 新建打卡任务</el-button>
       </div>
       <div v-if="checkinStatus === 'loading' && !schedules.length" class="tp-empty">打卡任务加载中…</div>
@@ -1330,7 +1463,7 @@ reload().catch((e) => ElMessage.error(e.message));
         <el-button link type="primary" size="small" @click="retryCheckin">🔄 点击重试</el-button>
       </div>
       <div v-else-if="!schedules.length" class="tp-empty">还没有打卡任务 — 有「任务管理」权限的成员可建每日/每周打卡或定时汇报</div>
-      <div v-for="s in schedules" :key="s.id" class="ci-card">
+      <div v-for="s in visibleSchedules" :key="s.id" class="ci-card">
         <div class="ci-head">
           <b>{{ s.title }}</b>
           <el-tag size="small" :type="s.kind === 'once' ? 'danger' : 'primary'" effect="plain">
@@ -1346,6 +1479,11 @@ reload().catch((e) => ElMessage.error(e.message));
           <el-button v-if="perms.task" size="small" text type="primary" @click="openSchedEdit(s)">设置</el-button>
           <el-button v-if="perms.task" size="small" text type="danger" @click="removeSched(s)">删除</el-button>
         </div>
+      </div>
+      <div v-if="hasMoreSchedules" ref="scheduleMore" class="ci-more" @click="revealMoreSchedules">
+        <span v-if="scheduleLoadingMore">正在加载更多打卡任务…</span>
+        <span v-else-if="visibleScheduleCount < schedules.length">已显示 {{ visibleSchedules.length }} / {{ schedules.length }}，继续显示</span>
+        <span v-else>继续加载剩余打卡任务</span>
       </div>
     </div>
 
@@ -1614,6 +1752,18 @@ reload().catch((e) => ElMessage.error(e.message));
 }
 .ci-sec { margin-top: 20px;
   .tp-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; h4 { margin: 0; } }
+}
+.ci-sync {
+  margin-left: 6px; color: var(--text-2); font-size: 11.5px; font-weight: 400;
+}
+.ci-more, .ci-more-link {
+  display: block; width: 100%; padding: 10px 0; text-align: center;
+  color: var(--text-2); font-size: 12.5px;
+}
+.ci-more {
+  border: 1px dashed var(--border); border-radius: 8px; cursor: pointer;
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+  &:hover { color: var(--primary); border-color: var(--primary); }
 }
 .tp-empty { color: #94a3b8; font-size: 13px; padding: 12px 0; }
 .tp-empty.checkin-retry {

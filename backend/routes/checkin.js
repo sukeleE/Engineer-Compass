@@ -81,10 +81,27 @@ function handle(res, e) { return res.status(e.status || 500).json({ error: e.mes
 r.get('/:id/checkin/schedules', (req, res) => {
   const ctx = teamCtx(Number(req.params.id), req.user.id);
   if (!ctx || !ctx.member) return res.status(403).json({ error: '不是小组成员' });
-  const rows = db.prepare(
-    'SELECT * FROM checkin_schedule WHERE team_id = ? ORDER BY active DESC, id DESC'
-  ).all(ctx.team.id);
-  res.json({ schedules: rows.map((s) => ({ ...s, weekdays: parseWeekdays(s.weekdays) })), can_manage: hasPerm(ctx, 'task') });
+  const total = db.prepare('SELECT COUNT(*) AS n FROM checkin_schedule WHERE team_id = ?').get(ctx.team.id).n;
+  const paged = req.query.limit !== undefined || req.query.offset !== undefined;
+  let rows;
+  let offset = 0;
+  let limit = total;
+  if (paged) {
+    offset = Math.max(0, Math.trunc(Number(req.query.offset || 0)) || 0);
+    limit = Math.min(200, Math.max(1, Math.trunc(Number(req.query.limit || 20)) || 20));
+    rows = db.prepare(
+      'SELECT * FROM checkin_schedule WHERE team_id = ? ORDER BY active DESC, id DESC LIMIT ? OFFSET ?'
+    ).all(ctx.team.id, limit, offset);
+  } else {
+    rows = db.prepare(
+      'SELECT * FROM checkin_schedule WHERE team_id = ? ORDER BY active DESC, id DESC'
+    ).all(ctx.team.id);
+  }
+  res.json({
+    schedules: rows.map((s) => ({ ...s, weekdays: parseWeekdays(s.weekdays) })),
+    can_manage: hasPerm(ctx, 'task'),
+    total, offset, limit: paged ? limit : total, has_more: offset + rows.length < total,
+  });
 });
 
 r.post('/:id/checkin/schedules', (req, res) => {
@@ -195,9 +212,19 @@ r.get('/:id/checkin/my', (req, res) => {
   const now = new Date();
   const list = db.prepare('SELECT * FROM checkin_schedule WHERE team_id = ? AND active = 1 ORDER BY id DESC')
     .all(ctx.team.id);
-  const logStmt = db.prepare(
-    'SELECT id, is_late, self_progress, self_rating, score, featured FROM progress_log WHERE schedule_id = ? AND user_id = ? AND period_key = ?'
-  );
+  // 一次取回该成员在本组打卡任务下的提交索引，避免按每条任务、每个历史周期反复查库。
+  const scheduleIds = list.map((s) => s.id);
+  const logRows = [];
+  for (let i = 0; i < scheduleIds.length; i += 400) {
+    const chunk = scheduleIds.slice(i, i + 400);
+    logRows.push(...db.prepare(
+      `SELECT schedule_id, period_key, id, is_late, self_progress, self_rating, score, featured
+       FROM progress_log
+       WHERE team_id = ? AND user_id = ? AND schedule_id IN (${chunk.map(() => '?').join(',')})`
+    ).all(ctx.team.id, req.user.id, ...chunk));
+  }
+  const logMap = new Map(logRows.map((l) => [`${l.schedule_id}:${l.period_key}`, l]));
+  const logOf = (sid, periodKey) => logMap.get(`${sid}:${periodKey}`) || null;
   const toItem = (s, due, log, overdue = false) => ({
     schedule: { ...s, weekdays: parseWeekdays(s.weekdays) },
     period_key: due.key, due_at: due.dueAt,
@@ -209,19 +236,19 @@ r.get('/:id/checkin/my', (req, res) => {
   const out = [];
   for (const s of list) {
     const due = currentDue(s, now);
-    if (due) out.push(toItem(s, due, logStmt.get(s.id, req.user.id, due.key)));
+    if (due) out.push(toItem(s, due, logOf(s.id, due.key)));
     // 新版周报（长期允许补交）：再找最近一期已截止但未提交的历史周期，作为补交入口
     if (due && isWeeklyV2(s) && s.allow_late) {
       for (let i = 1; i <= 52; i++) {
         const prev = weeklyShiftOccurrence(s, due, -i);
         if (s.start_date && prev.date < s.start_date) break;
         if (now.getTime() <= prev.dueMs) continue;
-        const prevLog = logStmt.get(s.id, req.user.id, prev.key);
+        const prevLog = logOf(s.id, prev.key);
         if (!prevLog) { out.push(toItem(s, prev, null, true)); break; }
       }
     }
   }
-  res.json({ dues: out });
+  res.json({ dues: out, total: out.length, generated_at: now.toISOString() });
 });
 
 // 看板数据：与 board 接口同口径（周期列、成员行、角色筛选），供看板/导出复用

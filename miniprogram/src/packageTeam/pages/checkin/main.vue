@@ -5,7 +5,7 @@
     <!-- ============ 待办 ============ -->
     <view v-if="tab === 'due'">
       <EmptyState v-if="!dues.length" icon="✅" text="当前没有待办打卡任务" />
-      <view v-for="d in dues" :key="d.schedule.id + '-' + d.period_key" class="card due-card">
+      <view v-for="d in visibleDues" :key="d.schedule.id + '-' + d.period_key" class="card due-card">
         <view class="due-head">
           <text class="due-title ellipsis">{{ d.schedule.title }}</text>
           <text class="tag" :class="statusCls(d.status)">{{ statusText(d) }}</text>
@@ -24,13 +24,17 @@
           </button>
         </view>
       </view>
+      <view v-if="hiddenDueCount" class="more-tip" @click="showMoreDue">还有 {{ hiddenDueCount }} 项待办，点击或继续下滑显示</view>
     </view>
 
     <!-- ============ 任务 ============ -->
     <view v-else-if="tab === 'sched'">
       <button v-if="canTask" class="btn btn-primary btn-block" @click="openSchedCreate">＋ 新建打卡任务</button>
       <EmptyState v-if="!schedules.length" icon="🗂" text="还没有打卡任务，负责人可创建" />
-      <view v-for="s in schedules" :key="s.id" class="card sched-card" :class="{ off: !s.active }">
+      <view v-if="schedules.length" class="list-window-tip">
+        已显示 {{ visibleSchedules.length }} / {{ schedules.length }}<text v-if="scheduleTotal > schedules.length">，后台加载中</text>
+      </view>
+      <view v-for="s in visibleSchedules" :key="s.id" class="card sched-card" :class="{ off: !s.active }">
         <view class="sched-head">
           <text class="sched-title">{{ s.title }}</text>
           <text class="tag" :class="s.active ? 'tag-green' : 'tag-gray'">{{ s.active ? '进行中' : '已停用' }}</text>
@@ -48,6 +52,7 @@
           <view class="mini-btn danger" @click="removeSched(s)">删除</view>
         </view>
       </view>
+      <view v-if="hasMoreSchedules" class="more-tip" @click="showMoreSchedules">继续下滑显示更多打卡任务</view>
     </view>
 
     <!-- ============ 看板 ============ -->
@@ -71,7 +76,7 @@
               <view class="cell-name">成员</view>
               <view v-for="p in board.periods" :key="p.key" class="cell-period">{{ p.label }}</view>
             </view>
-            <view v-for="m in board.members" :key="m.id" class="board-row">
+            <view v-for="m in visibleBoardMembers" :key="m.id" class="board-row">
               <view class="cell-name">
                 <text class="ellipsis">{{ boardName(m) }}</text>
               </view>
@@ -88,6 +93,9 @@
             </view>
           </view>
         </scroll-view>
+        <view v-if="board && board.members.length > visibleBoardMembers.length" class="more-tip" @click="showMoreBoard">
+          还有 {{ board.members.length - visibleBoardMembers.length }} 名成员，点击或继续下滑显示
+        </view>
         <view class="legend">
           <text class="lg st-on">按时</text>
           <text class="lg st-late">迟交</text>
@@ -112,7 +120,7 @@
 
       <view class="section-title">打卡排行榜</view>
       <EmptyState v-if="!leaderboard.length" icon="🏆" text="暂无打卡记录" />
-      <view v-for="(m, i) in leaderboard" :key="m.id" class="card rank-row">
+      <view v-for="(m, i) in visibleLeaderboard" :key="m.id" class="card rank-row">
         <text class="rank-no" :class="{ top: i < 3 }">{{ i + 1 }}</text>
         <view class="rank-main">
           <text class="rank-name ellipsis">{{ boardName(m) }}</text>
@@ -124,6 +132,9 @@
             <text v-if="m.streak">连续 {{ m.streak }} 天</text>
           </view>
         </view>
+      </view>
+      <view v-if="leaderboard.length > visibleLeaderboard.length" class="more-tip" @click="showMoreRank">
+        还有 {{ leaderboard.length - visibleLeaderboard.length }} 名成员，点击或继续下滑显示
       </view>
 
       <view class="section-title">
@@ -342,8 +353,9 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue';
-import { onLoad, onShow } from '@dcloudio/uni-app';
+import { onLoad, onShow, onReachBottom } from '@dcloudio/uni-app';
 import { api } from '../../../utils/api.js';
+import auth from '../../../utils/auth.js';
 import { confirm, toast } from '../../../utils/guard.js';
 import { chooseImageAsBase64, isImage } from '../../../utils/fileBase64.js';
 import Tabs from '../../../components/Tabs.vue';
@@ -351,6 +363,7 @@ import EmptyState from '../../../components/EmptyState.vue';
 import AttachmentList from '../../../components/AttachmentList.vue';
 import { previewAttachment } from '../../../utils/preview.js';
 import { displayName, teamDisplayName } from '../../../utils/displayName.js';
+import { readCache, writeCache } from '../../../utils/swrCache.js';
 
 const WD = ['一', '二', '三', '四', '五', '六', '日'];
 const tabs = [
@@ -367,8 +380,34 @@ const dues = ref([]);
 const schedules = ref([]);
 const leaderboard = ref([]);
 const featuredList = ref([]);
+const scheduleTotal = ref(0);
+const schedulesComplete = ref(false);
+const scheduleLoadingMore = ref(false);
+const dueVisible = ref(8);
+const schedVisible = ref(8);
+const boardVisible = ref(20);
+const rankVisible = ref(10);
+const visibleDues = computed(() => dues.value.slice(0, dueVisible.value));
+const visibleSchedules = computed(() => schedules.value.slice(0, schedVisible.value));
+const visibleBoardMembers = computed(() => (board.value?.members || []).slice(0, boardVisible.value));
+const visibleLeaderboard = computed(() => leaderboard.value.slice(0, rankVisible.value));
+const hiddenDueCount = computed(() => Math.max(0, dues.value.length - visibleDues.value.length));
+const hasMoreSchedules = computed(() =>
+  schedVisible.value < schedules.value.length || !schedulesComplete.value);
 
 const canTask = computed(() => !!(detail.value && (detail.value.me.is_owner || detail.value.perms.task)));
+
+const CACHE_PREFIX = 'checkin:';
+let scheduleSeq = 0;
+let scheduleLoadingSeq = 0;
+let lastLoadedAt = 0;
+let loadingAll = null;
+function cacheKey(kind) {
+  return `${CACHE_PREFIX}${auth.user?.id || 'anon'}:${id.value}:${kind}`;
+}
+function compactDetail(d) {
+  return d ? { me: d.me, perms: d.perms, members: d.members || [] } : null;
+}
 
 function todayStr() {
   const d = new Date();
@@ -413,26 +452,105 @@ function logAuthorName(l) { return teamDisplayName(l, teamMembers()) || l.nickna
 function commentAuthorName(c) { return teamDisplayName(c, teamMembers()) || c.nickname || '成员'; }
 
 
-async function loadBase() { detail.value = await api.teamDetail(id.value); }
+function restoreCheckinCache() {
+  const meta = readCache(cacheKey('meta'))?.value;
+  const dueCache = readCache(cacheKey('dues'))?.value;
+  const schedCache = readCache(cacheKey('schedules'))?.value;
+  if (meta) detail.value = meta;
+  if (dueCache?.dues) dues.value = dueCache.dues;
+  if (schedCache?.schedules) schedules.value = schedCache.schedules;
+  if (schedCache) scheduleTotal.value = Number(schedCache.total || schedules.value.length);
+  if (schedules.value.length && !boardSchedId.value) boardSchedId.value = schedules.value[0].id;
+}
+
+async function loadBase() {
+  const d = await api.teamDetail(id.value);
+  detail.value = d;
+  writeCache(cacheKey('meta'), compactDetail(d));
+}
 async function loadDues() {
   const r = await api.checkinMy(id.value);
   dues.value = r.dues || [];
+  writeCache(cacheKey('dues'), { dues: dues.value });
 }
 async function loadSchedules() {
-  const r = await api.checkinSchedules(id.value);
+  const seq = ++scheduleSeq;
+  const r = await api.checkinSchedules(id.value, { limit: 8, offset: 0 });
+  if (seq !== scheduleSeq) return;
   schedules.value = r.schedules || [];
+  scheduleTotal.value = Number(r.total ?? schedules.value.length);
+  schedulesComplete.value = !r.has_more;
+  schedVisible.value = 8;
   if (!boardSchedId.value && schedules.value.length) boardSchedId.value = schedules.value[0].id;
+  writeCache(cacheKey('schedules'), { schedules: schedules.value, total: scheduleTotal.value });
+  if (r.has_more) loadRemainingSchedules(seq, Number(r.offset || 0) + schedules.value.length);
 }
-async function loadAll() {
-  await loadBase();
-  await Promise.all([loadDues(), loadSchedules()]);
+async function loadRemainingSchedules(seq, startOffset) {
+  if (scheduleLoadingMore.value && scheduleLoadingSeq === seq) return;
+  scheduleLoadingSeq = seq;
+  scheduleLoadingMore.value = true;
+  try {
+    let offset = Math.max(0, Number(startOffset) || 0);
+    while (seq === scheduleSeq && offset < scheduleTotal.value) {
+      const r = await api.checkinSchedules(id.value, { limit: 40, offset });
+      if (seq !== scheduleSeq) return;
+      const rows = r.schedules || [];
+      if (!rows.length) break;
+      const seen = new Set(schedules.value.map((s) => Number(s.id)));
+      schedules.value = schedules.value.concat(rows.filter((s) => !seen.has(Number(s.id))));
+      scheduleTotal.value = Number(r.total ?? scheduleTotal.value);
+      offset = Number(r.offset ?? offset) + rows.length;
+      writeCache(cacheKey('schedules'), { schedules: schedules.value, total: scheduleTotal.value });
+      if (!r.has_more) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (seq === scheduleSeq) schedulesComplete.value = offset >= scheduleTotal.value;
+  } finally {
+    if (scheduleLoadingSeq === seq) scheduleLoadingMore.value = false;
+  }
+}
+async function loadAll({ force = false } = {}) {
+  if (!id.value || loadingAll) return loadingAll;
+  if (!force && Date.now() - lastLoadedAt < 15000) return;
+  lastLoadedAt = Date.now();
+  // 小组详情、待办、任务同时请求；任一失败都不阻塞其他区域先显示。
+  loadingAll = Promise.allSettled([loadBase(), loadDues(), loadSchedules()]);
+  try {
+    await loadingAll;
+  } finally {
+    loadingAll = null;
+  }
 }
 
 function switchTab(k) {
   tab.value = k;
   if (k === 'board' && boardSchedId.value && !board.value) loadBoard();
-  if (k === 'rank' && !leaderboard.value.length) loadRank();
+  if (k === 'rank' && !leaderboard.value.length) {
+    restoreRankCache();
+    loadRank();
+  }
 }
+function showMoreDue() {
+  dueVisible.value = Math.min(dues.value.length, dueVisible.value + 8);
+}
+function showMoreSchedules() {
+  schedVisible.value = Math.min(schedules.value.length, schedVisible.value + 8);
+  if (!schedulesComplete.value && !scheduleLoadingMore.value) {
+    loadRemainingSchedules(scheduleSeq, schedules.value.length);
+  }
+}
+function showMoreBoard() {
+  boardVisible.value = Math.min(board.value?.members?.length || 0, boardVisible.value + 20);
+}
+function showMoreRank() {
+  rankVisible.value = Math.min(leaderboard.value.length, rankVisible.value + 10);
+}
+onReachBottom(() => {
+  if (tab.value === 'due') showMoreDue();
+  else if (tab.value === 'sched') showMoreSchedules();
+  else if (tab.value === 'board') showMoreBoard();
+  else showMoreRank();
+});
 
 // ---------- 打卡提交 ----------
 const subOpen = ref(false);
@@ -665,6 +783,7 @@ async function loadBoard() {
   const sid = boardSchedId.value;
   if (!sid) return;
   board.value = await api.checkinBoard(id.value, sid, { role_id: boardRoleIdForReq });
+  boardVisible.value = 20;
 }
 
 // ---------- 汇报详情 / 评分 ----------
@@ -707,16 +826,28 @@ const rankSchedIdx = ref(0);
 const rankSchedNames = computed(() => ['全部任务', ...schedules.value.map((s) => s.title)]);
 function setRange(r) { rankRange.value = r; loadRank(); }
 function onRankSched(e) { rankSchedIdx.value = Number(e.detail.value); loadRank(); }
+function rankCacheKey() {
+  const sched = schedules.value[rankSchedIdx.value - 1];
+  return cacheKey(`rank:${rankRange.value}:${sched?.id || 'all'}`);
+}
+function restoreRankCache() {
+  const cached = readCache(rankCacheKey())?.value;
+  if (!cached) return;
+  if (Array.isArray(cached.leaderboard)) leaderboard.value = cached.leaderboard;
+  if (Array.isArray(cached.featuredList)) featuredList.value = cached.featuredList;
+}
 async function loadRank() {
   const card = { range: rankRange.value };
   const sched = schedules.value[rankSchedIdx.value - 1];
   if (sched) card.schedule_id = sched.id;
-  const [lb, ft] = await Promise.all([
+  rankVisible.value = 10;
+  const [lbR, ftR] = await Promise.allSettled([
     api.checkinLeaderboard(id.value, card),
     api.checkinFeatured(id.value, sched ? { schedule_id: sched.id } : {}),
   ]);
-  leaderboard.value = lb.board || [];
-  featuredList.value = ft.reports || [];
+  if (lbR.status === 'fulfilled') leaderboard.value = lbR.value.board || [];
+  if (ftR.status === 'fulfilled') featuredList.value = ftR.value.reports || [];
+  writeCache(rankCacheKey(), { leaderboard: leaderboard.value, featuredList: featuredList.value });
 }
 
 // ---------- 优秀墙：当期（最新一周）常显，往期合并折叠 ----------
@@ -785,16 +916,23 @@ watch(() => featuredGroups.value.currentKey, () => { pastFtOpen.value = false; }
 
 onLoad((o) => {
   id.value = Number(o.id);
+  restoreCheckinCache();
   loadAll();
 });
 onShow(() => {
-  if (id.value && detail.value) loadAll();
+  if (id.value && detail.value && Date.now() - lastLoadedAt >= 15000) loadAll();
 });
 </script>
 
 <style lang="scss" scoped>
 .filter-row { display: flex; gap: 14rpx; margin-bottom: 18rpx; }
 .filter-pick { background: #fff; border: 1rpx solid #e2e8f0; border-radius: 12rpx; padding: 16rpx 22rpx; font-size: 25rpx; color: #334155; }
+.list-window-tip { color: #94a3b8; font-size: 22rpx; padding: 4rpx 0 14rpx; }
+.more-tip {
+  color: #64748b; background: #f8fafc; border: 1rpx dashed #cbd5e1;
+  border-radius: 12rpx; padding: 18rpx; margin-top: 16rpx;
+  text-align: center; font-size: 24rpx;
+}
 .due-card { padding: 24rpx 28rpx; }
 .due-head { display: flex; justify-content: space-between; align-items: center; gap: 14rpx; }
 .due-title { font-size: 30rpx; font-weight: 700; color: #1e293b; flex: 1; }

@@ -172,7 +172,7 @@ export const api = {
   teamLogUpdate: (id, lid, card) => req(`/team/${id}/log/${lid}`, { method: 'PUT', body: JSON.stringify(card) }),
   teamLogDelete: (id, lid) => req(`/team/${id}/log/${lid}`, { method: 'DELETE' }),
   // 周期打卡 / 定时汇报
-  teamCheckinSchedules: (id) => req(`/team/${id}/checkin/schedules`),
+  teamCheckinSchedules: (id, p) => req(`/team/${id}/checkin/schedules${qs(p)}`),
   teamCheckinScheduleCreate: (id, b) => req(`/team/${id}/checkin/schedules`, { method: 'POST', body: JSON.stringify(b) }),
   teamCheckinScheduleUpdate: (id, sid, b) => req(`/team/${id}/checkin/schedules/${sid}`, { method: 'PUT', body: JSON.stringify(b) }),
   teamCheckinScheduleDelete: (id, sid) => req(`/team/${id}/checkin/schedules/${sid}`, { method: 'DELETE' }),
