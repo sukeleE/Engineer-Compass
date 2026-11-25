@@ -74,7 +74,10 @@
           <view class="board-table">
             <view class="board-row board-header">
               <view class="cell-name">成员</view>
-              <view v-for="p in board.periods" :key="p.key" class="cell-period">{{ p.label }}</view>
+              <view v-for="p in board.periods" :key="p.key" class="cell-period">
+                <text class="period-title">{{ periodTitle(p) }}</text>
+                <text v-if="periodRange(p)" class="period-range">{{ periodRange(p) }}</text>
+              </view>
             </view>
             <view v-for="m in visibleBoardMembers" :key="m.id" class="board-row">
               <view class="cell-name">
@@ -886,6 +889,15 @@ function weekRangeLabel(key) {
   const endMd = sun.getUTCFullYear() === y ? weekMd(sun) : `${sun.getUTCFullYear()}年${weekMd(sun)}`;
   return `第${w}周 · ${weekMd(mon)}–${endMd}`;
 }
+function periodTitle(period) {
+  const label = String(period?.label || '');
+  const match = label.match(/^(第\d+周)（/);
+  return match ? match[1] : label;
+}
+function periodRange(period) {
+  const match = String(period?.label || '').match(/（(.+)）$/);
+  return match ? match[1] : '';
+}
 function featuredPeriodLabel(key) { return key === 'unknown' ? '未分期' : weekRangeLabel(key); }
 // 优秀墙：按「期」（ISO 周）分组；当期常显，本期空缺时回退展示最新一期往期
 const featuredGroups = computed(() => {
@@ -953,8 +965,33 @@ onShow(() => {
 .board-row { display: flex; border-bottom: 1rpx solid #f1f5f9; background: #fff; }
 .board-header { position: sticky; top: 0; z-index: 2; background: #f8fafc; }
 .cell-name { width: 170rpx; flex-shrink: 0; padding: 16rpx 12rpx; font-size: 24rpx; font-weight: 600; color: #334155; display: flex; align-items: center; }
-.cell-period { width: 130rpx; flex-shrink: 0; padding: 14rpx 8rpx; font-size: 21rpx; color: #64748b; text-align: center; }
-.cell-state { width: 130rpx; flex-shrink: 0; height: 88rpx; display: flex; align-items: center; justify-content: center; font-size: 22rpx; margin: 6rpx 4rpx; border-radius: 10rpx; }
+.cell-period {
+  width: 198rpx;
+  height: 86rpx;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  padding: 10rpx 6rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  text-align: center;
+  overflow: hidden;
+}
+.period-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: #334155;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.period-range { display: block; color: #94a3b8; font-size: 18rpx; line-height: 1.2; white-space: nowrap; }
+.cell-state { width: 190rpx; box-sizing: border-box; flex-shrink: 0; height: 88rpx; display: flex; align-items: center; justify-content: center; font-size: 22rpx; margin: 6rpx 4rpx; border-radius: 10rpx; }
 .st-on { background: #dcfce7; color: #166534; }
 .st-late { background: #fef3c7; color: #b45309; }
 .st-miss { background: #fee2e2; color: #b91c1c; }
