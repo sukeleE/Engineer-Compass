@@ -14,7 +14,7 @@
       <view v-if="finalPlan" class="card plan-card">
         <view class="plan-title">✅ 计划已生成并保存（{{ finalPlan.phases?.length || 0 }} 个阶段）</view>
         <view v-if="finalPlan.summary" class="plan-summary">{{ finalPlan.summary }}</view>
-        <button class="btn btn-primary btn-block" @click="goList">前往查看</button>
+        <button class="btn btn-primary btn-block" @click="goList">{{ mode === 'team-generate' ? '返回计划列表' : '前往查看' }}</button>
       </view>
       <view v-if="sending" class="msg-row assistant"><view class="bubble typing">AI 思考中…</view></view>
       <view id="bottom" style="height:20rpx"></view>
@@ -44,6 +44,7 @@ const finalPlan = ref(null);
 const hintMap = {
   study: '告诉我你想学的主题、当前水平、目标与每周可投入时间，AI 会先提问再产出完整学习计划并自动保存。',
   schedule: '告诉我你的基础水平、备赛周期与目标，AI 会先提问再生成该竞赛的个人备赛日程并自动保存。',
+  'team-generate': 'AI 会先确认小组部门分工、备赛周期和目标，再生成小组备赛计划并自动保存。',
 };
 const hint = ref(hintMap.study);
 
@@ -52,11 +53,8 @@ async function scrollBottom() {
   anchor.value = 'bottom';
 }
 
-async function send() {
-  const text = draft.value.trim();
-  if (!text || sending.value) return;
-  messages.value.push({ role: 'user', content: text });
-  draft.value = '';
+async function ask() {
+  if (sending.value) return;
   sending.value = true;
   await scrollBottom();
   try {
@@ -75,7 +73,21 @@ async function send() {
   }
 }
 
+async function send() {
+  const text = draft.value.trim();
+  if (!text || sending.value) return;
+  messages.value.push({ role: 'user', content: text });
+  draft.value = '';
+  await ask();
+}
+
 function goList() {
+  if (mode.value === 'team-generate') {
+    uni.navigateBack({
+      fail: () => uni.redirectTo({ url: `/packageTeam/pages/tasks/main?id=${cfg.value.team_id}&tab=plans` }),
+    });
+    return;
+  }
   const url = mode.value === 'study' ? '/packagePlan/pages/study/list' : '/pages/schedule/main';
   if (mode.value === 'study') uni.redirectTo({ url });
   else uni.switchTab({ url });
@@ -89,8 +101,13 @@ onLoad((o) => {
   if (o.comp_name) c.comp_name = decodeURIComponent(o.comp_name);
   if (o.study_id) c.study_id = Number(o.study_id);
   if (o.schedule_id) c.schedule_id = Number(o.schedule_id);
+  if (o.team_id) c.team_id = Number(o.team_id);
   cfg.value = c;
-  uni.setNavigationBarTitle({ title: mode.value === 'study' ? 'AI 学习计划对话' : 'AI 备赛计划对话' });
+  const title = mode.value === 'study'
+    ? 'AI 学习计划对话'
+    : mode.value === 'team-generate' ? 'AI 小组计划对话' : 'AI 备赛计划对话';
+  uni.setNavigationBarTitle({ title });
+  ask();
 });
 </script>
 

@@ -29,7 +29,7 @@
     <!-- 备赛计划 -->
     <block v-else>
       <view v-if="canEditPlan" class="plan-actions">
-        <button class="btn btn-primary plan-btn" @click="generate">AI 生成计划</button>
+        <button class="btn btn-primary plan-btn" @click="openPlanMenu">✨ AI 编写计划</button>
         <button class="btn btn-ghost plan-btn" @click="aiGrouping">AI 智能分组</button>
       </view>
       <EmptyState v-if="!plans.length" icon="🗺️" text="暂无备赛计划，可让 AI 按部门生成" />
@@ -243,24 +243,43 @@ async function completeOnce(p, pi, ti) {
   } catch (e) { /* 限权提示 */ }
 }
 
-// ---------- AI 生成（先选竞赛） ----------
-async function generate() {
+// ---------- AI 编写计划：对话编写 / 一键编写 ----------
+async function pickCompetition(onPick) {
   const comps = await api.competitions();
   if (!comps || !comps.length) return toast('暂无已转正竞赛，无法生成计划');
   const names = comps.map((c) => c.name);
   uni.showActionSheet({
     itemList: names.slice(0, 30),
-    success: async (res) => {
-      const comp = comps[res.tapIndex];
-      uni.showLoading({ title: 'AI 生成中…', mask: true });
-      try {
-        const r = await api.teamPlanGenerate(id.value, { comp_id: comp.id });
-        uni.hideLoading();
-        toast(r.template ? 'AI 不可用，已用模板生成' : '已生成', 'success');
-        load();
-      } catch (e) { uni.hideLoading(); }
+    success: (res) => onPick(comps[res.tapIndex]),
+  });
+}
+function openPlanMenu() {
+  uni.showActionSheet({
+    itemList: ['💬 对话编写', '⚡ 一键编写'],
+    success: (res) => {
+      if (res.tapIndex === 0) {
+        pickCompetition((comp) => {
+          uni.navigateTo({
+            url: `/packagePlan/pages/planchat/main?mode=team-generate&team_id=${id.value}`
+              + `&comp_id=${comp.id}&comp_name=${encodeURIComponent(comp.name)}`,
+          });
+        });
+      } else {
+        pickCompetition(generate);
+      }
     },
   });
+}
+async function generate(comp) {
+  uni.showLoading({ title: 'AI 编写中…', mask: true });
+  try {
+    const r = await api.teamPlanGenerate(id.value, { comp_id: comp.id });
+    uni.hideLoading();
+    toast(r.template ? 'AI 不可用，已用模板生成' : '计划已生成', 'success');
+    load();
+  } catch (e) {
+    uni.hideLoading();
+  }
 }
 
 // ---------- 计划重命名 / 删除 ----------
@@ -422,7 +441,10 @@ async function applyGrouping(g) {
   load();
 }
 
-onLoad((o) => { id.value = Number(o.id); });
+onLoad((o) => {
+  id.value = Number(o.id);
+  if (o.tab === 'plans') tab.value = 'plans';
+});
 onShow(() => { if (id.value) load(); });
 </script>
 
