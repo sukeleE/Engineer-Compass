@@ -8,6 +8,11 @@
 # 用法：拷到 /etc/nginx/conf.d/compass.conf（或 sites-available 软链），
 #       按实际域名/证书改 server_name 与证书路径，nginx -t 后 reload。
 
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     server_name compass.example.com;   # ← 改成实际域名或服务器 IP
@@ -19,6 +24,10 @@ server {
     # API 反代到 PM2 守护的 Node 后端（默认端口 3000）
     location /api/ {
         proxy_pass http://127.0.0.1:3000;
+        # 消息通知 WebSocket（/api/realtime/ws）
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

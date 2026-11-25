@@ -1,10 +1,11 @@
 <script setup>
 // 工具 Dock（苹果悬浮窗式）：单个 🧰 主浮标，点击展开 日程笔记 / AI 对话 / 消息中心 三个工具
 // 消息中心未读红点：dock 收起时在主浮标右上角，展开后转移到消息中心工具按钮右上角
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
+import { notificationState, refreshUnread, startNotificationRealtime, stopNotificationRealtime } from '../utils/notificationStore.js';
 import ScheduleNotes from './ScheduleNotes.vue';
 import AIChatBox from './AIChatBox.vue';
 import MessageCenter from './MessageCenter.vue';
@@ -12,17 +13,8 @@ import GhostUsers from './GhostUsers.vue'; // 怪奇小队（仅幽灵用户可�
 
 const dockOpen = ref(false);   // 工具列表展开/收起
 const activeTool = ref(null);  // 当前打开的面板：'notes' | 'ai' | 'msg' | 'ghost' | null（单值天然互斥）
-const unread = ref(0);         // 消息中心未读总数
+const unread = computed(() => notificationState.counts.total); // 消息中心未读总数（全局共享）
 const schedules = ref([]);     // 日程笔记「关联备赛」选择数据源
-
-let unreadTimer = null;
-
-async function refreshUnread() {
-  if (!auth.user?.id) return;
-  try {
-    unread.value = (await api.notificationsUnread()).total || 0;
-  } catch { /* 静默 */ }
-}
 
 function toggleDock() {
   dockOpen.value = !dockOpen.value;
@@ -45,11 +37,12 @@ async function loadSchedules() {
 }
 
 onMounted(() => {
-  refreshUnread();
-  unreadTimer = setInterval(refreshUnread, 15000); // 后台常驻轮询红点
+  startNotificationRealtime();
   loadSchedules();
 });
-onBeforeUnmount(() => clearInterval(unreadTimer));
+onBeforeUnmount(() => {
+  stopNotificationRealtime();
+});
 </script>
 
 <template>

@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired, logAudit, mutedGuard } from './middleware.js';
+import { publishUnread } from '../lib/realtime.js';
 
 const r = Router();
 const uid = (req) => Number(req.user.id);
@@ -134,6 +135,7 @@ r.get('/dm/:uid', authRequired, (req, res) => {
      ORDER BY id DESC LIMIT 100`
   ).all(me, other, other, me).reverse();
   db.prepare('UPDATE dm_message SET is_read = 1 WHERE from_id = ? AND to_id = ? AND is_read = 0').run(other, me);
+  publishUnread(me);
   res.json(rows);
 });
 
@@ -156,6 +158,7 @@ r.post('/dm/:uid/read', authRequired, (req, res) => {
   const me = uid(req);
   const other = Number(req.params.uid);
   db.prepare('UPDATE dm_message SET is_read = 1 WHERE from_id = ? AND to_id = ? AND is_read = 0').run(other, me);
+  publishUnread(me);
   res.json({ message: 'ok' });
 });
 

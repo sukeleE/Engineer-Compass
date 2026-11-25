@@ -24,6 +24,7 @@ import share from './routes/share.js';
 import friends from './routes/friends.js';
 import ghost from './routes/ghost.js';
 import notifications from './routes/notifications.js';
+import realtime from './routes/realtime.js';
 import admin, { publicAnnounce } from './routes/admin.js';
 import resource, { publicR } from './routes/resource.js';
 import importPlan from './routes/importPlan.js';
@@ -41,6 +42,7 @@ import { sweepStaging } from './lib/shareFiles.js';
 import { sweepOrphanHonorFiles } from './lib/honorFiles.js';
 import { sweepOrphanPurchaseFiles } from './lib/purchaseFiles.js';
 import { runCheckinReminders } from './lib/checkin.js';
+import { attachRealtimeServer } from './lib/realtime.js';
 
 // 加载 .env（Node 24 内置）；mailer 配置为惰性读取（调用时读 process.env），加载顺序无影响
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -73,6 +75,7 @@ app.use('/api/share', share);
 app.use('/api/friends', friends);
 app.use('/api/ghost', ghost);
 app.use('/api/notifications', notifications);
+app.use('/api/realtime', realtime);
 app.use('/api/admin/honors', adminHonor); // 必须排在 /api/admin 之前（否则要先白跑一遍 admin 的鉴权）
 app.use('/api/admin', admin);
 app.use('/api/honor', honor); // 荣誉墙：前台公开只读（无需登录）
@@ -169,7 +172,8 @@ checkinTimer.unref();
 setTimeout(runCheckinOnce, 20 * 1000); // 启动 20 秒后补跑一次（重启即恢复提醒）
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ Engineer-Compass API 已启动: http://localhost:${PORT}`);
   console.log('   接口: /api/health | /api/competition | /api/ai/chat | /api/schedule');
 });
+attachRealtimeServer(server);

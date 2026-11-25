@@ -3,6 +3,8 @@
 import { Router } from 'express';
 import db from '../db/database.js';
 import { authRequired } from './middleware.js';
+import { unreadSnapshot } from '../lib/notificationCounts.js';
+import { publishUnread } from '../lib/realtime.js';
 
 const r = Router();
 const TYPES = ['comment', 'like', 'fav'];
@@ -46,16 +48,8 @@ r.get('/', authRequired, (req, res) => {
 // GET /api/notifications/unread-count — 红点数字（通知三组 + 私信未读 + 个人公告）
 r.get('/unread-count', authRequired, (req, res) => {
   const me = uid(req);
-  const countOf = (type) =>
-    Number(db.prepare('SELECT COUNT(*) AS n FROM notification WHERE user_id = ? AND type = ? AND is_read = 0').get(me, type).n);
-  const comments = countOf('comment');
-  const likes = countOf('like');
-  const favs = countOf('fav');
-  const dm = Number(db.prepare('SELECT COUNT(*) AS n FROM dm_message WHERE to_id = ? AND is_read = 0').get(me).n);
-  const notices = Number(
-    db.prepare('SELECT COUNT(*) AS n FROM personal_notice WHERE user_id = ? AND is_read = 0').get(me).n
-  );
-  res.json({ total: comments + likes + favs + dm + notices, comments, likes, favs, dm, notices });
+  res.set('Cache-Control', 'no-store');
+  res.json(unreadSnapshot(db, me));
 });
 
 // GET /api/notifications/personal — 个人公告/系统通知（最新 30 条）
@@ -69,20 +63,24 @@ r.get('/personal', authRequired, (req, res) => {
 
 // POST /api/notifications/personal/:id/read — 单条已读（只能标自己的）
 r.post('/personal/:id/read', authRequired, (req, res) => {
+  const me = uid(req);
   db.prepare(
     `UPDATE personal_notice SET is_read = 1, read_time = datetime('now','localtime')
      WHERE id = ? AND user_id = ? AND is_read = 0`
-  ).run(Number(req.params.id), uid(req));
-  res.json({ message: '已标记已读' });
+  ).run(Number(req.params.id), me);
+  publishUnread(me);
+  res.json({ message: '已标记已读', unread: unreadSnapshot(db, me) });
 });
 
 // POST /api/notifications/personal/read-all — 全部已读
 r.post('/personal/read-all', authRequired, (req, res) => {
+  const me = uid(req);
   db.prepare(
     `UPDATE personal_notice SET is_read = 1, read_time = datetime('now','localtime')
      WHERE user_id = ? AND is_read = 0`
-  ).run(uid(req));
-  res.json({ message: '已全部标记已读' });
+  ).run(me);
+  publishUnread(me);
+  res.json({ message: '已全部标记已读', unread: unreadSnapshot(db, me) });
 });
 
 // POST /api/notifications/read — 批量标已读 { types: ['comment','like','fav'] }
@@ -95,7 +93,8 @@ r.post('/read', authRequired, (req, res) => {
     const q = db.prepare('UPDATE notification SET is_read = 1 WHERE user_id = ? AND type = ? AND is_read = 0');
     for (const t of types) q.run(me, t);
   }
-  res.json({ message: '已标记已读' });
+  publishUnread(me);
+  res.json({ message: '已标记已读', unread: unreadSnapshot(db, me) });
 });
 
 export default r;

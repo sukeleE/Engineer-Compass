@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import auth from '../auth.js';
 import { fmtShort } from '../utils/time.js';
+import { refreshUnread } from '../utils/notificationStore.js';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -30,6 +31,7 @@ async function loadDm() {
   try {
     dmMsgs.value = await api.dmList(props.user.id);
     emit('refresh'); // 顺带刷新父组件未读徽标（原 MyView loadFriends）
+    refreshUnread({ force: true });
     nextTick(scrollDm);
   } catch (e) { ElMessage.error(e.message); }
 }
@@ -53,7 +55,12 @@ async function sendDm() {
 // 弹窗开关 → 轮询启停
 watch(() => props.open, (open) => {
   if (dmTimer) { clearInterval(dmTimer); dmTimer = null; }
-  if (open) { loadDm(); dmTimer = setInterval(loadDm, 3000); }
+  if (open) {
+    loadDm();
+    dmTimer = setInterval(loadDm, 1500);
+  } else {
+    refreshUnread({ force: true });
+  }
 });
 onUnmounted(() => { if (dmTimer) clearInterval(dmTimer); });
 </script>

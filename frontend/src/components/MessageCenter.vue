@@ -1,29 +1,27 @@
 <script setup>
 // 全局消息中心（右下角浮窗，仿 AIChatBox）：评论/点赞/收藏通知 + 好友私信
 // 有未读时按钮右上角显示红点数字；面板分「私信评论 / 点赞 / 收藏」三组（小红书风格）
-import { ref, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api } from '../api.js';
 import { toLocal } from '../utils/time.js';
+import {
+  notificationState, refreshUnread, setUnreadKey, clearNotificationTypes, holdFastPolling,
+  applyUnreadCounts,
+} from '../utils/notificationStore.js';
 
-// 纯面板：由 ToolDock 控制开关；面板打开期间 3s 快轮询未读计数（红点徽标轮询在 ToolDock）
+// 纯面板：由 ToolDock 控制开关；WebSocket 推送为主，面板打开期间短轮询兜底。
 const props = defineProps({ open: Boolean });
 const emit = defineEmits(['close']);
 const router = useRouter();
 const tab = ref('dm');
-const counts = ref({ comments: 0, likes: 0, favs: 0, dm: 0, notices: 0 });
+const counts = computed(() => notificationState.counts);
 const notif = ref({ comments: [], likes: [], favs: [] });
 const notices = ref([]); // 个人公告/系统通知（初始密码提醒等）
 const friends = ref([]); // 好友列表（带 unread/last_msg/last_time）
 
-let fastTimer = null;
-
-async function refreshUnread() {
-  try {
-    counts.value = await api.notificationsUnread();
-  } catch { /* 网络错误静默 */ }
-}
+let releaseFastPolling = null;
 
 async function loadAll() {
   try {
@@ -40,8 +38,11 @@ async function loadAll() {
 async function goNotif(n) {
   if (!n.is_read) {
     n.is_read = 1;
-    api.notificationsRead([n.type]).catch(() => {});
-    refreshUnread();
+    clearNotificationTypes([n.type]);
+    api.notificationsRead([n.type])
+      .then((r) => { if (r?.unread) applyUnreadCounts(r.unread); })
+      .catch(() => {})
+      .finally(() => refreshUnread({ force: true }));
   }
   emit('close'); // 跳转前关闭面板
   router.push(`/share/${n.post.id}`);
@@ -51,8 +52,11 @@ async function goNotif(n) {
 function goNotice(n) {
   if (!n.is_read) {
     n.is_read = 1;
-    api.noticeRead(n.id).catch(() => {});
-    refreshUnread();
+    setUnreadKey('notices', counts.value.notices - 1);
+    api.noticeRead(n.id)
+      .then((r) => { if (r?.unread) applyUnreadCounts(r.unread); })
+      .catch(() => {})
+      .finally(() => refreshUnread({ force: true }));
   }
   if (n.link) {
     emit('close'); // 跳转前关闭面板
@@ -74,13 +78,16 @@ function goProfile(id) {
 }
 
 async function readAll() {
-  await Promise.all([
+  clearNotificationTypes(['comment', 'like', 'fav', 'notice']);
+  const results = await Promise.all([
     api.notificationsRead(['comment', 'like', 'fav']),
     api.noticesReadAll(),
   ].map((p) => p.catch(() => {})));
+  const latest = results.find((r) => r?.unread)?.unread;
+  if (latest) applyUnreadCounts(latest);
   for (const k of ['comments', 'likes', 'favs']) notif.value[k].forEach((n) => (n.is_read = 1));
   notices.value.forEach((n) => (n.is_read = 1));
-  refreshUnread();
+  refreshUnread({ force: true });
   ElMessage.success('已全部标记为已读');
 }
 
@@ -103,18 +110,21 @@ const favUnread = () => counts.value.favs || 0;
 const noticeUnread = () => counts.value.notices || 0;
 
 onBeforeUnmount(() => {
-  clearInterval(fastTimer);
+  releaseFastPolling?.();
 });
 
 watch(() => props.open, (v) => {
+  releaseFastPolling?.();
+  releaseFastPolling = null;
   if (v) {
-    refreshUnread();
+    refreshUnread({ force: true });
     loadAll();
-    fastTimer = setInterval(refreshUnread, 3000); // 面板打开期间快轮询
-  } else {
-    clearInterval(fastTimer);
-    fastTimer = null;
+    releaseFastPolling = holdFastPolling();
   }
+});
+
+watch(() => counts.value.total, (next, prev) => {
+  if (props.open && next > prev) loadAll();
 });
 </script>
 

@@ -384,6 +384,7 @@ export const api = {
   notifications: () => req('/notifications'),
   notificationsUnread: () => req('/notifications/unread-count'),
   notificationsRead: (types) => req('/notifications/read', { method: 'POST', body: JSON.stringify({ types }) }),
+  realtimeTicket: () => req('/realtime/ticket'),
   // 认证：登出（删除服务端会话 + 审计）
   logout: () => req('/auth/logout', { method: 'POST' }),
   // 后台管理（仅管理员，路由守卫 + 后端 adminRequired 双重校验）
