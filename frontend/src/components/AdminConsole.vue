@@ -804,6 +804,7 @@ onMounted(() => {
             @keyup.enter="visits.page = 1; loadVisits()" @clear="visits.page = 1; loadVisits()" />
           <el-button @click="visits.page = 1; loadVisits()">查询</el-button>
           <span class="count">共 {{ visits.total }} 次访问</span>
+          <span class="count">仅保留最近 5000 条</span>
         </div>
         <el-table :data="visits.list" v-loading="visits.loading" stripe>
           <el-table-column prop="create_time" label="时间" width="165" :formatter="fmtT" />

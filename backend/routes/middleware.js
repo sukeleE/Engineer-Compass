@@ -202,6 +202,17 @@ export function clientIp(req) {
   return xff || String(req.ip || '').replace('::ffff:', '');
 }
 
+export const ACCESS_LOG_LIMIT = 5000;
+const accessOverflowStmt = db.prepare(
+  'SELECT id FROM access_log ORDER BY id DESC LIMIT 1 OFFSET ?'
+);
+const accessDeleteStmt = db.prepare('DELETE FROM access_log WHERE id <= ?');
+function trimAccessLog() {
+  const overflow = accessOverflowStmt.get(ACCESS_LOG_LIMIT);
+  if (overflow) accessDeleteStmt.run(overflow.id);
+}
+try { trimAccessLog(); } catch { /* 表未就绪时由首次写入后的清理兜底 */ }
+
 // 访问日志中间件：记录所有 /api 请求（含游客、认证失败的），health 探活不算噪音
 // 挂载在认证中间件之前 → 自己解析 token 取 user_id（游客/无效 token 记 null）
 export function accessLog(req, res, next) {
@@ -215,6 +226,7 @@ export function accessLog(req, res, next) {
     db.prepare('INSERT INTO access_log (user_id, username, ip, method, path) VALUES (?,?,?,?,?)').run(
       uid, uname, clientIp(req), req.method, req.originalUrl || req.url || ''
     );
+    trimAccessLog();
   } catch { /* 记录失败不影响主流程 */ }
   next();
 }
