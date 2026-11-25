@@ -20,10 +20,10 @@
       <!-- 主浮标（可自由拖动，点击展开；拖动超过阈值不触发点击） -->
       <view class="fd-fab" :class="{ active: open, dragging }"
         @touchstart.stop="onTouchStart"
-        @touchmove.stop.prevent="onTouchMove"
-        @touchend.stop="onTouchEnd"
-        @touchcancel.stop="onTouchCancel"
-        @click="onFabClick">
+        @touchmove.stop="onTouchMove"
+        @touchend="onTouchEnd"
+        @touchcancel="onTouchCancel"
+        @tap.stop="onFabClick">
         <text v-if="pomo.running && !open" class="fd-fab-time">{{ formatClock(pomo.remaining) }}</text>
         <text v-else class="fd-fab-icon">🧰</text>
         <text v-if="unread > 0 && !open && !pomo.running" class="fd-dot"></text>
