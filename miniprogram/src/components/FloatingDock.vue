@@ -59,6 +59,11 @@
               <text class="tool-card-name">学习统计</text>
               <text class="tool-card-desc">今日 {{ stats.today }} 分钟</text>
             </view>
+            <view class="tool-card tool-card-wide" @click="openGalleryTool('ai')">
+              <text class="tool-card-icon">💬</text>
+              <text class="tool-card-name">AI 对话</text>
+              <text class="tool-card-desc">竞赛、备赛和学习问题都可以直接问</text>
+            </view>
           </view>
         </template>
 
@@ -290,6 +295,11 @@ function pick(key) {
 function closePanel() { panel.value = ''; }
 
 function openGalleryTool(key) {
+  if (key === 'ai') {
+    panel.value = '';
+    uni.navigateTo({ url: '/packageCompetition/pages/chat/main' });
+    return;
+  }
   panel.value = key;
 }
 
@@ -479,6 +489,7 @@ function removeCd(id) { removeCountdown(id); }
 .tool-card-icon { font-size: 42rpx; }
 .tool-card-name { color: #1e293b; font-size: 28rpx; font-weight: 800; }
 .tool-card-desc { color: #64748b; font-size: 22rpx; }
+.tool-card-wide { grid-column: 1 / -1; min-height: 120rpx; }
 
 .cd-form { display: flex; align-items: center; gap: 12rpx; margin-bottom: 18rpx; }
 .cd-input {
