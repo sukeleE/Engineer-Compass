@@ -46,7 +46,7 @@ export const PERM_GROUPS = [
 
 // 不拆分子权限的单权限模块
 export const PERM_FLAT = [
-  { key: 'competition', label: '🧠 竞赛审核', plain: '竞赛审核', desc: 'AI 收录竞赛的采纳/拒绝（AI 收录管理端）' },
+  { key: 'competition', label: '🧠 竞赛审核', plain: '竞赛审核', desc: '竞赛收录审核、精确日期、技术树与学习资源维护' },
   { key: 'announce', label: '📢 公告管理', plain: '公告管理', desc: '全站公告的发布与编辑' },
   { key: 'honor', label: '🏅 荣誉墙', plain: '荣誉墙', desc: '荣誉条目与奖状图片维护' },
   { key: 'server', label: '🖥️ 服务器状态', plain: '服务器状态', desc: '服务器运行状态面板' },

@@ -4,6 +4,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api.js';
 import CompDialog from './CompDialog.vue';
+import CompetitionDataEditor from './CompetitionDataEditor.vue';
 
 const tab = ref('pending');
 const pendingList = ref([]);
@@ -53,12 +54,17 @@ const submitted = ref(false);
 const card = reactive({
   name: '', short_name: '', type: '', start_month: null, sign_start: '',
   sign_end: '', province_time: '', national_time: '', cycle: '',
+  registration_start_date: '', registration_deadline: '',
+  competition_start_date: '', competition_end_date: '',
+  date_status: 'unknown', date_source_url: '',
   difficulty: null, intro: '', suitable_major: '', team: '', source_url: '',
   confidence: null, data_year: null,
 });
 const SUBMIT_FIELDS = [
   'name', 'short_name', 'type', 'start_month', 'sign_start', 'sign_end',
-  'province_time', 'national_time', 'cycle', 'difficulty', 'intro',
+  'province_time', 'national_time', 'registration_start_date', 'registration_deadline',
+  'competition_start_date', 'competition_end_date', 'date_status', 'date_source_url',
+  'cycle', 'difficulty', 'intro',
   'suitable_major', 'team', 'source_url', 'confidence', 'data_year',
 ];
 
@@ -76,6 +82,12 @@ async function extract() {
       start_month: r.start_month || null, sign_start: r.sign_start || '',
       sign_end: r.sign_end || '', province_time: r.province_time || '',
       national_time: r.national_time || '', cycle: r.cycle || '',
+      registration_start_date: r.registration_start_date || '',
+      registration_deadline: r.registration_deadline || '',
+      competition_start_date: r.competition_start_date || '',
+      competition_end_date: r.competition_end_date || '',
+      date_status: r.date_status || 'unknown',
+      date_source_url: r.date_source_url || '',
       difficulty: r.difficulty || null, intro: r.intro || '',
       suitable_major: r.suitable_major || '', team: r.team || '',
       source_url: r.source_url || '', confidence: r.confidence || null,
@@ -110,6 +122,9 @@ function resetForm() {
   Object.assign(card, {
     name: '', short_name: '', type: '', start_month: null, sign_start: '',
     sign_end: '', province_time: '', national_time: '', cycle: '',
+    registration_start_date: '', registration_deadline: '',
+    competition_start_date: '', competition_end_date: '',
+    date_status: 'unknown', date_source_url: '',
     difficulty: null, intro: '', suitable_major: '', team: '', source_url: '',
     confidence: null, data_year: null,
   });
@@ -217,6 +232,33 @@ onMounted(loadPending);
                 <el-form-item label="国赛/决赛"><el-input v-model="card.national_time" /></el-form-item>
               </div>
               <div class="form-row">
+                <el-form-item label="精确报名开始">
+                  <el-date-picker v-model="card.registration_start_date" type="date" value-format="YYYY-MM-DD" clearable style="width:100%" />
+                </el-form-item>
+                <el-form-item label="精确报名截止">
+                  <el-date-picker v-model="card.registration_deadline" type="date" value-format="YYYY-MM-DD" clearable style="width:100%" />
+                </el-form-item>
+                <el-form-item label="精确比赛开始">
+                  <el-date-picker v-model="card.competition_start_date" type="date" value-format="YYYY-MM-DD" clearable style="width:100%" />
+                </el-form-item>
+                <el-form-item label="精确比赛结束">
+                  <el-date-picker v-model="card.competition_end_date" type="date" value-format="YYYY-MM-DD" clearable style="width:100%" />
+                </el-form-item>
+              </div>
+              <div class="form-row">
+                <el-form-item label="日期状态">
+                  <el-select v-model="card.date_status" style="width:100%">
+                    <el-option label="已精确到日" value="exact" />
+                    <el-option label="部分日期明确" value="partial" />
+                    <el-option label="仅公布月份" value="month_only" />
+                    <el-option label="待官方公布" value="unknown" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="日期来源">
+                  <el-input v-model="card.date_source_url" placeholder="官方通知/赛程页面 URL" />
+                </el-form-item>
+              </div>
+              <div class="form-row">
                 <el-form-item label="举办周期"><el-input v-model="card.cycle" placeholder="每年一届/两年一届" /></el-form-item>
                 <el-form-item label="组队"><el-input v-model="card.team" placeholder="3人/队" /></el-form-item>
                 <el-form-item label="适合专业"><el-input v-model="card.suitable_major" /></el-form-item>
@@ -242,6 +284,11 @@ onMounted(loadPending);
             />
           </div>
         </div>
+      </el-tab-pane>
+
+      <!-- ========== Tab3 竞赛数据维护 ========== -->
+      <el-tab-pane label="竞赛数据维护" name="catalog" lazy>
+        <CompetitionDataEditor />
       </el-tab-pane>
     </el-tabs>
 

@@ -24,6 +24,21 @@ const migCol = (table, col, ddl) => {
   const c = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!c.some((x) => x.name === col)) db.exec(ddl);
 };
+migCol('competition', 'registration_start_date', 'ALTER TABLE competition ADD COLUMN registration_start_date TEXT');
+migCol('competition', 'registration_deadline', 'ALTER TABLE competition ADD COLUMN registration_deadline TEXT');
+migCol('competition', 'competition_start_date', 'ALTER TABLE competition ADD COLUMN competition_start_date TEXT');
+migCol('competition', 'competition_end_date', 'ALTER TABLE competition ADD COLUMN competition_end_date TEXT');
+migCol('competition', 'date_status', "ALTER TABLE competition ADD COLUMN date_status TEXT DEFAULT 'unknown'");
+migCol('competition', 'date_source_url', 'ALTER TABLE competition ADD COLUMN date_source_url TEXT');
+migCol('competition', 'date_updated_at', 'ALTER TABLE competition ADD COLUMN date_updated_at DATETIME');
+migCol('tech_stack', 'keywords', "ALTER TABLE tech_stack ADD COLUMN keywords TEXT DEFAULT ''");
+migCol('tech_stack', 'sort_order', 'ALTER TABLE tech_stack ADD COLUMN sort_order INTEGER DEFAULT 0');
+migCol('media_resource', 'resource_type', "ALTER TABLE media_resource ADD COLUMN resource_type TEXT DEFAULT 'article'");
+migCol('media_resource', 'provider', "ALTER TABLE media_resource ADD COLUMN provider TEXT DEFAULT ''");
+migCol('media_resource', 'created_by', 'ALTER TABLE media_resource ADD COLUMN created_by INTEGER');
+migCol('media_resource', 'verified_at', 'ALTER TABLE media_resource ADD COLUMN verified_at DATETIME');
+db.exec('CREATE INDEX IF NOT EXISTS idx_stack_parent ON tech_stack(parent_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_media_node ON media_resource(tech_node_id, source_type)');
 migCol('progress_log', 'attachments', "ALTER TABLE progress_log ADD COLUMN attachments TEXT DEFAULT '[]'");
 // 周期打卡：progress_log 挂接任务/周期 + 自评 + 组长评分（新库 schema.sql 已含）
 migCol('progress_log', 'schedule_id', 'ALTER TABLE progress_log ADD COLUMN schedule_id INTEGER');

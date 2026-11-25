@@ -1,0 +1,362 @@
+{
+  "expansions": [
+    {
+      "match": ["stm32", "单片机", "嵌入式", "mcu"],
+      "children": ["GPIO、时钟与中断", "通信外设与传感器", "嵌入式综合项目"]
+    },
+    {
+      "match": ["pcb", "电路板", "原理图", "布线", "eda"],
+      "children": ["原理图与器件选型", "PCB布局与布线", "制板、焊接与调试"]
+    },
+    {
+      "match": ["c语言", "c/c++", "c++", "指针"],
+      "children": ["语法与数据类型", "指针、内存与结构体", "工程实践与调试"]
+    },
+    {
+      "match": ["python", "数据分析", "爬虫"],
+      "children": ["Python基础语法", "常用库与数据处理", "项目实战与工程化"]
+    },
+    {
+      "match": ["java", "jvm", "spring"],
+      "children": ["Java语言基础", "面向对象与集合框架", "Spring与工程实践"]
+    },
+    {
+      "match": ["前端", "html", "css", "javascript", "vue", "react", "web"],
+      "children": ["HTML与CSS基础", "JavaScript与组件化", "前后端联调与部署"]
+    },
+    {
+      "match": ["数据结构", "算法", "leetcode", "程序设计"],
+      "children": ["基础数据结构", "经典算法与复杂度", "刷题与竞赛训练"]
+    },
+    {
+      "match": ["linux", "操作系统", "shell"],
+      "children": ["Linux命令与环境", "进程、内存与文件系统", "Shell自动化与服务器实践"]
+    },
+    {
+      "match": ["git", "版本控制", "github"],
+      "children": ["仓库、提交与分支", "协作冲突与代码评审", "开源项目工作流"]
+    },
+    {
+      "match": ["电路", "模电", "数电", "电子", "电源"],
+      "children": ["电路基础与分析方法", "模拟与数字电路", "电源、驱动与调试"]
+    },
+    {
+      "match": ["信号", "通信", "射频", "dsp"],
+      "children": ["信号与系统基础", "调制、滤波与采样", "通信链路与实测"]
+    },
+    {
+      "match": ["控制", "pid", "自动控制", "电机"],
+      "children": ["控制系统建模", "PID与状态反馈", "电机控制与参数整定"]
+    },
+    {
+      "match": ["机器人", "ros", "机械臂", "运动学"],
+      "children": ["ROS与机器人软件栈", "运动学、感知与规划", "整机联调与任务实践"]
+    },
+    {
+      "match": ["视觉", "opencv", "图像", "识别"],
+      "children": ["图像处理基础", "特征提取与目标检测", "视觉系统部署与调优"]
+    },
+    {
+      "match": ["机器学习", "深度学习", "人工智能", "神经网络", "pytorch", "tensorflow"],
+      "children": ["数学基础与数据处理", "经典模型与训练方法", "模型评估与项目部署"]
+    },
+    {
+      "match": ["fpga", "verilog", "vhdl"],
+      "children": ["数字逻辑与时序", "Verilog硬件描述", "FPGA综合、仿真与上板"]
+    },
+    {
+      "match": ["arduino", "树莓派", "传感器"],
+      "children": ["开发板与外设接线", "传感器数据采集", "创意原型与项目整合"]
+    },
+    {
+      "match": ["机械", "结构", "solidworks", "cad", "建模", "装配"],
+      "children": ["结构与机构方案", "三维建模与工程图", "公差、加工与装配"]
+    },
+    {
+      "match": ["3d打印", "增材", "打印"],
+      "children": ["模型切片与参数", "材料与结构设计", "打印后处理与装配"]
+    },
+    {
+      "match": ["数学", "建模", "matlab", "线性代数", "概率"],
+      "children": ["模型假设与公式推导", "数值计算与编程实现", "论文写作与结果验证"]
+    },
+    {
+      "match": ["统计", "数据分析", "数据挖掘"],
+      "children": ["统计描述与推断", "数据清洗与可视化", "建模与结论表达"]
+    },
+    {
+      "match": ["化学", "化工", "实验"],
+      "children": ["基础原理与安全规范", "实验设计与数据处理", "结果分析与报告"]
+    },
+    {
+      "match": ["生物", "生命科学", "基因", "细胞"],
+      "children": ["基础知识与文献检索", "实验方法与数据记录", "结果分析与科研表达"]
+    },
+    {
+      "match": ["医学", "临床", "护理", "诊断"],
+      "children": ["核心知识与指南", "临床技能与病例分析", "团队协作与综合演练"]
+    },
+    {
+      "match": ["设计", "ui", "ux", "视觉", "平面", "交互"],
+      "children": ["设计调研与用户分析", "视觉规范与原型制作", "作品呈现与评审表达"]
+    },
+    {
+      "match": ["经管", "商业", "市场", "创业", "财务"],
+      "children": ["市场与用户研究", "商业模型与财务测算", "路演表达与项目迭代"]
+    },
+    {
+      "match": ["英语", "演讲", "外语", "口语"],
+      "children": ["语言表达与发音", "结构化演讲训练", "即兴问答与舞台呈现"]
+    },
+    {
+      "match": ["论文", "科研", "写作", "文献"],
+      "children": ["文献检索与阅读", "研究设计与证据整理", "论文写作与引用规范"]
+    },
+    {
+      "match": ["项目管理", "协作", "计划", "路演"],
+      "children": ["目标拆解与里程碑", "团队协作与风险控制", "复盘、汇报与迭代"]
+    },
+    {
+      "match": ["网络安全", "信息安全", "ctf", "渗透"],
+      "children": ["网络与系统基础", "常见漏洞与攻防", "CTF实战与复盘"]
+    },
+    {
+      "match": ["数据库", "sql", "mysql", "sqlite"],
+      "children": ["关系模型与SQL", "索引、事务与性能", "数据建模与应用开发"]
+    },
+    {
+      "match": ["云计算", "大数据", "docker", "kubernetes"],
+      "children": ["容器与云服务基础", "数据处理与服务部署", "监控、扩展与运维"]
+    },
+    {
+      "match": ["材料", "金属", "复合材料"],
+      "children": ["材料性能与测试", "制备工艺与参数", "失效分析与工程应用"]
+    },
+    {
+      "match": ["能源", "环境", "节能", "水利"],
+      "children": ["系统调研与数据采集", "方案设计与仿真", "效益评估与工程落地"]
+    }
+  ],
+  "resources": [
+    {
+      "match": ["stm32", "单片机", "嵌入式", "mcu"],
+      "items": [
+        { "title": "STM32CubeMX 官方工具与文档", "url": "https://www.st.com/en/development-tools/stm32cubemx.html", "provider": "STMicroelectronics", "resource_type": "docs", "platform": "docs" },
+        { "title": "STM32 HAL 与底层驱动用户手册", "url": "https://www.st.com/resource/en/user_manual/um1725-description-of-stm32f4-hal-and-lowlayer-drivers-stmicroelectronics.pdf", "provider": "STMicroelectronics", "resource_type": "docs", "platform": "docs" },
+        { "title": "FreeRTOS 官方文档与 RTOS 教程", "url": "https://www.freertos.org/Documentation/RTOS_book.html", "provider": "FreeRTOS", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["pcb", "电路板", "原理图", "布线", "eda"],
+      "items": [
+        { "title": "KiCad 官方文档", "url": "https://docs.kicad.org/", "provider": "KiCad", "resource_type": "docs", "platform": "docs" },
+        { "title": "Altium Designer 官方文档", "url": "https://www.altium.com/documentation/altium-designer", "provider": "Altium", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["c语言", "c/c++", "c++", "指针"],
+      "items": [
+        { "title": "C++ Reference", "url": "https://en.cppreference.com/w/c", "provider": "cppreference", "resource_type": "docs", "platform": "docs" },
+        { "title": "菜鸟教程 C 语言", "url": "https://www.runoob.com/cprogramming/c-tutorial.html", "provider": "菜鸟教程", "resource_type": "course", "platform": "article" },
+        { "title": "MIT Missing Semester", "url": "https://missing.csail.mit.edu/", "provider": "MIT", "resource_type": "course", "platform": "mooc" }
+      ]
+    },
+    {
+      "match": ["python", "爬虫"],
+      "items": [
+        { "title": "Python 官方教程", "url": "https://docs.python.org/3/tutorial/", "provider": "Python Software Foundation", "resource_type": "docs", "platform": "docs" },
+        { "title": "Automate the Boring Stuff with Python", "url": "https://automatetheboringstuff.com/", "provider": "Al Sweigart", "resource_type": "course", "platform": "article" },
+        { "title": "Real Python Tutorials", "url": "https://realpython.com/", "provider": "Real Python", "resource_type": "course", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["java", "jvm", "spring"],
+      "items": [
+        { "title": "Dev.java Learn", "url": "https://dev.java/learn/", "provider": "Oracle", "resource_type": "docs", "platform": "docs" },
+        { "title": "Spring Guides", "url": "https://spring.io/guides", "provider": "Spring", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["前端", "html", "css", "javascript", "vue", "react", "web"],
+      "items": [
+        { "title": "MDN Web Docs", "url": "https://developer.mozilla.org/zh-CN/docs/Web", "provider": "Mozilla", "resource_type": "docs", "platform": "docs" },
+        { "title": "JavaScript.info", "url": "https://zh.javascript.info/", "provider": "JavaScript.info", "resource_type": "course", "platform": "article" },
+        { "title": "Vue.js 官方文档", "url": "https://cn.vuejs.org/guide/", "provider": "Vue.js", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["数据结构", "算法", "leetcode", "程序设计"],
+      "items": [
+        { "title": "MIT 6.006 Introduction to Algorithms", "url": "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/", "provider": "MIT OpenCourseWare", "resource_type": "course", "platform": "mooc" },
+        { "title": "VisuAlgo 数据结构可视化", "url": "https://visualgo.net/zh", "provider": "VisuAlgo", "resource_type": "tool", "platform": "article" },
+        { "title": "LeetCode 题库", "url": "https://leetcode.cn/problemset/", "provider": "LeetCode", "resource_type": "tool", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["linux", "操作系统", "shell"],
+      "items": [
+        { "title": "Linux Journey", "url": "https://linuxjourney.com/", "provider": "Linux Journey", "resource_type": "course", "platform": "article" },
+        { "title": "MIT Missing Semester", "url": "https://missing.csail.mit.edu/", "provider": "MIT", "resource_type": "course", "platform": "mooc" }
+      ]
+    },
+    {
+      "match": ["git", "版本控制", "github"],
+      "items": [
+        { "title": "Pro Git 中文版", "url": "https://git-scm.com/book/zh/v2", "provider": "Git", "resource_type": "docs", "platform": "docs" },
+        { "title": "GitHub Skills", "url": "https://skills.github.com/", "provider": "GitHub", "resource_type": "course", "platform": "github" }
+      ]
+    },
+    {
+      "match": ["电路", "模电", "数电", "电子", "电源"],
+      "items": [
+        { "title": "All About Circuits Textbook", "url": "https://www.allaboutcircuits.com/textbook/", "provider": "All About Circuits", "resource_type": "course", "platform": "article" },
+        { "title": "Electronics Tutorials", "url": "https://www.electronics-tutorials.ws/", "provider": "Electronics Tutorials", "resource_type": "course", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["信号", "通信", "射频", "dsp"],
+      "items": [
+        { "title": "MIT 6.003 Signals and Systems", "url": "https://ocw.mit.edu/courses/6-003-signals-and-systems-fall-2011/", "provider": "MIT OpenCourseWare", "resource_type": "course", "platform": "mooc" },
+        { "title": "Analog Devices 技术文章与教程", "url": "https://www.analog.com/en/resources/technical-articles.html", "provider": "Analog Devices", "resource_type": "article", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["控制", "pid", "自动控制", "电机"],
+      "items": [
+        { "title": "PID Control Overview", "url": "https://www.mathworks.com/discovery/pid-control.html", "provider": "MathWorks", "resource_type": "docs", "platform": "docs" },
+        { "title": "Engineering Media Control Systems", "url": "https://engineeringmedia.com/", "provider": "Brian Douglas", "resource_type": "video", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["机器人", "ros", "机械臂", "运动学"],
+      "items": [
+        { "title": "ROS 2 Tutorials", "url": "https://docs.ros.org/en/rolling/Tutorials.html", "provider": "Open Robotics", "resource_type": "docs", "platform": "docs" },
+        { "title": "Gazebo Sim Documentation", "url": "https://gazebosim.org/docs", "provider": "Gazebo", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["视觉", "opencv", "图像", "识别"],
+      "items": [
+        { "title": "OpenCV Tutorials", "url": "https://docs.opencv.org/4.x/d9/df8/tutorial_root.html", "provider": "OpenCV", "resource_type": "docs", "platform": "docs" },
+        { "title": "PyImageSearch Tutorials", "url": "https://pyimagesearch.com/start-here/", "provider": "PyImageSearch", "resource_type": "course", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["机器学习", "深度学习", "人工智能", "神经网络", "pytorch", "tensorflow"],
+      "items": [
+        { "title": "scikit-learn User Guide", "url": "https://scikit-learn.org/stable/user_guide.html", "provider": "scikit-learn", "resource_type": "docs", "platform": "docs" },
+        { "title": "PyTorch Tutorials", "url": "https://pytorch.org/tutorials/", "provider": "PyTorch", "resource_type": "docs", "platform": "docs" },
+        { "title": "TensorFlow Tutorials", "url": "https://www.tensorflow.org/tutorials", "provider": "TensorFlow", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["fpga", "verilog", "vhdl"],
+      "items": [
+        { "title": "Nandland FPGA Tutorials", "url": "https://nandland.com/", "provider": "Nandland", "resource_type": "course", "platform": "article" },
+        { "title": "AMD FPGA Documentation", "url": "https://docs.amd.com/", "provider": "AMD", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["arduino", "树莓派", "传感器"],
+      "items": [
+        { "title": "Arduino Documentation", "url": "https://docs.arduino.cc/", "provider": "Arduino", "resource_type": "docs", "platform": "docs" },
+        { "title": "Raspberry Pi Documentation", "url": "https://www.raspberrypi.com/documentation/", "provider": "Raspberry Pi", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["机械", "结构", "solidworks", "cad", "建模", "装配"],
+      "items": [
+        { "title": "SolidWorks Documentation", "url": "https://help.solidworks.com/", "provider": "Dassault Systèmes", "resource_type": "docs", "platform": "docs" },
+        { "title": "FreeCAD Documentation", "url": "https://wiki.freecad.org/Getting_started", "provider": "FreeCAD", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["3d打印", "增材", "打印"],
+      "items": [
+        { "title": "Prusa Knowledge Base", "url": "https://help.prusa3d.com/", "provider": "Prusa Research", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["数学", "建模", "matlab", "线性代数", "概率"],
+      "items": [
+        { "title": "MATLAB Getting Started", "url": "https://www.mathworks.com/help/matlab/getting-started-with-matlab.html", "provider": "MathWorks", "resource_type": "docs", "platform": "docs" },
+        { "title": "MIT 18.06 Linear Algebra", "url": "https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/", "provider": "MIT OpenCourseWare", "resource_type": "course", "platform": "mooc" },
+        { "title": "Khan Academy Statistics", "url": "https://www.khanacademy.org/math/statistics-probability", "provider": "Khan Academy", "resource_type": "course", "platform": "mooc" }
+      ]
+    },
+    {
+      "match": ["统计", "数据挖掘"],
+      "items": [
+        { "title": "Khan Academy Statistics", "url": "https://www.khanacademy.org/math/statistics-probability", "provider": "Khan Academy", "resource_type": "course", "platform": "mooc" },
+        { "title": "Pandas User Guide", "url": "https://pandas.pydata.org/docs/user_guide/", "provider": "Pandas", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["化学", "化工", "实验"],
+      "items": [
+        { "title": "Chemistry LibreTexts", "url": "https://chem.libretexts.org/", "provider": "LibreTexts", "resource_type": "course", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["生物", "生命科学", "基因", "细胞"],
+      "items": [
+        { "title": "NCBI Bookshelf", "url": "https://www.ncbi.nlm.nih.gov/books/", "provider": "NCBI", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["医学", "临床", "护理", "诊断"],
+      "items": [
+        { "title": "Merck Manual Professional", "url": "https://www.merckmanuals.com/professional", "provider": "Merck", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["设计", "ui", "ux", "视觉", "平面", "交互"],
+      "items": [
+        { "title": "Nielsen Norman Group UX Articles", "url": "https://www.nngroup.com/articles/", "provider": "NN/g", "resource_type": "article", "platform": "article" },
+        { "title": "Figma Learn", "url": "https://help.figma.com/hc/en-us", "provider": "Figma", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["经管", "商业", "市场", "创业", "财务"],
+      "items": [
+        { "title": "MIT OpenCourseWare Entrepreneurship", "url": "https://ocw.mit.edu/search/?q=entrepreneurship", "provider": "MIT OpenCourseWare", "resource_type": "course", "platform": "mooc" },
+        { "title": "Y Combinator Startup Library", "url": "https://www.ycombinator.com/library", "provider": "Y Combinator", "resource_type": "course", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["英语", "演讲", "外语", "口语"],
+      "items": [
+        { "title": "TED Talks", "url": "https://www.ted.com/talks", "provider": "TED", "resource_type": "video", "platform": "video" },
+        { "title": "TED Presentation Playlist", "url": "https://www.ted.com/playlists/574/how_to_make_a_great_presentation", "provider": "TED", "resource_type": "video", "platform": "video" }
+      ]
+    },
+    {
+      "match": ["论文", "科研", "写作", "文献"],
+      "items": [
+        { "title": "The Writing Center Handbook", "url": "https://writing.wisc.edu/handbook/", "provider": "University of Wisconsin", "resource_type": "docs", "platform": "docs" },
+        { "title": "Google Scholar", "url": "https://scholar.google.com/", "provider": "Google", "resource_type": "tool", "platform": "article" }
+      ]
+    },
+    {
+      "match": ["网络安全", "信息安全", "ctf", "渗透"],
+      "items": [
+        { "title": "OWASP Web Security Testing Guide", "url": "https://owasp.org/www-project-web-security-testing-guide/", "provider": "OWASP", "resource_type": "docs", "platform": "docs" },
+        { "title": "PortSwigger Web Security Academy", "url": "https://portswigger.net/web-security", "provider": "PortSwigger", "resource_type": "course", "platform": "mooc" }
+      ]
+    },
+    {
+      "match": ["数据库", "sql", "mysql", "sqlite"],
+      "items": [
+        { "title": "SQLite Documentation", "url": "https://www.sqlite.org/docs.html", "provider": "SQLite", "resource_type": "docs", "platform": "docs" },
+        { "title": "PostgreSQL Tutorial", "url": "https://www.postgresql.org/docs/current/tutorial.html", "provider": "PostgreSQL", "resource_type": "docs", "platform": "docs" }
+      ]
+    },
+    {
+      "match": ["云计算", "大数据", "docker", "kubernetes"],
+      "items": [
+        { "title": "Docker Documentation", "url": "https://docs.docker.com/", "provider": "Docker", "resource_type": "docs", "platform": "docs" },
+        { "title": "Kubernetes Documentation", "url": "https://kubernetes.io/docs/home/", "provider": "Kubernetes", "resource_type": "docs", "platform": "docs" }
+      ]
+    }
+  ]
+}

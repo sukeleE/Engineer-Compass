@@ -73,11 +73,13 @@ r.post('/extract', async (req, res) => {
   }
 
   const system = `你是竞赛情报员。根据用户提供的竞赛资料，提取竞赛信息。
-只输出JSON，字段：name, short_name, type(A类/B类+赛道：电子机器人/机械/综合/数学基础/设计艺术/经管商科/医学技能), start_month(1-12), sign_start, sign_end, province_time, national_time, cycle, difficulty(1-5), intro, suitable_major, team, source_url, confidence(0-1), data_year
+只输出JSON，字段：name, short_name, type(A类/B类+赛道：电子机器人/机械/综合/数学基础/设计艺术/经管商科/医学技能), start_month(1-12), sign_start, sign_end, province_time, national_time, registration_start_date, registration_deadline, competition_start_date, competition_end_date, date_status, date_source_url, cycle, difficulty(1-5), intro, suitable_major, team, source_url, confidence(0-1), data_year
 规则：
 1. 资料里没有的字段必须为null，禁止编造
-2. 对信息完整性自评 confidence
-3. 禁止多余文字，直接返回json`;
+2. 精确日期只接受 YYYY-MM-DD；只有年月或约数时留 null，并保留原文
+3. date_status 只能是 exact / partial / month_only / unknown
+4. 对信息完整性自评 confidence
+5. 禁止多余文字，直接返回json`;
 
   try {
     const raw = await callDeepSeek([

@@ -24,7 +24,14 @@ CREATE TABLE IF NOT EXISTS competition (
   status         TEXT DEFAULT 'active',        -- active正式数据 / pending待审核草稿
   data_year      INTEGER,                      -- 信息对应年份（隔年提示可能过时）
   confidence     REAL,                         -- AI自评置信度(0-1)
-  create_time    DATETIME DEFAULT CURRENT_TIMESTAMP
+  create_time    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  registration_start_date TEXT,
+  registration_deadline   TEXT,
+  competition_start_date  TEXT,
+  competition_end_date    TEXT,
+  date_status             TEXT DEFAULT 'unknown',
+  date_source_url         TEXT,
+  date_updated_at         DATETIME
 );
 
 -- 表2 competition_process 备赛流程/子赛项表（每个子赛项=一个阶段条目）
@@ -40,6 +47,8 @@ CREATE TABLE IF NOT EXISTS competition_process (
 
 -- 表3 tech_stack 技术栈树状表（递归结构，支持无限层级）
 CREATE TABLE IF NOT EXISTS tech_stack (
+  keywords   TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0,
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   comp_id    INTEGER NOT NULL REFERENCES competition(id) ON DELETE CASCADE,
   process_id INTEGER REFERENCES competition_process(id) ON DELETE CASCADE,  -- 所属子赛项（根节点=子赛项名）
@@ -63,6 +72,10 @@ CREATE TABLE IF NOT EXISTS user_schedule (
 -- category: intro 竞赛介绍 / process 备赛流程 / knowledge 知识点（关联技术栈）
 -- platform: bilibili/zhihu/csdn/wechat/douyin/cnki/github/tencent/robomaster
 CREATE TABLE IF NOT EXISTS media_resource (
+  resource_type TEXT DEFAULT 'article',
+  provider      TEXT DEFAULT '',
+  created_by    INTEGER,
+  verified_at   DATETIME,
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   comp_id      INTEGER NOT NULL REFERENCES competition(id) ON DELETE CASCADE,
   category     TEXT NOT NULL,                 -- intro / process / knowledge
@@ -340,8 +353,10 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS idx_process_comp  ON competition_process(comp_id);
 CREATE INDEX IF NOT EXISTS idx_stack_comp    ON tech_stack(comp_id);
 CREATE INDEX IF NOT EXISTS idx_stack_process ON tech_stack(process_id);
+CREATE INDEX IF NOT EXISTS idx_stack_parent  ON tech_stack(parent_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_user ON user_schedule(user_id);
 CREATE INDEX IF NOT EXISTS idx_media_comp    ON media_resource(comp_id, category);
+CREATE INDEX IF NOT EXISTS idx_media_node    ON media_resource(tech_node_id, source_type);
 
 -- 表23~28 资源分享（贴吧式）：帖子 + 附件 + 标签子板块 + 点赞 + 收藏 + 评论
 CREATE TABLE IF NOT EXISTS share_post (

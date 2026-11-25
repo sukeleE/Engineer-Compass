@@ -24,6 +24,26 @@
           <view v-if="comp.sign_start || comp.sign_end" class="info-item">
             <text class="info-label">报名时间</text><text class="info-value">{{ comp.sign_start || '?' }} ~ {{ comp.sign_end || '?' }}</text>
           </view>
+          <view class="info-item">
+            <text class="info-label">报名开始</text><text class="info-value mono">{{ comp.registration_start_date || '官方未公布' }}</text>
+          </view>
+          <view class="info-item">
+            <text class="info-label">报名截止</text><text class="info-value mono deadline">{{ comp.registration_deadline || '官方未公布' }}</text>
+          </view>
+          <view class="info-item">
+            <text class="info-label">比赛开始</text><text class="info-value mono">{{ comp.competition_start_date || '官方未公布' }}</text>
+          </view>
+          <view class="info-item">
+            <text class="info-label">比赛结束</text><text class="info-value mono">{{ comp.competition_end_date || '官方未公布' }}</text>
+          </view>
+          <view v-if="comp.date_status || comp.date_source_url" class="info-item">
+            <text class="info-label">日期状态</text>
+            <text class="info-value">{{ dateStatusText(comp.date_status) }}</text>
+          </view>
+          <view v-if="comp.date_source_url" class="info-item" @click="copyLink(comp.date_source_url)">
+            <text class="info-label">日期来源</text>
+            <text class="info-value source-link">点击复制官方来源链接</text>
+          </view>
           <view v-if="comp.province_time" class="info-item">
             <text class="info-label">省赛时间</text><text class="info-value">{{ comp.province_time }}</text>
           </view>
@@ -63,7 +83,12 @@
       <!-- 技术栈树 -->
       <block v-else-if="tab === 'tree'">
         <view class="card">
-          <TechTree v-if="tree.length" :nodes="tree" :default-expand-level="1" />
+          <TechTree
+            v-if="tree.length"
+            :nodes="tree"
+            :resources-by-node="techResources"
+            :default-expand-level="1"
+          />
           <EmptyState v-else icon="🌳" text="暂无技术栈数据" />
         </view>
       </block>
@@ -76,11 +101,13 @@
             <view class="media-title ellipsis">{{ m.title || m.keyword || '学习资源' }}</view>
             <view class="media-meta">
               <text class="tag tag-blue">{{ platformName(m.platform) }}</text>
+              <text class="tag tag-gray">{{ resourceTypeName(m.resource_type) }}</text>
+              <text v-if="m.provider" class="text-small text-muted ellipsis">{{ m.provider }}</text>
               <text v-if="m.tech_node" class="text-small text-muted ellipsis">{{ m.tech_node }}</text>
             </view>
           </view>
         </view>
-        <EmptyState v-if="!mediaGroups.length" icon="📚" text="暂无学习资源" />
+        <EmptyState v-if="!mediaGroups.length" icon="📚" text="暂无已核实的真实学习资源" />
       </block>
     </block>
 
@@ -117,10 +144,22 @@ const tree = computed(() => {
   return buildTree(rows);
 });
 
+const techResources = computed(() => {
+  const map = {};
+  for (const item of comp.value?.media || []) {
+    if (item.category !== 'knowledge' || item.source_type === 'search' || !item.tech_node_id) continue;
+    const key = String(item.tech_node_id);
+    if (!map[key]) map[key] = [];
+    map[key].push(item);
+  }
+  return map;
+});
+
 const MEDIA_CATEGORY = { intro: '竞赛介绍', process: '备赛流程', knowledge: '知识点' };
 const mediaGroups = computed(() => {
   const map = new Map();
   for (const m of comp.value?.media || []) {
+    if (m.source_type === 'search' || m.category === 'knowledge') continue;
     if (!map.has(m.category)) map.set(m.category, { category: m.category, label: MEDIA_CATEGORY[m.category] || m.category, items: [] });
     map.get(m.category).items.push(m);
   }
@@ -128,8 +167,14 @@ const mediaGroups = computed(() => {
 });
 
 function platformName(p) {
-  const names = { bilibili: 'B站', zhihu: '知乎', csdn: 'CSDN', wechat: '公众号', douyin: '抖音', cnki: '知网', github: 'GitHub', tencent: '腾讯', robomaster: 'RoboMaster' };
+  const names = { bilibili: 'B站', zhihu: '知乎', csdn: 'CSDN', wechat: '公众号', douyin: '抖音', cnki: '知网', github: 'GitHub', docs: '官方文档', mooc: '公开课', video: '视频', article: '文章', tencent: '腾讯', robomaster: 'RoboMaster' };
   return names[p] || p || '网络';
+}
+function resourceTypeName(type) {
+  return { docs: '文档', course: '课程', video: '视频', project: '项目', tool: '工具', article: '文章' }[type] || '资源';
+}
+function dateStatusText(status) {
+  return { exact: '已精确到日', partial: '部分日期明确', month_only: '仅公布月份', unknown: '待官方公布' }[status] || '待核验';
 }
 
 function copyLink(url) {
@@ -201,6 +246,9 @@ onLoad((options) => {
 .info-item { display: flex; padding: 10rpx 0; gap: 20rpx; }
 .info-label { color: #94a3b8; font-size: 25rpx; width: 130rpx; flex-shrink: 0; }
 .info-value { color: #334155; font-size: 25rpx; flex: 1; }
+.info-value.mono { font-family: monospace; }
+.info-value.deadline { color: #dc2626; font-weight: 700; }
+.info-value.source-link { color: #2563eb; }
 .source { display: flex; align-items: center; margin-top: 14rpx; gap: 8rpx; }
 .source-url { color: #2563eb; font-size: 24rpx; flex: 1; }
 

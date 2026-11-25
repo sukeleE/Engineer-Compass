@@ -38,29 +38,31 @@ const PLATFORM_META = {
   douyin: { name: '抖音', icon: '🎵', color: '#3b3b3b' },
   cnki: { name: '知网', icon: '📚', color: '#0b4da2' },
   github: { name: 'GitHub', icon: '🐙', color: '#181717' },
+  docs: { name: '官方文档', icon: '📘', color: '#2563eb' },
+  mooc: { name: '公开课', icon: '🎓', color: '#7c3aed' },
+  video: { name: '视频', icon: '🎬', color: '#dc2626' },
+  article: { name: '文章', icon: '📝', color: '#475569' },
   tencent: { name: '腾讯视频', icon: '🎬', color: '#ff7218' },
   robomaster: { name: 'RoboMaster', icon: '🤖', color: '#b08d00' },
   official: { name: '官网', icon: '🏛️', color: 'var(--primary)' },
 };
 const metaOf = (p) => PLATFORM_META[p] || { name: p, icon: '🔗', color: '#64748b' };
 
-// 学习资源：按分类取 + knowledge 按子赛项/节点分组
-const mediaByCat = (cat) => (comp.value?.media || []).filter((m) => m.category === cat);
-const knowledgeGroups = computed(() => {
-  const map = new Map();
-  for (const m of comp.value?.media || []) {
-    if (m.category !== 'knowledge') continue;
-    const key = m.process_name || '其他';
-    if (!map.has(key)) map.set(key, new Map());
-    const nodeMap = map.get(key);
-    if (!nodeMap.has(m.tech_node)) nodeMap.set(m.tech_node, []);
-    nodeMap.get(m.tech_node).push(m);
-  }
-  return [...map.entries()].map(([processName, nodes]) => ({
-    processName,
-    nodes: [...nodes.entries()].map(([name, items]) => ({ name, items })),
-  }));
-});
+const selectedStackNode = ref(null);
+const curatedMedia = computed(() => (comp.value?.media || []).filter((m) => m.source_type !== 'search'));
+const curatedKnowledge = computed(() => curatedMedia.value.filter((m) => m.category === 'knowledge'));
+const introProcessMedia = computed(() => curatedMedia.value.filter((m) => m.category === 'intro' || m.category === 'process'));
+const knowledgeGroups = computed(() => []);
+// 学习资源只展示已核实的真实链接；平台搜索模板不再冒充课程资源
+const mediaByCat = (cat) => curatedMedia.value.filter((m) => m.category === cat);
+
+function onStackSelect(node) {
+  selectedStackNode.value = node;
+}
+
+function resourceTypeLabel(type) {
+  return { docs: '文档', course: '课程', video: '视频', project: '项目', tool: '工具', article: '文章' }[type] || '资源';
+}
 
 watch(
   () => props.compId,
@@ -71,6 +73,7 @@ watch(
     activeTab.value = 'info';
     try {
       comp.value = await api.competition(id);
+      selectedStackNode.value = null;
       const firstWithTree = comp.value.process.find((p) => p.tech_stack?.length) || comp.value.process[0];
       selProcess.value = firstWithTree?.id ?? null;
     } catch (e) {
@@ -181,6 +184,24 @@ function lab(full, short) { return isNarrow.value ? short : full; }
               <el-descriptions-item label="时间线">
                 <span class="timeline-text">{{ comp.timeline_raw || '—' }}</span>
               </el-descriptions-item>
+              <el-descriptions-item label="报名开始">
+                <span class="date-value">{{ comp.registration_start_date || '官方未公布' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="报名截止">
+                <span class="date-value deadline">{{ comp.registration_deadline || '官方未公布' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="比赛开始">
+                <span class="date-value">{{ comp.competition_start_date || '官方未公布' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="比赛结束">
+                <span class="date-value">{{ comp.competition_end_date || '官方未公布' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="日期状态">
+                <el-tag size="small" :type="comp.date_status === 'exact' ? 'success' : comp.date_status === 'partial' ? 'warning' : 'info'">
+                  {{ { exact: '已精确到日', partial: '部分日期明确', month_only: '仅公布月份', unknown: '待官方公布' }[comp.date_status] || '待核验' }}
+                </el-tag>
+                <a v-if="comp.date_source_url" :href="comp.date_source_url" target="_blank" class="date-source">日期来源</a>
+              </el-descriptions-item>
               <el-descriptions-item label="适合专业">{{ comp.suitable_major || '—' }}</el-descriptions-item>
               <el-descriptions-item label="数据状态">
                 <el-tag size="small" :type="comp.status === 'pending' ? 'warning' : 'success'">
@@ -218,13 +239,45 @@ function lab(full, short) { return isNarrow.value ? short : full; }
                 <el-option v-for="p in processOptions" :key="p.id" :value="p.id" :label="p.label" />
               </el-select>
             </div>
-            <TechTreeChart v-if="curProcess" :process="curProcess" />
+            <template v-if="curProcess">
+              <TechTreeChart
+                :process="curProcess"
+                :resources="curatedKnowledge"
+                @select="onStackSelect"
+              />
+              <div v-if="selectedStackNode" class="node-resource-panel">
+                <div class="nr-head">
+                  <b>{{ selectedStackNode.name }}</b>
+                  <span>{{ selectedStackNode.resources.length }} 条已收录资源</span>
+                </div>
+                <div v-if="selectedStackNode.resources.length" class="nr-list">
+                  <a
+                    v-for="resource in selectedStackNode.resources"
+                    :key="resource.id"
+                    :href="resource.url"
+                    target="_blank"
+                    class="nr-item"
+                  >
+                    <span class="nr-type">{{ resourceTypeLabel(resource.resource_type) }}</span>
+                    <span class="nr-title">{{ resource.title }}</span>
+                    <span class="nr-provider">{{ resource.provider || metaOf(resource.platform).name }}</span>
+                  </a>
+                </div>
+                <el-empty v-else description="这个知识点暂时没有找到合适资源，管理员可人工补充" :image-size="50" />
+              </div>
+            </template>
             <el-empty v-else description="该竞赛暂无技术栈数据" />
           </el-tab-pane>
 
           <!-- Tab4 学习资源（视频/文章，按分类 + 技术栈节点） -->
           <el-tab-pane :label="lab('🎬 学习资源', '资源')" name="media">
-            <el-empty v-if="!(comp.media || []).length" description="暂无学习资源数据" />
+            <el-alert
+              title="知识点资源请在「树状技术栈」中点击具体节点查看；这里只展示竞赛介绍和备赛流程资源。"
+              type="info"
+              :closable="false"
+              style="margin-bottom:12px"
+            />
+            <el-empty v-if="!introProcessMedia.length" description="暂无已核实的竞赛介绍或流程资源" />
             <template v-else>
               <!-- 竞赛介绍 -->
               <div v-if="mediaByCat('intro').length" class="media-block">
@@ -358,6 +411,9 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 }
 
 .timeline-text { white-space: normal; }
+.date-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+.date-value.deadline { color: #dc2626; font-weight: 600; }
+.date-source { margin-left: 10px; color: var(--primary-dark); font-size: 12px; }
 
 // 官网横幅
 .official-banner {
@@ -394,6 +450,39 @@ function lab(full, short) { return isNarrow.value ? short : full; }
 
 .stack-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .stack-label { color: var(--text-2); font-size: 13px; }
+.node-resource-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-3);
+  padding: 10px 12px;
+}
+.nr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  b { font-size: 14px; }
+  span { color: var(--text-2); font-size: 12px; }
+}
+.nr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 7px; }
+.nr-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--card-bg);
+  &:hover { border-color: var(--primary); background: var(--surface-2); }
+}
+.nr-type { flex-shrink: 0; font-size: 11px; color: #fff; background: var(--primary); border-radius: 4px; padding: 1px 5px; }
+.nr-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nr-provider { flex-shrink: 0; color: var(--text-2); font-size: 11px; }
 
 .join-intro { margin-bottom: 16px; p { margin: 6px 0; } .join-tip { color: var(--text-2); font-size: 13px; } }
 .join-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

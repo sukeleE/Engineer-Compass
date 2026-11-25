@@ -5,7 +5,9 @@ import * as echarts from 'echarts';
 
 const props = defineProps({
   process: { type: Object, default: null }, // 子赛项对象 { phase_name, tech_stack: [{id,parent_id,node_name,node_desc}] }
+  resources: { type: Array, default: () => [] },
 });
+const emit = defineEmits(['select']);
 
 const chartRef = ref(null);
 const collapseState = ref('all'); // 默认全部展开（需求）；节点级点击展开/收起仍可用
@@ -15,7 +17,21 @@ let chart = null;
 function buildTree(proc, state) {
   if (!proc) return { name: '无技术栈数据', children: [] };
   const nodes = proc.tech_stack || [];
-  const byId = new Map(nodes.map((n) => [n.id, { name: n.node_name, tooltip_desc: n.node_desc, children: [] }]));
+  const resourceCount = new Map();
+  for (const resource of props.resources) {
+    if (!resource.tech_node_id) continue;
+    resourceCount.set(resource.tech_node_id, (resourceCount.get(resource.tech_node_id) || 0) + 1);
+  }
+  const byId = new Map(nodes.map((n) => [
+    n.id,
+    {
+      name: n.node_name,
+      rawId: n.id,
+      resourceCount: resourceCount.get(n.id) || 0,
+      tooltip_desc: n.node_desc,
+      children: [],
+    },
+  ]));
   const roots = [];
   for (const n of nodes) {
     const node = byId.get(n.id);
@@ -47,7 +63,14 @@ function render() {
     tooltip: {
       trigger: 'item',
       triggerOn: 'mousemove',
-      formatter: (p) => p.data.name + (p.data.tooltip_desc ? `<br/><span style="color:#94a3b8">${p.data.tooltip_desc}</span>` : ''),
+      formatter: (p) => {
+        const resource = p.data.rawId
+          ? `<br/><span style="color:${p.data.resourceCount ? '#047857' : '#94a3b8'}">${p.data.resourceCount ? `${p.data.resourceCount} 条学习资源` : '暂无已收录资源'}</span>`
+          : '';
+        return p.data.name
+          + (p.data.tooltip_desc ? `<br/><span style="color:#94a3b8">${p.data.tooltip_desc}</span>` : '')
+          + resource;
+      },
     },
     series: [
       {
@@ -55,7 +78,7 @@ function render() {
         data: [tree],
         top: 12, bottom: 12, left: 24, right: 24,
         symbolSize: 8,
-        initialTreeDepth: 3,
+        initialTreeDepth: 5,
         expandAndCollapse: true,
         roam: true, // 拖拽平移 + 滚轮缩放
         label: {
@@ -104,12 +127,21 @@ function fitTree() {
 
 function onResize() { chart?.resize(); }
 
-watch(() => props.process, async () => { await nextTick(); render(); });
+watch(() => [props.process, props.resources], async () => { await nextTick(); render(); }, { deep: true });
 
 let ro = null;
 
 onMounted(async () => {
   chart = echarts.init(chartRef.value);
+  chart.on('click', (params) => {
+    const rawId = params?.data?.rawId;
+    if (!rawId) return;
+    emit('select', {
+      id: rawId,
+      name: params.data.name,
+      resources: props.resources.filter((resource) => resource.tech_node_id === rawId),
+    });
+  });
   await nextTick();
   render();
   // 容器可能在隐藏 tab（display:none）里初始化 → 量到 0 宽、树挤在角落；
@@ -133,7 +165,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="tree-wrap">
     <div class="tree-toolbar">
-      <span class="hint">🖱️ 拖拽平移 · 滚轮缩放 · 点击折叠</span>
+      <span class="hint">拖拽平移 · 滚轮缩放 · 点击知识点查看资源</span>
     </div>
     <div ref="chartRef" class="tech-tree"></div>
   </div>
