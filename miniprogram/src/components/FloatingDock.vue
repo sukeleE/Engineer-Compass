@@ -3,27 +3,22 @@
     <view class="fd-anchor" :style="anchorStyle">
       <!-- 展开的工具列表（仿网页版 ToolDock：默认向上纵向堆叠；靠近顶部自动向下，靠近左侧自动换到右边） -->
       <view v-if="open" class="fd-tools" :class="{ below: !spaceAbove, left: leftMode }">
-        <view class="fd-tool" @click="pick('gallery')">
+        <view class="fd-tool" @tap="pick('gallery')">
           <text class="fd-name">工具</text>
           <view class="fd-icon">🧰</view>
         </view>
-        <view class="fd-tool" @click="pick('notes')">
+        <view class="fd-tool" @tap="pick('notes')">
           <text class="fd-name">学习笔记</text>
           <view class="fd-icon">📝</view>
         </view>
-        <view class="fd-tool" @click="pick('msg')">
+        <view class="fd-tool" @tap="pick('msg')">
           <text class="fd-name">消息中心</text>
           <view class="fd-icon">🔔<text v-if="unread > 0" class="fd-unread">{{ unread > 99 ? '99+' : unread }}</text></view>
         </view>
       </view>
 
       <!-- 主浮标（可自由拖动，点击展开；拖动超过阈值不触发点击） -->
-      <view class="fd-fab" :class="{ active: open, dragging }"
-        @touchstart.stop="onTouchStart"
-        @touchmove.stop="onTouchMove"
-        @touchend="onTouchEnd"
-        @touchcancel="onTouchCancel"
-        @tap.stop="onFabClick">
+      <view class="fd-fab" :class="{ active: open }" @tap.stop="toggle">
         <text v-if="pomo.running && !open" class="fd-fab-time">{{ formatClock(pomo.remaining) }}</text>
         <text v-else class="fd-fab-icon">🧰</text>
         <text v-if="unread > 0 && !open && !pomo.running" class="fd-dot"></text>
@@ -31,35 +26,35 @@
     </view>
 
     <!-- 工具面板 -->
-    <view v-if="panel" class="fd-mask" @click="closePanel">
-      <view class="fd-sheet" @click.stop>
+    <view v-if="panel" class="fd-mask" @tap="closePanel">
+      <view class="fd-sheet" @tap.stop>
         <template v-if="panel === 'gallery'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">🧰 学习工具</text>
-            <text class="fd-close" @click="closePanel">×</text>
+            <text class="fd-close" @tap="closePanel">×</text>
           </view>
           <view class="tool-grid">
-            <view class="tool-card" @click="openGalleryTool('pomodoro')">
+            <view class="tool-card" @tap="openGalleryTool('pomodoro')">
               <text class="tool-card-icon">🍅</text>
               <text class="tool-card-name">番茄钟</text>
               <text class="tool-card-desc">{{ pomo.running ? formatClock(pomo.remaining) : '专注计时' }}</text>
             </view>
-            <view class="tool-card" @click="openGalleryTool('countdown')">
+            <view class="tool-card" @tap="openGalleryTool('countdown')">
               <text class="tool-card-icon">📅</text>
               <text class="tool-card-name">倒数日</text>
               <text class="tool-card-desc">{{ countdowns.list.length }} 个目标</text>
             </view>
-            <view class="tool-card" @click="openGalleryTool('todo')">
+            <view class="tool-card" @tap="openGalleryTool('todo')">
               <text class="tool-card-icon">✅</text>
               <text class="tool-card-name">今日待办</text>
               <text class="tool-card-desc">{{ todos.list.filter((item) => !item.done).length }} 项未完成</text>
             </view>
-            <view class="tool-card" @click="openGalleryTool('stats')">
+            <view class="tool-card" @tap="openGalleryTool('stats')">
               <text class="tool-card-icon">📊</text>
               <text class="tool-card-name">学习统计</text>
               <text class="tool-card-desc">今日 {{ stats.today }} 分钟</text>
             </view>
-            <view class="tool-card tool-card-wide" @click="openGalleryTool('ai')">
+            <view class="tool-card tool-card-wide" @tap="openGalleryTool('ai')">
               <text class="tool-card-icon">💬</text>
               <text class="tool-card-name">AI 对话</text>
               <text class="tool-card-desc">竞赛、备赛和学习问题都可以直接问</text>
@@ -70,22 +65,22 @@
         <template v-else-if="panel === 'pomodoro'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">🍅 番茄钟</text>
-            <text class="fd-close" @click="closePanel">✕</text>
+            <text class="fd-close" @tap="closePanel">✕</text>
           </view>
           <view class="pomo-mode">{{ pomo.mode === 'focus' ? '专注时间' : '休息时间' }}</view>
           <view class="pomo-clock">{{ formatClock(pomo.remaining) }}</view>
           <view class="pomo-tip">今日完成 {{ pomo.completedToday }} 个番茄</view>
           <view class="pomo-actions">
-            <button class="btn btn-primary pomo-btn" @click="pomodoroToggle">{{ pomo.running ? '暂停' : '开始' }}</button>
-            <button class="btn btn-ghost pomo-btn" @click="pomodoroReset">重置</button>
+            <button class="btn btn-primary pomo-btn" @tap="pomodoroToggle">{{ pomo.running ? '暂停' : '开始' }}</button>
+            <button class="btn btn-ghost pomo-btn" @tap="pomodoroReset">重置</button>
           </view>
           <view class="preset-row">
             <text class="preset-label">专注</text>
-            <text v-for="m in focusPresets" :key="'f' + m" class="preset-chip" :class="{ on: pomo.focusMin === m }" @click="chooseFocus(m)">{{ m }} 分钟</text>
+            <text v-for="m in focusPresets" :key="'f' + m" class="preset-chip" :class="{ on: pomo.focusMin === m }" @tap="chooseFocus(m)">{{ m }} 分钟</text>
           </view>
           <view class="preset-row">
             <text class="preset-label">休息</text>
-            <text v-for="m in breakPresets" :key="'b' + m" class="preset-chip" :class="{ on: pomo.breakMin === m }" @click="chooseBreak(m)">{{ m }} 分钟</text>
+            <text v-for="m in breakPresets" :key="'b' + m" class="preset-chip" :class="{ on: pomo.breakMin === m }" @tap="chooseBreak(m)">{{ m }} 分钟</text>
           </view>
           <view class="pomo-foot">计时在切换页面后继续；离开小程序期间按结束时间自动校准。</view>
         </template>
@@ -93,14 +88,14 @@
         <template v-else-if="panel === 'countdown'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">📅 倒数日</text>
-            <text class="fd-close" @click="closePanel">✕</text>
+            <text class="fd-close" @tap="closePanel">✕</text>
           </view>
           <view class="cd-form">
             <input v-model="cdTitle" class="cd-input" placeholder="目标名称，如：省赛" maxlength="20" />
             <picker mode="date" :value="cdDate" @change="onCdDate">
               <view class="cd-date-btn">{{ cdDate || '选择日期' }}</view>
             </picker>
-            <button class="btn btn-primary cd-add" @click="addCd">添加</button>
+            <button class="btn btn-primary cd-add" @tap="addCd">添加</button>
           </view>
           <scroll-view scroll-y class="cd-list">
             <EmptyState v-if="!cdItems.length" icon="📅" text="还没有倒数日，添加一个目标吧" />
@@ -110,7 +105,7 @@
                 <text class="cd-date">{{ it.date }}</text>
               </view>
               <text class="cd-days" :class="{ soon: it.days <= 7 && it.days >= 0, past: it.days < 0 }">{{ it.label }}</text>
-              <text class="cd-del" @click="removeCd(it.id)">删除</text>
+              <text class="cd-del" @tap="removeCd(it.id)">删除</text>
             </view>
           </scroll-view>
         </template>
@@ -118,18 +113,18 @@
         <template v-else-if="panel === 'todo'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">✅ 今日待办</text>
-            <text class="fd-close" @click="closePanel">×</text>
+            <text class="fd-close" @tap="closePanel">×</text>
           </view>
           <view class="cd-form">
             <input v-model="todoText" class="cd-input" placeholder="添加一条今日待办" maxlength="60" @confirm="submitTodo" />
-            <button class="btn btn-primary cd-add" @click="submitTodo">添加</button>
+            <button class="btn btn-primary cd-add" @tap="submitTodo">添加</button>
           </view>
           <scroll-view scroll-y class="cd-list">
             <EmptyState v-if="!todos.list.length" icon="✅" text="还没有待办，先添加一条吧" />
             <view v-for="item in todos.list" :key="item.id" class="todo-item">
-              <text class="todo-check" :class="{ done: item.done }" @click="toggleTodo(item.id)">{{ item.done ? '✓' : '' }}</text>
-              <text class="todo-text" :class="{ done: item.done }" @click="toggleTodo(item.id)">{{ item.text }}</text>
-              <text class="todo-del" @click="removeTodo(item.id)">删除</text>
+              <text class="todo-check" :class="{ done: item.done }" @tap="toggleTodo(item.id)">{{ item.done ? '✓' : '' }}</text>
+              <text class="todo-text" :class="{ done: item.done }" @tap="toggleTodo(item.id)">{{ item.text }}</text>
+              <text class="todo-del" @tap="removeTodo(item.id)">删除</text>
             </view>
           </scroll-view>
         </template>
@@ -137,7 +132,7 @@
         <template v-else>
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">📊 学习统计</text>
-            <text class="fd-close" @click="closePanel">×</text>
+            <text class="fd-close" @tap="closePanel">×</text>
           </view>
           <view class="stats-grid">
             <view class="stats-card"><text class="stats-num">{{ stats.today }}</text><text class="stats-label">今日分钟</text></view>
@@ -159,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue';
+import { ref, computed } from 'vue';
 import { api } from '../utils/api.js';
 import { isLoggedIn } from '../utils/auth.js';
 import { ensureLogin, toast } from '../utils/guard.js';
@@ -170,7 +165,7 @@ import {
   formatClock, countdowns, addCountdown, removeCountdown, daysLeft, daysText,
   todos, addTodo, toggleTodo, removeTodo,
   todayFocusMinutes, weekFocusMinutes, streakDays, last7Days,
-  dock, initDockPos, saveDockPos, dockBounds,
+  dock, initDockPos,
 } from '../utils/studyTools.js';
 
 initDockPos();
@@ -178,7 +173,6 @@ initDockPos();
 const open = ref(false);
 const panel = ref(''); // gallery | pomodoro | countdown | todo | stats | ''
 const unread = ref(0);
-const dragging = ref(false);
 const cdTitle = ref('');
 const cdDate = ref('');
 const todoText = ref('');
@@ -189,64 +183,6 @@ const anchorStyle = computed(() => ({ left: `${dock.x}px`, top: `${dock.y}px` })
 // 工具列表高度约 4×84rpx + 间距；上方空间不足时改到浮标下方
 const spaceAbove = computed(() => dock.y > (dock.w / 7.5) * 4.6);
 const leftMode = computed(() => dock.x < dock.w / 2);
-
-let drag = null;
-let touchHandled = false;
-let touchTimer = null;
-
-function onTouchStart(e) {
-  const t = e.touches && e.touches[0];
-  if (!t) return;
-  drag = { sx: t.clientX, sy: t.clientY, ox: dock.x, oy: dock.y, moved: false };
-}
-
-function onTouchMove(e) {
-  if (!drag) return;
-  const t = e.touches && e.touches[0];
-  if (!t) return;
-  const dx = t.clientX - drag.sx;
-  const dy = t.clientY - drag.sy;
-  if (!drag.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    drag.moved = true;
-    dragging.value = true;
-    open.value = false;
-  }
-  if (!drag.moved) return;
-  const b = dockBounds();
-  dock.x = Math.max(b.minX, Math.min(b.maxX, drag.ox + dx));
-  dock.y = Math.max(b.minY, Math.min(b.maxY, drag.oy + dy));
-}
-
-function onTouchEnd() {
-  if (!drag) return;
-  const moved = drag.moved;
-  const x = dock.x;
-  const y = dock.y;
-  drag = null;
-  dragging.value = false;
-  if (moved) saveDockPos(x, y);
-  touchHandled = moved;
-  clearTimeout(touchTimer);
-  touchTimer = setTimeout(() => { touchHandled = false; }, 400);
-}
-
-function onFabClick() {
-  if (touchHandled) {
-    touchHandled = false;
-    return;
-  }
-  toggle();
-}
-
-function onTouchCancel() {
-  drag = null;
-  dragging.value = false;
-  touchHandled = true;
-  clearTimeout(touchTimer);
-  touchTimer = setTimeout(() => { touchHandled = false; }, 400);
-}
-
-onBeforeUnmount(() => clearTimeout(touchTimer));
 
 const cdItems = computed(() => countdowns.list.map((it) => ({
   ...it,
@@ -369,8 +305,6 @@ function removeCd(id) { removeCountdown(id); }
   transition: transform 0.2s;
 }
 .fd-fab.active { transform: rotate(45deg); }
-.fd-fab.dragging { transform: scale(1.06); }
-.fd-fab.active.dragging { transform: rotate(45deg) scale(1.06); }
 .fd-fab-icon { font-size: 44rpx; }
 .fd-fab-time { font-size: 22rpx; font-weight: 700; }
 .fd-dot {
