@@ -55,6 +55,7 @@
               </view>
             </view>
             <view v-if="task.mode === 'multi' && !task.done" class="mini-btn" @click.stop="completeOnce(p, pi, ti)">+1</view>
+            <view class="mini-btn ai-entry" @click.stop="openAiAssist(p, pi, ti, task)">✨ AI</view>
             <view v-if="canEditPlan" class="mini-btn" @click.stop="openSplit(p, pi, ti)">拆分</view>
           </view>
         </view>
@@ -90,6 +91,52 @@
         <view class="modal-actions">
           <button class="btn btn-ghost modal-btn" @click="splitOpen = false">取消</button>
           <button class="btn btn-primary modal-btn" :disabled="splitBusy" @click="saveSplit">{{ splitBusy ? '提交中…' : '确认拆分' }}</button>
+        </view>
+      </view>
+    </view>
+
+    <!-- AI 任务协助弹窗 -->
+    <view v-if="aiOpen" class="modal-mask" @click="aiOpen = false">
+      <view class="modal modal-lg ai-modal" @click.stop>
+        <view class="modal-title">✨ AI 任务协助</view>
+        <view class="ai-task-text">{{ aiCtx && aiCtx.task ? aiCtx.task.text : '' }}</view>
+        <scroll-view scroll-y class="ai-result-scroll">
+          <view v-if="aiPanelBusy" class="ai-loading">
+            <view class="loading-dot"></view>
+            <text>正在拆解并匹配学习资源…</text>
+          </view>
+          <view v-else-if="aiPanelError" class="ai-error">{{ aiPanelError }}</view>
+          <template v-else-if="aiPanelResult">
+            <view v-if="aiPanelResult.hint" class="ai-hint">{{ aiPanelResult.hint }}</view>
+            <view class="ai-section">
+              <view class="ai-section-title">可执行子任务</view>
+              <view v-for="(s, i) in aiPanelResult.subtasks" :key="i" class="ai-subtask">
+                <text class="ai-index">{{ i + 1 }}</text>
+                <text class="ai-subtask-text">{{ s }}</text>
+              </view>
+            </view>
+            <view v-if="(aiPanelResult.keywords || []).length" class="ai-section">
+              <view class="ai-section-title">细分关键词</view>
+              <view class="ai-keywords">
+                <text v-for="(k, i) in aiPanelResult.keywords" :key="i" class="ai-keyword">{{ k }}</text>
+              </view>
+            </view>
+            <view v-if="(aiPanelResult.resources || []).length" class="ai-section">
+              <view class="ai-section-title">推荐学习资源</view>
+              <view v-for="(r, i) in aiPanelResult.resources" :key="i" class="ai-resource" @click="copyResource(r)">
+                <view class="ai-resource-main">
+                  <text class="ai-resource-title">{{ r.title }}</text>
+                  <text class="ai-resource-meta">{{ platformName(r.platform) }} · {{ r.kind === 'detail' ? '细分检索' : '主题检索' }}</text>
+                </view>
+                <text class="ai-copy">复制</text>
+              </view>
+            </view>
+          </template>
+        </scroll-view>
+        <view class="modal-actions">
+          <button class="btn btn-ghost modal-btn" @click="aiOpen = false">关闭</button>
+          <button v-if="canEditPlan && aiPanelResult && aiPanelResult.subtasks.length" class="btn btn-primary modal-btn"
+            :disabled="aiApplyBusy" @click="applyAiSplit">{{ aiApplyBusy ? '应用中…' : '应用为子任务' }}</button>
         </view>
       </view>
     </view>
@@ -287,6 +334,72 @@ async function saveSplit() {
   }
 }
 
+// ---------- AI 任务协助：拆解 + 关键词 + 平台学习资源 ----------
+const aiOpen = ref(false);
+const aiCtx = ref(null);
+const aiPanelBusy = ref(false);
+const aiPanelError = ref('');
+const aiPanelResult = ref(null);
+const aiApplyBusy = ref(false);
+const PLATFORM_NAMES = {
+  bilibili: 'B站',
+  zhihu: '知乎',
+  csdn: 'CSDN',
+  wechat: '微信公众号',
+  douyin: '抖音',
+  cnki: '知网',
+  github: 'GitHub',
+  tencent: '腾讯视频',
+};
+function platformName(key) {
+  return PLATFORM_NAMES[key] || key || '学习平台';
+}
+async function openAiAssist(p, pi, ti, task) {
+  aiCtx.value = { p, pi, ti, task };
+  aiOpen.value = true;
+  aiPanelResult.value = null;
+  aiPanelError.value = '';
+  if (!task?.text) {
+    aiPanelError.value = '任务文本为空，无法拆解';
+    return;
+  }
+  aiPanelBusy.value = true;
+  try {
+    aiPanelResult.value = await api.taskAssist({ task_text: task.text });
+  } catch (e) {
+    aiPanelError.value = e.message || 'AI 服务暂不可用';
+  } finally {
+    aiPanelBusy.value = false;
+  }
+}
+function copyResource(resource) {
+  if (!resource?.url) return;
+  uni.setClipboardData({
+    data: resource.url,
+    success: () => toast('链接已复制，可在浏览器打开', 'success'),
+  });
+}
+async function applyAiSplit() {
+  const ctx = aiCtx.value;
+  const subtasks = aiPanelResult.value?.subtasks || [];
+  if (!ctx || !subtasks.length) return;
+  if (!canEditPlan.value) return toast('仅组长可应用拆分');
+  if (!(await confirm(`将「${ctx.task.text}」替换为 ${subtasks.length} 个子任务？`))) return;
+  aiApplyBusy.value = true;
+  try {
+    await api.teamPlanTaskSplit(id.value, ctx.p.id, {
+      phase_idx: ctx.pi,
+      task_idx: ctx.ti,
+      subtasks,
+    });
+    toast('已应用 AI 拆分', 'success');
+    aiOpen.value = false;
+    load();
+  } finally {
+    aiApplyBusy.value = false;
+  }
+}
+
 // ---------- AI 智能分组 ----------
 const groupOpen = ref(false);
 const groupRows = ref([]);
@@ -324,6 +437,7 @@ onShow(() => { if (id.value) load(); });
 .t-actions { display: flex; gap: 14rpx; justify-content: flex-end; margin-top: 16rpx; }
 .mini-btn { background: #eff6ff; color: #2563eb; font-size: 24rpx; border-radius: 26rpx; padding: 10rpx 28rpx; }
 .mini-btn.danger { background: #fee2e2; color: #ef4444; }
+.mini-btn.ai-entry { background: #ecfdf5; color: #047857; }
 .plan-actions { display: flex; gap: 16rpx; }
 .plan-btn { flex: 1; height: 80rpx; font-size: 27rpx; }
 .plan-card { padding: 24rpx 28rpx; }
@@ -354,6 +468,101 @@ onShow(() => { if (id.value) load(); });
 .picker-like { color: #475569; }
 .modal-actions { display: flex; gap: 18rpx; }
 .modal-btn { flex: 1; height: 80rpx; font-size: 28rpx; }
+.ai-modal { max-height: 84vh; }
+.ai-task-text {
+  padding: 16rpx 18rpx;
+  margin-bottom: 16rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 25rpx;
+  line-height: 1.65;
+}
+.ai-result-scroll { max-height: 54vh; margin-bottom: 18rpx; }
+.ai-loading {
+  min-height: 240rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  color: #64748b;
+  font-size: 24rpx;
+}
+.loading-dot {
+  width: 32rpx;
+  height: 32rpx;
+  border: 4rpx solid #dbe4ef;
+  border-top-color: #059669;
+  border-radius: 50%;
+  animation: ai-spin .8s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+.ai-error { color: #b91c1c; padding: 24rpx 8rpx; font-size: 25rpx; text-align: center; }
+.ai-hint {
+  padding: 12rpx 16rpx;
+  margin-bottom: 14rpx;
+  border-radius: 10rpx;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 23rpx;
+  line-height: 1.6;
+}
+.ai-section { margin-bottom: 20rpx; }
+.ai-section-title {
+  margin-bottom: 10rpx;
+  color: #334155;
+  font-size: 25rpx;
+  font-weight: 700;
+}
+.ai-subtask {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  padding: 10rpx 0;
+  border-bottom: 1rpx solid #f1f5f9;
+}
+.ai-index {
+  width: 34rpx;
+  height: 34rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 20rpx;
+  line-height: 34rpx;
+  text-align: center;
+}
+.ai-subtask-text { flex: 1; color: #334155; font-size: 25rpx; line-height: 1.6; }
+.ai-keywords { display: flex; gap: 10rpx; flex-wrap: wrap; }
+.ai-keyword {
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 22rpx;
+}
+.ai-resource {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin-bottom: 10rpx;
+  padding: 14rpx 16rpx;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 12rpx;
+  background: #fff;
+}
+.ai-resource-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.ai-resource-title { color: #334155; font-size: 24rpx; line-height: 1.45; }
+.ai-resource-meta { color: #94a3b8; font-size: 21rpx; }
+.ai-copy {
+  flex-shrink: 0;
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 21rpx;
+}
 .group-list { max-height: 60vh; margin-bottom: 16rpx; }
 .group-row { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 8rpx; border-bottom: 1rpx solid #f1f5f9; }
 .group-main { flex: 1; display: flex; flex-direction: column; gap: 6rpx; }
