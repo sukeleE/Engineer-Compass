@@ -296,11 +296,27 @@ function closePanel() { panel.value = ''; }
 
 function openGalleryTool(key) {
   if (key === 'ai') {
-    panel.value = '';
-    uni.navigateTo({ url: '/packageCompetition/pages/chat/main' });
+    openAiChat();
     return;
   }
   panel.value = key;
+}
+
+function openAiChat() {
+  open.value = false;
+  panel.value = '';
+  const url = '/packageCompetition/pages/chat/main?from=dock';
+  setTimeout(() => {
+    uni.navigateTo({
+      url,
+      fail: () => {
+        uni.redirectTo({
+          url,
+          fail: () => toast('AI 对话页面打开失败，请稍后重试'),
+        });
+      },
+    });
+  }, 40);
 }
 
 function submitTodo() {

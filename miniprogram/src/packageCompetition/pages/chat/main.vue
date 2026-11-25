@@ -73,6 +73,7 @@ async function scrollBottom() {
 onLoad((options) => {
   compId.value = options.id ? Number(options.id) : null;
   compName.value = options.name ? decodeURIComponent(options.name) : '';
+  uni.setNavigationBarTitle({ title: compName.value ? 'AI 竞赛问答' : 'AI 工科竞赛助手' });
 });
 </script>
 
