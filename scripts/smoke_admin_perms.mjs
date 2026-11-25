@@ -178,11 +178,11 @@ try {
   ok('log:visit：访问记录 200', (await req('/admin/visits', { token: T.访录 })).status === 200);
   const insAccess = db.prepare("INSERT INTO access_log (method, path) VALUES ('GET', '/retention-seed')");
   db.exec('BEGIN');
-  for (let i = 0; i < 5010; i++) insAccess.run();
+  for (let i = 0; i < 100010; i++) insAccess.run();
   db.exec('COMMIT');
   await req('/admin/logs', { token: T.日志 });
   const accessCount = db.prepare('SELECT COUNT(*) AS n FROM access_log').get().n;
-  ok('访问记录写入后严格保留最近 5000 条', accessCount === 5000, accessCount);
+  ok('访问记录写入后严格保留最近 5000 页（100000 条）', accessCount === 100000, accessCount);
 
   // ---------- 8. 超管任命：子 key 落库 / 非法过滤 / 会话即时生效 ----------
   const role = await req(`/admin/users/${acc.目标3.id}/role`, {

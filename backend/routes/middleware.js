@@ -202,7 +202,9 @@ export function clientIp(req) {
   return xff || String(req.ip || '').replace('::ffff:', '');
 }
 
-export const ACCESS_LOG_LIMIT = 5000;
+export const ACCESS_LOG_PAGE_SIZE = 20;
+export const ACCESS_LOG_KEEP_PAGES = 5000;
+export const ACCESS_LOG_LIMIT = ACCESS_LOG_PAGE_SIZE * ACCESS_LOG_KEEP_PAGES;
 const accessOverflowStmt = db.prepare(
   'SELECT id FROM access_log ORDER BY id DESC LIMIT 1 OFFSET ?'
 );
