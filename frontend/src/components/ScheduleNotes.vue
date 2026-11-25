@@ -11,6 +11,7 @@ import { NOTE_STATUS, statusOf, excerpt, fmtDate } from '../utils/noteStatus.js'
 const props = defineProps({
   schedules: { type: Array, default: () => [] }, // 供「关联备赛」选择
   open: { type: Boolean, default: false },       // 面板展开（由 ToolDock 控制）
+  panelStyle: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(['close']);
 
@@ -209,7 +210,7 @@ onMounted(() => { loadMonth().then(applyDate); });
 <template>
   <!-- 日程笔记面板（由 ToolDock 控制开关），布局仿 AI 对话 / 消息中心 -->
   <transition name="chat">
-    <div v-if="props.open" class="note-panel">
+    <div v-if="props.open" class="note-panel" :style="props.panelStyle">
       <div class="note-head">
         <b>📝 日程笔记</b>
         <div class="note-sub">{{ date }} · 今日记录</div>

@@ -1,5 +1,6 @@
 <template>
   <view class="page-wrap">
+    <FloatingDock />
     <!-- 用户头部 -->
     <view class="card profile" @click="loggedIn && openProfile()">
       <image v-if="loggedIn && auth.user.avatar" :src="auth.user.avatar" class="avatar avatar-img" mode="aspectFill" />
@@ -149,6 +150,7 @@ import { onShow } from '@dcloudio/uni-app';
 import { auth, isLoggedIn, patchUser, clearAuth } from '../../utils/auth.js';
 import { loginWithWechat, logout } from '../../utils/wechat.js';
 import { api } from '../../utils/api.js';
+import FloatingDock from '../../components/FloatingDock.vue';
 import { BASE_URL } from '../../env.js';
 import { chooseImageAsBase64 } from '../../utils/fileBase64.js';
 

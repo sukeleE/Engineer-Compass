@@ -1,5 +1,6 @@
 <template>
   <view class="page-wrap">
+    <FloatingDock />
     <!-- 未登录 -->
     <EmptyState v-if="!loggedIn" icon="🔐" text="登录后查看和管理你的 AI 备赛计划" btn-text="去登录" @action="goLogin" />
 
@@ -100,6 +101,7 @@
 import { ref, reactive, computed } from 'vue';
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app';
 import { api } from '../../utils/api.js';
+import FloatingDock from '../../components/FloatingDock.vue';
 import { isLoggedIn, auth } from '../../utils/auth.js';
 import { planProgress } from '../../utils/format.js';
 import EmptyState from '../../components/EmptyState.vue';

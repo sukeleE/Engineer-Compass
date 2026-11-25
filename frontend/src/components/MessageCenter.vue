@@ -12,7 +12,7 @@ import {
 } from '../utils/notificationStore.js';
 
 // 纯面板：由 ToolDock 控制开关；WebSocket 推送为主，面板打开期间短轮询兜底。
-const props = defineProps({ open: Boolean });
+const props = defineProps({ open: Boolean, panelStyle: { type: Object, default: () => ({}) } });
 const emit = defineEmits(['close']);
 const router = useRouter();
 const tab = ref('dm');
@@ -131,7 +131,7 @@ watch(() => counts.value.total, (next, prev) => {
 <template>
   <!-- 消息面板（由 ToolDock 控制开关） -->
   <transition name="chat">
-    <div v-if="props.open" class="m-panel">
+    <div v-if="props.open" class="m-panel" :style="props.panelStyle">
       <div class="m-head">
         <b>🔔 消息中心</b>
         <div class="m-actions">

@@ -8,7 +8,7 @@ import { api } from '../api.js';
 import auth, { patchUser } from '../auth.js';
 import DmDialog from './DmDialog.vue';
 
-const props = defineProps({ open: Boolean });
+const props = defineProps({ open: Boolean, panelStyle: { type: Object, default: () => ({}) } });
 const emit = defineEmits(['close']);
 const router = useRouter();
 
@@ -52,7 +52,7 @@ async function exitGhost() {
 <template>
   <!-- 怪奇小队面板（右下角，仿 MessageCenter 浮窗） -->
   <transition name="dock">
-    <div v-if="props.open" class="g-panel">
+    <div v-if="props.open" class="g-panel" :style="props.panelStyle">
       <div class="g-head">
         <b>👻 怪奇小队</b>
         <div class="g-actions">

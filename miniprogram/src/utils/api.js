@@ -292,4 +292,5 @@ export const api = {
   adminFeedback: (p) => request('/admin/feedback' + qs(p)),
   adminFeedbackDelete: (id) => request('/admin/feedback/' + id, { method: 'DELETE' }),
   latestAnnouncement: () => request('/announcements/latest', { showError: false }),
+  announcementList: () => request('/announcements', { showError: false }),
 };

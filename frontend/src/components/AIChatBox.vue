@@ -4,7 +4,7 @@ import { ref, watch, nextTick } from 'vue';
 import { store } from '../store.js';
 import { api } from '../api.js';
 
-const props = defineProps({ open: Boolean });
+const props = defineProps({ open: Boolean, panelStyle: { type: Object, default: () => ({}) } });
 const emit = defineEmits(['close']);
 const messages = ref(JSON.parse(localStorage.getItem('ec_chat_history') || '[]'));
 const input = ref('');
@@ -51,7 +51,7 @@ function clearHistory() {
 <template>
   <!-- 聊天面板（由 ToolDock 控制开关） -->
   <transition name="chat">
-    <div v-if="props.open" class="chat-panel">
+    <div v-if="props.open" class="chat-panel" :style="props.panelStyle">
       <div class="chat-head">
         <b>🤖 竞赛助手</b>
         <div class="chat-ctx">

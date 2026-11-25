@@ -1,5 +1,6 @@
 <template>
   <view class="page-wrap">
+    <FloatingDock />
     <view v-if="notice" class="card notice-bar" @click="noticeOpen = true">
       <text class="nb-icon">📢</text>
       <view class="nb-main">
@@ -61,6 +62,7 @@
 import { ref, computed } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { api } from '../../utils/api.js';
+import FloatingDock from '../../components/FloatingDock.vue';
 import { ensureLogin } from '../../utils/guard.js';
 import auth from '../../utils/auth.js';
 

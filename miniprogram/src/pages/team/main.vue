@@ -1,5 +1,6 @@
 <template>
   <view class="page-wrap">
+    <FloatingDock />
     <view class="top-actions">
       <button class="btn btn-primary flex1" @click="goCreate">＋ 创建小组</button>
       <button class="btn btn-outline flex1" @click="openJoin">邀请码加入</button>
@@ -46,6 +47,7 @@
 import { ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { api } from '../../utils/api.js';
+import FloatingDock from '../../components/FloatingDock.vue';
 import { ensureLogin, toast } from '../../utils/guard.js';
 import EmptyState from '../../components/EmptyState.vue';
 

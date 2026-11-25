@@ -1,5 +1,6 @@
 <template>
   <view class="page-wrap">
+    <FloatingDock />
     <!-- 搜索框 -->
     <view class="search-bar">
       <input
@@ -64,6 +65,7 @@
 import { ref, computed } from 'vue';
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app';
 import { api } from '../../utils/api.js';
+import FloatingDock from '../../components/FloatingDock.vue';
 import { MONTHS } from '../../utils/format.js';
 import EmptyState from '../../components/EmptyState.vue';
 import CompCardRow from './CompCardRow.vue';
