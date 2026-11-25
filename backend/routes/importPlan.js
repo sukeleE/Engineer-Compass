@@ -144,7 +144,8 @@ r.post('/plan', mutedGuard, (req, res, next) => {
   if (!file) return res.status(400).json({ error: '未收到文件，请以 multipart/form-data 上传（字段名 file）' });
   const mode = String(req.body?.mode || '');
   if (!['schedule', 'study', 'team'].includes(mode)) return res.status(400).json({ error: 'mode 仅支持 schedule（竞赛日程）/ study（学习日程）/ team（小组计划）' });
-  const ext = extname(basename(String(file.originalname || ''))).toLowerCase();
+  const originalName = String(req.body?.filename || file.originalname || '').trim();
+  const ext = extname(basename(originalName)).toLowerCase();
   if (!ALLOWED.has(ext)) return res.status(400).json({ error: '暂不支持该格式（支持 Word .docx / PDF / Excel .xls/.xlsx / Markdown / 纯文本）' });
   if (file.size === 0) return res.status(400).json({ error: '文件为空' });
 
@@ -158,7 +159,7 @@ r.post('/plan', mutedGuard, (req, res, next) => {
 
   // 2) AI 转换（与 /plan-text 共用）
   try {
-    const out = await convertToPlan(mode, text, basename(file.originalname, extname(file.originalname)), req);
+    const out = await convertToPlan(mode, text, basename(originalName, extname(originalName)), req);
     res.json({ plan: out });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });

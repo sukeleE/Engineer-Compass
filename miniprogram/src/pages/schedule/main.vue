@@ -8,9 +8,8 @@
       <block v-else>
         <Tabs v-model="viewTab" :tabs="tabs" />
         <view class="top-ops">
-          <button class="btn btn-primary third" @click="openAiPlanMenu">✨ AI 编写计划</button>
-          <button class="btn btn-ghost third" @click="goManual">＋ 自编计划</button>
-          <button class="btn btn-ghost third" @click="openCalendar">📅 月历</button>
+          <button class="btn btn-primary half" @click="openPlanWriter">✏️ 编写计划</button>
+          <button class="btn btn-ghost half" @click="openCalendar">📅 月历</button>
         </view>
 
         <block v-if="viewTab === 'team'">
@@ -225,47 +224,11 @@ function remove(s) {
 
 // ============ AI 编写 / 修改 / 自编计划 ============
 const optimizingId = ref(null);
-async function pickCompetition(onPick) {
-  const comps = await api.competitions();
-  if (!comps?.length) return uni.showToast({ title: '暂无可生成计划的竞赛', icon: 'none' });
-  uni.showActionSheet({
-    itemList: comps.map((c) => c.name).slice(0, 30),
-    success: (res) => onPick(comps[res.tapIndex]),
-  });
-}
-function openAiPlanMenu() {
-  uni.showActionSheet({
-    itemList: ['💬 对话编写', '⚡ 一键编写'],
-    success: (res) => {
-      pickCompetition((comp) => {
-        if (res.tapIndex === 0) {
-          uni.navigateTo({
-            url: `/packagePlan/pages/planchat/main?mode=schedule&comp_id=${comp.id}`
-              + `&comp_name=${encodeURIComponent(comp.name)}`,
-          });
-          return;
-        }
-        createAiPlan(comp);
-      });
-    },
-  });
-}
-async function createAiPlan(comp) {
-  uni.showLoading({ title: 'AI 编写中…', mask: true });
-  try {
-    await api.scheduleAdd(comp.id);
-    uni.hideLoading();
-    uni.showToast({ title: '计划已生成', icon: 'success' });
-    load();
-  } catch (e) {
-    uni.hideLoading();
-  }
+function openPlanWriter() {
+  uni.navigateTo({ url: '/packagePlan/pages/schedule/write' });
 }
 function openAiModify(s) {
   uni.navigateTo({ url: `/packagePlan/pages/planchat/main?mode=schedule-edit&schedule_id=${s.id}` });
-}
-function goManual() {
-  uni.navigateTo({ url: '/packagePlan/pages/schedule/edit' });
 }
 async function optimize(s) {
   uni.showModal({
@@ -387,7 +350,6 @@ onPullDownRefresh(async () => {
 .btn.mini { width: 180rpx; height: 64rpx; font-size: 25rpx; }
 .top-ops { display: flex; gap: 16rpx; margin-bottom: 18rpx; }
 .half { flex: 1; height: 80rpx; font-size: 27rpx; }
-.third { flex: 1; height: 76rpx; font-size: 24rpx; padding: 0 10rpx; }
 .group-card { padding: 24rpx 28rpx; }
 .group-head { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; margin-bottom: 14rpx; }
 .group-name { flex: 1; min-width: 0; font-size: 29rpx; font-weight: 700; color: #1e293b; }

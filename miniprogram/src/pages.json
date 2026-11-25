@@ -25,6 +25,7 @@
         { "path": "pages/notes/main", "style": { "navigationBarTitleText": "学习笔记" } },
         { "path": "pages/notes/edit", "style": { "navigationBarTitleText": "当日笔记" } },
         { "path": "pages/schedule/edit", "style": { "navigationBarTitleText": "自编备赛计划" } },
+        { "path": "pages/schedule/write", "style": { "navigationBarTitleText": "编写备赛计划" } },
         { "path": "pages/planchat/main", "style": { "navigationBarTitleText": "AI 计划对话" } }
       ]
     },
