@@ -7,14 +7,6 @@
           <text class="fd-name">工具</text>
           <view class="fd-icon">🧰</view>
         </view>
-        <view class="fd-tool" @click="pick('pomodoro')">
-          <text class="fd-name">番茄钟</text>
-          <view class="fd-icon">🍅<text v-if="pomo.running" class="fd-mini">{{ formatClock(pomo.remaining) }}</text></view>
-        </view>
-        <view class="fd-tool" @click="pick('countdown')">
-          <text class="fd-name">倒数日</text>
-          <view class="fd-icon">📅</view>
-        </view>
         <view class="fd-tool" @click="pick('notes')">
           <text class="fd-name">学习笔记</text>
           <view class="fd-icon">📝</view>
@@ -400,19 +392,6 @@ function removeCd(id) { removeCountdown(id); }
   justify-content: center;
   font-size: 40rpx;
   box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.15);
-}
-.fd-mini {
-  position: absolute;
-  bottom: -6rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #2563eb;
-  color: #fff;
-  font-size: 16rpx;
-  line-height: 22rpx;
-  padding: 0 8rpx;
-  border-radius: 8rpx;
-  white-space: nowrap;
 }
 .fd-unread {
   position: absolute;
