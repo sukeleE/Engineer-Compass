@@ -131,7 +131,7 @@ const logGroups = computed(() => {
   const groups = [];
   const free = logs.value.filter((l) => !l.schedule_id);
   if (free.length) {
-    groups.push({ key: 'free', free: true, collapsible: false, label: '自由汇报', logs: free,
+    groups.push({ key: 'free', free: true, collapsible: true, label: '自由汇报', logs: free,
       count: free.length, late: 0, featured: free.filter((l) => l.featured).length });
   }
   const map = new Map();
@@ -151,8 +151,16 @@ const logGroups = computed(() => {
 });
 const expandedWeeks = reactive({});
 let lastLatestWeek = null;
+let freeInitialized = false;
 // 仅在出现新的最新周时自动展开（首次加载/跨周新汇报），不覆盖用户手动收起状态
 function ensureLatestWeek() {
+  if (!freeInitialized) {
+    const free = logGroups.value.find((g) => g.free);
+    if (free) {
+      expandedWeeks.free = true;
+      freeInitialized = true;
+    }
+  }
   const latest = logGroups.value.find((g) => !g.free);
   if (!latest || latest.key === lastLatestWeek) return;
   expandedWeeks[latest.key] = true;

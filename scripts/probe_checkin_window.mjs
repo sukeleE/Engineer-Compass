@@ -180,6 +180,13 @@ try {
   const logText = await page.locator('.tp-logs').textContent();
   ok('成员进度汇报仍正常显示', logText.includes('成员进度汇报窗口化验收'), logText.slice(0, 300));
   ok('自由进度汇报默认直接显示', logText.includes('自由进度汇报窗口化验收'), logText.slice(0, 300));
+  const freeHead = page.locator('.tp-logs .week-group').filter({ hasText: '自由汇报' }).locator('.week-head').first();
+  await freeHead.click();
+  await page.waitForFunction(() => !document.querySelector('.tp-logs')?.textContent.includes('自由进度汇报窗口化验收'));
+  ok('自由汇报可折叠', true);
+  await freeHead.click();
+  await page.waitForFunction(() => document.querySelector('.tp-logs')?.textContent.includes('自由进度汇报窗口化验收'));
+  ok('自由汇报可重新展开', true);
   ok('周报附件内容为空时仍显示附件入口', logText.includes('周报附件验收.docx'), logText.slice(0, 500));
   ok('周报附件提交时显示附件说明', (await page.locator('.ci-att-report-note').count()) > 0);
   await page.getByText('周报附件验收.docx').first().click();
