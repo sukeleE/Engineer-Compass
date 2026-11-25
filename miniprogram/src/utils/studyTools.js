@@ -6,6 +6,8 @@ import { reactive } from 'vue';
 const POMO_KEY = 'ec_pomodoro';
 const CD_KEY = 'ec_countdowns';
 const DOCK_KEY = 'ec_dock_pos';
+const TODO_KEY = 'ec_study_todos';
+const SESSION_KEY = 'ec_study_sessions';
 
 function todayStr() {
   const d = new Date();
@@ -63,6 +65,12 @@ function complete() {
   pomo.endAt = 0;
   if (pomo.mode === 'focus') {
     pomo.completedToday += 1;
+    addSession({
+      id: Date.now(),
+      date: todayStr(),
+      minutes: pomo.focusMin,
+      endedAt: new Date().toISOString(),
+    });
     pomo.mode = 'break';
     pomo.remaining = pomo.breakMin * 60;
     notify('专注完成，休息一下');
@@ -177,6 +185,117 @@ export function daysText(dateStr) {
   if (n === 0) return '就是今天';
   if (n > 0) return `D-${n}`;
   return `已过 ${-n} 天`;
+}
+
+// ---------------- 学习记录 / 统计 ----------------
+function loadSessions() {
+  let list = [];
+  try {
+    const value = uni.getStorageSync(SESSION_KEY);
+    if (Array.isArray(value)) list = value;
+  } catch { /* 忽略 */ }
+  return list.filter((item) => item && item.date);
+}
+
+export const sessions = reactive({ list: loadSessions() });
+
+function saveSessions() {
+  try { uni.setStorageSync(SESSION_KEY, sessions.list); } catch { /* 忽略 */ }
+}
+
+export function addSession(session) {
+  sessions.list.push(session);
+  if (sessions.list.length > 2000) sessions.list.splice(0, sessions.list.length - 2000);
+  saveSessions();
+}
+
+export function todayFocusMinutes() {
+  const today = todayStr();
+  return sessions.list
+    .filter((item) => item.date === today)
+    .reduce((sum, item) => sum + (Number(item.minutes) || 0), 0);
+}
+
+export function weekFocusMinutes() {
+  const days = new Set();
+  for (let i = 0; i < 7; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    days.add(todayStr(date));
+  }
+  return sessions.list
+    .filter((item) => days.has(item.date))
+    .reduce((sum, item) => sum + (Number(item.minutes) || 0), 0);
+}
+
+export function streakDays() {
+  const dates = new Set(sessions.list.map((item) => item.date));
+  let count = 0;
+  for (let i = 0; i < 365; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const key = todayStr(date);
+    if (!dates.has(key)) {
+      if (i === 0) continue;
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+export function last7Days() {
+  const output = [];
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const key = todayStr(date);
+    const minutes = sessions.list
+      .filter((item) => item.date === key)
+      .reduce((sum, item) => sum + (Number(item.minutes) || 0), 0);
+    output.push({
+      key,
+      label: `${date.getMonth() + 1}/${date.getDate()}`,
+      minutes,
+    });
+  }
+  return output;
+}
+
+// ---------------- 今日待办 ----------------
+function loadTodos() {
+  let list = [];
+  try {
+    const value = uni.getStorageSync(TODO_KEY);
+    if (Array.isArray(value)) list = value;
+  } catch { /* 忽略 */ }
+  return list.filter((item) => item && item.text);
+}
+
+export const todos = reactive({ list: loadTodos() });
+
+function saveTodos() {
+  try { uni.setStorageSync(TODO_KEY, todos.list); } catch { /* 忽略 */ }
+}
+
+export function addTodo(text) {
+  const value = String(text || '').trim().slice(0, 60);
+  if (!value) return false;
+  todos.list.push({ id: Date.now(), text: value, done: false, date: todayStr() });
+  saveTodos();
+  return true;
+}
+
+export function toggleTodo(id) {
+  const todo = todos.list.find((item) => item.id === id);
+  if (!todo) return;
+  todo.done = !todo.done;
+  saveTodos();
+}
+
+export function removeTodo(id) {
+  todos.list = todos.list.filter((item) => item.id !== id);
+  saveTodos();
 }
 
 // ---------------- 浮标位置（跨 tab 共享 + 本地持久化） ----------------

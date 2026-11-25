@@ -3,6 +3,10 @@
     <view class="fd-anchor" :style="anchorStyle">
       <!-- 展开的工具列表（仿网页版 ToolDock：默认向上纵向堆叠；靠近顶部自动向下，靠近左侧自动换到右边） -->
       <view v-if="open" class="fd-tools" :class="{ below: !spaceAbove, left: leftMode }">
+        <view class="fd-tool" @click="pick('gallery')">
+          <text class="fd-name">工具</text>
+          <view class="fd-icon">🧰</view>
+        </view>
         <view class="fd-tool" @click="pick('pomodoro')">
           <text class="fd-name">番茄钟</text>
           <view class="fd-icon">🍅<text v-if="pomo.running" class="fd-mini">{{ formatClock(pomo.remaining) }}</text></view>
@@ -37,7 +41,36 @@
     <!-- 工具面板 -->
     <view v-if="panel" class="fd-mask" @click="closePanel">
       <view class="fd-sheet" @click.stop>
-        <template v-if="panel === 'pomodoro'">
+        <template v-if="panel === 'gallery'">
+          <view class="fd-sheet-head">
+            <text class="fd-sheet-title">🧰 学习工具</text>
+            <text class="fd-close" @click="closePanel">×</text>
+          </view>
+          <view class="tool-grid">
+            <view class="tool-card" @click="openGalleryTool('pomodoro')">
+              <text class="tool-card-icon">🍅</text>
+              <text class="tool-card-name">番茄钟</text>
+              <text class="tool-card-desc">{{ pomo.running ? formatClock(pomo.remaining) : '专注计时' }}</text>
+            </view>
+            <view class="tool-card" @click="openGalleryTool('countdown')">
+              <text class="tool-card-icon">📅</text>
+              <text class="tool-card-name">倒数日</text>
+              <text class="tool-card-desc">{{ countdowns.list.length }} 个目标</text>
+            </view>
+            <view class="tool-card" @click="openGalleryTool('todo')">
+              <text class="tool-card-icon">✅</text>
+              <text class="tool-card-name">今日待办</text>
+              <text class="tool-card-desc">{{ todos.list.filter((item) => !item.done).length }} 项未完成</text>
+            </view>
+            <view class="tool-card" @click="openGalleryTool('stats')">
+              <text class="tool-card-icon">📊</text>
+              <text class="tool-card-name">学习统计</text>
+              <text class="tool-card-desc">今日 {{ stats.today }} 分钟</text>
+            </view>
+          </view>
+        </template>
+
+        <template v-else-if="panel === 'pomodoro'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">🍅 番茄钟</text>
             <text class="fd-close" @click="closePanel">✕</text>
@@ -60,7 +93,7 @@
           <view class="pomo-foot">计时在切换页面后继续；离开小程序期间按结束时间自动校准。</view>
         </template>
 
-        <template v-else>
+        <template v-else-if="panel === 'countdown'">
           <view class="fd-sheet-head">
             <text class="fd-sheet-title">📅 倒数日</text>
             <text class="fd-close" @click="closePanel">✕</text>
@@ -84,6 +117,45 @@
             </view>
           </scroll-view>
         </template>
+
+        <template v-else-if="panel === 'todo'">
+          <view class="fd-sheet-head">
+            <text class="fd-sheet-title">✅ 今日待办</text>
+            <text class="fd-close" @click="closePanel">×</text>
+          </view>
+          <view class="cd-form">
+            <input v-model="todoText" class="cd-input" placeholder="添加一条今日待办" maxlength="60" @confirm="submitTodo" />
+            <button class="btn btn-primary cd-add" @click="submitTodo">添加</button>
+          </view>
+          <scroll-view scroll-y class="cd-list">
+            <EmptyState v-if="!todos.list.length" icon="✅" text="还没有待办，先添加一条吧" />
+            <view v-for="item in todos.list" :key="item.id" class="todo-item">
+              <text class="todo-check" :class="{ done: item.done }" @click="toggleTodo(item.id)">{{ item.done ? '✓' : '' }}</text>
+              <text class="todo-text" :class="{ done: item.done }" @click="toggleTodo(item.id)">{{ item.text }}</text>
+              <text class="todo-del" @click="removeTodo(item.id)">删除</text>
+            </view>
+          </scroll-view>
+        </template>
+
+        <template v-else>
+          <view class="fd-sheet-head">
+            <text class="fd-sheet-title">📊 学习统计</text>
+            <text class="fd-close" @click="closePanel">×</text>
+          </view>
+          <view class="stats-grid">
+            <view class="stats-card"><text class="stats-num">{{ stats.today }}</text><text class="stats-label">今日分钟</text></view>
+            <view class="stats-card"><text class="stats-num">{{ stats.week }}</text><text class="stats-label">近 7 天分钟</text></view>
+            <view class="stats-card"><text class="stats-num">{{ stats.streak }}</text><text class="stats-label">连续天数</text></view>
+          </view>
+          <view class="stats-chart">
+            <view v-for="day in stats.days" :key="day.key" class="stats-bar-item">
+              <view class="stats-bar-track">
+                <view class="stats-bar" :style="{ height: Math.max(4, day.minutes / maxDayMinutes * 100) + '%' }"></view>
+              </view>
+              <text class="stats-day">{{ day.label }}</text>
+            </view>
+          </view>
+        </template>
       </view>
     </view>
   </view>
@@ -99,17 +171,20 @@ import EmptyState from './EmptyState.vue';
 import {
   pomo, pomodoroToggle, pomodoroReset, setFocusMinutes, setBreakMinutes,
   formatClock, countdowns, addCountdown, removeCountdown, daysLeft, daysText,
+  todos, addTodo, toggleTodo, removeTodo,
+  todayFocusMinutes, weekFocusMinutes, streakDays, last7Days,
   dock, initDockPos, saveDockPos, dockBounds,
 } from '../utils/studyTools.js';
 
 initDockPos();
 
 const open = ref(false);
-const panel = ref(''); // pomodoro | countdown | ''
+const panel = ref(''); // gallery | pomodoro | countdown | todo | stats | ''
 const unread = ref(0);
 const dragging = ref(false);
 const cdTitle = ref('');
 const cdDate = ref('');
+const todoText = ref('');
 const focusPresets = [25, 45, 60];
 const breakPresets = [5, 10, 15];
 
@@ -152,19 +227,17 @@ function onTouchEnd() {
   const y = dock.y;
   drag = null;
   dragging.value = false;
-  if (moved) {
-    saveDockPos(x, y);
-  } else {
-    toggle();
-  }
-  // 阻止 touchend 后紧跟的 click 再触发一次
-  touchHandled = true;
+  if (moved) saveDockPos(x, y);
+  touchHandled = moved;
   clearTimeout(touchTimer);
   touchTimer = setTimeout(() => { touchHandled = false; }, 400);
 }
 
 function onFabClick() {
-  if (touchHandled) return;
+  if (touchHandled) {
+    touchHandled = false;
+    return;
+  }
   toggle();
 }
 
@@ -183,6 +256,13 @@ const cdItems = computed(() => countdowns.list.map((it) => ({
   days: daysLeft(it.date),
   label: daysText(it.date),
 })));
+const stats = computed(() => ({
+  today: todayFocusMinutes(),
+  week: weekFocusMinutes(),
+  streak: streakDays(),
+  days: last7Days(),
+}));
+const maxDayMinutes = computed(() => Math.max(1, ...stats.value.days.map((item) => item.minutes)));
 
 async function refreshUnread() {
   if (!isLoggedIn()) { unread.value = 0; return; }
@@ -216,6 +296,16 @@ function pick(key) {
 }
 
 function closePanel() { panel.value = ''; }
+
+function openGalleryTool(key) {
+  panel.value = key;
+}
+
+function submitTodo() {
+  if (!addTodo(todoText.value)) return toast('请填写待办内容');
+  todoText.value = '';
+  toast('待办已添加', 'success');
+}
 
 function chooseFocus(m) {
   if (pomo.running) return toast('请先暂停再切换时长');
@@ -392,6 +482,25 @@ function removeCd(id) { removeCountdown(id); }
 .preset-chip.on { background: #eff6ff; color: #2563eb; font-weight: 700; }
 .pomo-foot { font-size: 21rpx; color: #94a3b8; margin-top: 24rpx; line-height: 1.6; }
 
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+.tool-card {
+  min-height: 170rpx;
+  padding: 22rpx;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 18rpx;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.tool-card-icon { font-size: 42rpx; }
+.tool-card-name { color: #1e293b; font-size: 28rpx; font-weight: 800; }
+.tool-card-desc { color: #64748b; font-size: 22rpx; }
+
 .cd-form { display: flex; align-items: center; gap: 12rpx; margin-bottom: 18rpx; }
 .cd-input {
   flex: 1;
@@ -430,4 +539,46 @@ function removeCd(id) { removeCountdown(id); }
 .cd-days.soon { color: #b45309; }
 .cd-days.past { color: #94a3b8; font-weight: 600; }
 .cd-del { font-size: 22rpx; color: #ef4444; padding: 8rpx 4rpx; white-space: nowrap; }
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f1f5f9;
+}
+.todo-check {
+  width: 38rpx;
+  height: 38rpx;
+  flex-shrink: 0;
+  border: 2rpx solid #cbd5e1;
+  border-radius: 10rpx;
+  color: #fff;
+  font-size: 25rpx;
+  line-height: 36rpx;
+  text-align: center;
+}
+.todo-check.done { background: #16a34a; border-color: #16a34a; }
+.todo-text { flex: 1; min-width: 0; color: #334155; font-size: 26rpx; }
+.todo-text.done { color: #94a3b8; text-decoration: line-through; }
+.todo-del { color: #ef4444; font-size: 22rpx; padding: 8rpx 4rpx; }
+
+.stats-grid { display: flex; gap: 12rpx; margin-bottom: 24rpx; }
+.stats-card {
+  flex: 1;
+  padding: 18rpx 10rpx;
+  border-radius: 16rpx;
+  background: #eff6ff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+.stats-num { color: #2563eb; font-size: 38rpx; font-weight: 800; }
+.stats-label { color: #64748b; font-size: 20rpx; }
+.stats-chart { height: 270rpx; display: flex; align-items: flex-end; gap: 12rpx; padding: 10rpx 4rpx 0; }
+.stats-bar-item { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8rpx; }
+.stats-bar-track { width: 100%; height: 210rpx; border-radius: 10rpx; background: #f1f5f9; display: flex; align-items: flex-end; overflow: hidden; }
+.stats-bar { width: 100%; min-height: 4rpx; border-radius: 10rpx; background: linear-gradient(180deg, #60a5fa, #2563eb); }
+.stats-day { color: #94a3b8; font-size: 18rpx; }
 </style>
