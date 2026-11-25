@@ -85,7 +85,8 @@ function isSameOriginUrl(u) {
   catch { return false; }
 }
 function canPreviewOfficeAtt(a) {
-  return !!officePreviewType(a.name, a.mime) && (!!a.data || isSameOriginUrl(a.url || ''));
+  const url = String(a.url || '');
+  return !!officePreviewType(a.name, a.mime) && (!!a.data || (!!url && isSameOriginUrl(url)));
 }
 async function openOfficeAtt(a) {
   officeAtt.value = a;

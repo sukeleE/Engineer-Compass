@@ -14,6 +14,7 @@
     "smoke:checkin": "node scripts/smoke_checkin.mjs",
     "probe:checkin-window": "node scripts/probe_checkin_window.mjs",
     "probe:notifications": "node scripts/probe_notifications_realtime.mjs",
+    "probe:docx-preview": "node scripts/probe_docx_preview.mjs",
     "smoke:attendance": "node scripts/smoke_attendance.mjs",
     "smoke:github": "node scripts/smoke_github.mjs",
     "smoke:admin-perms": "node scripts/smoke_admin_perms.mjs",
